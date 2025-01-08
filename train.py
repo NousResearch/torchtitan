@@ -16,6 +16,7 @@ from torchtitan import utils
 from torchtitan.checkpoint import CheckpointManager, TrainState
 from torchtitan.config_manager import JobConfig
 from torchtitan.datasets import build_hf_data_loader, build_tokenizer
+from torchtitan.datasets.nanoset import build_nanoset_data_loader
 from torchtitan.float8 import Float8Handler
 from torchtitan.logging import init_logger, logger
 from torchtitan.metrics import build_device_memory_monitor, build_metric_logger
@@ -85,15 +86,32 @@ def main(job_config: JobConfig):
     tokenizer_type = model_name_to_tokenizer[model_name]
     tokenizer = build_tokenizer(tokenizer_type, job_config.model.tokenizer_path)
     # build dataloader
-    data_loader = build_hf_data_loader(
-        job_config.training.dataset,
-        job_config.training.dataset_path,
-        tokenizer,
-        job_config.training.batch_size,
-        job_config.training.seq_len,
-        dp_degree,
-        dp_rank,
-    )
+    if job_config.training.dataset_type == "huggingface":
+        data_loader = build_hf_data_loader(
+            job_config.training.dataset,
+            job_config.training.dataset_path,
+            tokenizer,
+            job_config.training.batch_size,
+            job_config.training.seq_len,
+            dp_degree,
+            dp_rank,
+        )
+    elif job_config.training.dataset_type == "nanoset":
+        dataset_weights = None
+        if job_config.training.dataset_weights is not None:
+            dataset_weights = [float(w) for w in job_config.training.dataset_weights]
+
+        data_loader = build_nanoset_data_loader(
+            dataset_folders=job_config.training.dataset_folders,
+            sequence_length=job_config.training.seq_len,
+            token_size=2 if tokenizer.n_words < 65536 else 4,
+            dataset_weights=dataset_weights,
+            batch_size=job_config.training.batch_size,
+            world_size=dp_degree,
+            rank=dp_rank,
+            infinite=True,
+            random_seed=job_config.training.dataset_random_seed,
+        )
 
     # build model (using meta init)
     model_cls = model_name_to_cls[model_name]

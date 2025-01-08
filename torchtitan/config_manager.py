@@ -217,6 +217,31 @@ class JobConfig:
                 loaded from this path instead of downloaded.""",
         )
         self.parser.add_argument(
+            "--training.dataset_type",
+            type=str,
+            default="huggingface",
+            choices=["huggingface", "nanoset"],
+            help="Type of dataset to use ['huggingface', 'nanoset']",
+        )
+        self.parser.add_argument(
+            "--training.dataset_folders",
+            type=string_list,
+            default=[],
+            help="List of folders containing tokenized datasets for Nanoset",
+        )
+        self.parser.add_argument(
+            "--training.dataset_weights",
+            type=string_list,
+            default=None,
+            help="Optional list of weights for weighted sampling from datasets",
+        )
+        self.parser.add_argument(
+            "--training.dataset_random_seed",
+            type=int,
+            default=1234,
+            help="Random seed for dataset shuffling",
+        )
+        self.parser.add_argument(
             "--training.batch_size", type=int, default=8, help="Batch size"
         )
         self.parser.add_argument(
