@@ -373,11 +373,14 @@ def main(job_config: JobConfig):
 
                 device_mem_stats = device_memory_monitor.get_peak_stats()
 
+                lr = lr_schedulers.schedulers[0].get_last_lr()[0]
+
                 metrics = {
                     "loss_metrics/global_avg_loss": global_avg_loss,
                     "loss_metrics/global_max_loss": global_max_loss,
                     "throughput(tps)": tps,
                     "mfu(%)": mfu,
+                    "lr": lr,
                     "time_metrics/end_to_end(s)": time_end_to_end,
                     "time_metrics/data_loading(s)": time_data_loading,
                     "time_metrics/data_loading(%)": time_data_loading_pct,
