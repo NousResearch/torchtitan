@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import functools
+import math
 from typing import Any, Dict, List
 
 import torch
@@ -178,6 +179,32 @@ def linear_warmup_linear_decay(
     return curr_adjustment
 
 
+def linear_warmup_cosine_decay(
+    warmup_steps: int,
+    decay_steps: int,
+    final_lr_ratio: float,
+    current_step: int
+) -> float:
+    """Computes linear warmup followed by cosine decay.
+    Per LambdaLR requirement, this returns a multiplicative factor
+    to adjust the learning rate to create the desired schedule.
+
+    Args:
+        warmup_steps: Number of warmup steps
+        decay_steps: Number of decay steps after warmup
+        final_lr_ratio: Final learning rate as a ratio of initial lr
+        current_step: Current training step
+    """
+    if current_step < warmup_steps:
+        # linear warmup from 0 to 1
+        return float(current_step) / max(1, warmup_steps)
+    else:
+        # cosine decay from 1 to final_lr_ratio
+        progress = min(1.0, (current_step - warmup_steps) / decay_steps)
+        cosine_decay = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return final_lr_ratio + (1.0 - final_lr_ratio) * cosine_decay
+
+
 class SchedulersContainer:
     """Util for calling step on multiple learning rate schedulers needed for virtual pipeline stages"""
 
@@ -205,6 +232,15 @@ class SchedulersContainer:
 def build_lr_schedulers(optimizers, job_config: JobConfig) -> SchedulersContainer:
     warmup_steps = int(job_config.training.warmup_steps)
     decay_steps = float(max(1, job_config.training.steps - warmup_steps))
-    lr_lambda = functools.partial(linear_warmup_linear_decay, warmup_steps, decay_steps)
+    if job_config.training.lr_schedule == "linear":
+        lr_lambda = functools.partial(linear_warmup_linear_decay, warmup_steps, decay_steps)
+    elif job_config.training.lr_schedule == "cosine":
+        final_lr_ratio = job_config.training.final_lr_ratio if hasattr(job_config.training, "final_lr_ratio") else 0.1
+        lr_lambda = functools.partial(
+            linear_warmup_cosine_decay,
+            warmup_steps,
+            decay_steps,
+            final_lr_ratio
+        )
 
     return SchedulersContainer(optimizers, lr_lambda)

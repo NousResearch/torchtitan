@@ -253,6 +253,12 @@ class JobConfig:
             help="Steps for lr scheduler warmup, normally 1/5 of --training.steps",
         )
         self.parser.add_argument(
+            "--training.lr_schedule", type=str, default="linear", help="Learning rate schedule to use"
+        )
+        self.parser.add_argument(
+            "--training.final_lr_ratio", type=float, default=0.1, help="Final lr ratio for cosine decay"
+        )
+        self.parser.add_argument(
             "--training.max_norm",
             type=Union[float, int],
             default=1.0,
