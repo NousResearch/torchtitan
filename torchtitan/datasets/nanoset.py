@@ -1,10 +1,13 @@
+import hashlib
 import os
+import pickle
 import warnings
 from typing import Dict, List, Tuple, Union
 
 import numpy as np
 import torch
 from datatrove.utils.dataset import DatatroveFolderDataset
+from datatrove.pipeline.tokens.merger import load_doc_ends
 from torchtitan.datasets.hf_datasets import DPAwareDataLoader
 from torchtitan.logging import logger
 from torch.distributed.checkpoint.stateful import Stateful
@@ -54,6 +57,8 @@ class Nanoset(torch.utils.data.Dataset):
         token_size: int,
         dataset_weights: Union[List[float], None] = None,
         random_seed: int = 1234,
+        doc_offsets=False,
+        use_cached_doc_offsets=True,
     ) -> None:
 
         # Checks
@@ -75,7 +80,7 @@ class Nanoset(torch.utils.data.Dataset):
                     seq_len=sequence_length,
                     recursive=False,
                     token_size=token_size,
-                    shuffle=True,
+                    shuffle=False,
                 )
             )
 
@@ -94,6 +99,32 @@ class Nanoset(torch.utils.data.Dataset):
         ), f"Specified {len(self.dataset_weights)} weights but {len(dataset_folders)} datasets were provided."
         ## Build dataset index and dataset sample index
         self.dataset_index, self.dataset_sample_index = self.build_nanoset_index()
+
+        self.sequence_offsets = None
+        if doc_offsets:
+            cache_filename = hashlib.sha256(self.fingerprint().encode()).hexdigest()[:16] + ".packing"
+            if use_cached_doc_offsets:
+                if os.path.exists(cache_filename):
+                    self.sequence_offsets = pickle.load(open(cache_filename, "rb"))
+
+            if self.sequence_offsets is None:
+                self.doc_ends_per_file = []
+                for dataset in self.datatrove_datasets:
+                    file_doc_ends = []
+                    for file_dataset in dataset.files:
+                        index_path = file_dataset.file_path + ".index"
+                        with open(index_path, "rb") as f:
+                            doc_ends = load_doc_ends(f)
+                            file_doc_ends.append(doc_ends)
+                    self.doc_ends_per_file.append(file_doc_ends)
+
+                logger.info("Calculating sequence to file map")
+                sequence_to_file_map = calculate_file_mapping(len(self), self.dataset_index, self.dataset_sample_index, [x.lens for x in self.datatrove_datasets])
+                logger.info("Calculating sequence offsets")
+                self.sequence_offsets = self._calculate_sequence_offsets(sequence_to_file_map)
+
+                if use_cached_doc_offsets and ("LOCAL_RANK" not in os.environ or int(os.environ["LOCAL_RANK"]) == 0):
+                    pickle.dump(self.sequence_offsets, open(cache_filename, "wb"))
 
         self.print_nanoset_info()
 
@@ -118,7 +149,12 @@ class Nanoset(torch.utils.data.Dataset):
         dataset = self.dataset_index[idx]
         dataset_sample = self.dataset_sample_index[idx]
 
-        return self.datatrove_datasets[dataset][dataset_sample]
+        sample = self.datatrove_datasets[dataset][dataset_sample]
+
+        if self.sequence_offsets is not None:
+            sample["offsets"] = torch.from_numpy(self.sequence_offsets[idx])
+
+        return sample
 
     def build_nanoset_index(self) -> np.ndarray:
         """
@@ -159,6 +195,37 @@ class Nanoset(torch.utils.data.Dataset):
                 f">   Total number of samples from the {self.dataset_folders[index]} dataset: {sample_count} ({round(normalize(dataset_sample_count).tolist()[index], 2)})",
                 )
 
+    def _calculate_sequence_offsets(self, sequence_to_file_map: Dict[int, Tuple[int, int, int]]) -> Dict[int, torch.Tensor]:
+        offsets_map = []
+
+        for idx in range(len(self)):
+            dataset_idx, file_idx, file_offset = sequence_to_file_map[idx]
+            doc_ends = self.doc_ends_per_file[dataset_idx][file_idx]
+
+            start_pos = file_offset * (self.sequence_length + 1)
+            end_pos = start_pos + self.sequence_length + 1
+
+            doc_boundaries = np.searchsorted(doc_ends, [start_pos, end_pos])
+            relevant_ends = doc_ends[doc_boundaries[0]:doc_boundaries[1]]
+
+            sequence_relative_ends = relevant_ends - start_pos
+            sequence_relative_ends = sequence_relative_ends[sequence_relative_ends > 0]
+
+            if len(sequence_relative_ends) == 0:
+                offsets_map.append(np.array([0, self.sequence_length + 1], dtype="int"))
+            else:
+                offsets_map.append(np.array([0] + sequence_relative_ends.tolist() + [self.sequence_length + 1], dtype="int"))
+
+        return offsets_map
+
+
+    def fingerprint(self) -> str:
+        return ":".join(file.file_path for dataset in self.datatrove_datasets for file in dataset.files) \
+            + "-" + "|".join([str(x) for x in self.dataset_weights]) \
+            + "-" + str(self.sequence_length) \
+            + "-" + str(self.token_size) \
+            + "-" + str(self.random_seed)
+
 
 @jit(nopython=True, cache=True)
 def build_nanoset_index_helper(
@@ -193,6 +260,43 @@ def build_nanoset_index_helper(
         current_samples[max_error_index] += 1
 
     return dataset_index, dataset_sample_index
+
+@jit(nopython=True, cache=True)
+def bisect_right(a, x):
+    lo=0
+    hi=len(a)
+
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if x < a[mid]:
+            hi = mid
+        else:
+            lo = mid + 1
+
+    return lo
+
+
+def calculate_file_mapping(
+    n_samples: int, dataset_index: np.ndarray, dataset_sample_index: np.ndarray, lenses: List[np.ndarray]
+) -> Dict[int, Tuple[int, int, int]]:
+    sequence_map = {}
+
+    for idx in range(n_samples):
+        dataset_idx = dataset_index[idx]
+        sample_idx = dataset_sample_index[idx]
+
+        lens = lenses[dataset_idx]
+        # Use binary search to find which file contains this sample
+        file_idx = bisect_right(lens, sample_idx) - 1
+
+        # Calculate offset within the file
+        file_start = lens[file_idx]
+        file_offset = sample_idx - file_start
+
+        sequence_map[idx] = (dataset_idx, file_idx, file_offset)
+
+    return sequence_map
+
 
 class IterableNanoset(IterableDataset, Stateful):
     def __init__(
