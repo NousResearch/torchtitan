@@ -111,6 +111,7 @@ def main(job_config: JobConfig):
             rank=dp_rank,
             infinite=True,
             random_seed=job_config.training.dataset_random_seed,
+            doc_offsets=job_config.experimental.disable_cross_attention,
         )
 
     # build model (using meta init)
@@ -279,7 +280,11 @@ def main(job_config: JobConfig):
             # get batch
             data_load_start = time.perf_counter()
             batch = next(data_iterator)
-            input_ids, labels = batch
+            if len(batch) == 3:
+                input_ids, labels, offsets = batch
+            else:
+                input_ids, labels = batch
+                offsets = None
             ntokens_since_last_log += labels.numel()
             data_loading_times.append(time.perf_counter() - data_load_start)
 
@@ -324,7 +329,7 @@ def main(job_config: JobConfig):
             else:
                 # Non-PP forward / backward
                 with train_context(optional_context_parallel_ctx):
-                    pred = model(input_ids)
+                    pred = model(input_ids, offsets)
                     loss = loss_fn(pred, labels)
                     # pred.shape=(bs, seq_len, vocab_size)
                     # need to free to before bwd to avoid peaking memory

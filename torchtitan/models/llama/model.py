@@ -13,6 +13,7 @@ from typing import Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.nn.attention.flex_attention import _mask_mod_signature, create_block_mask, flex_attention
 from torchtitan.models.norms import build_norm
 
 
@@ -125,6 +126,59 @@ def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
     )
 
 
+def causal_mask(b, h, q_idx, kv_idx):
+    return q_idx >= kv_idx
+
+
+def _offsets_to_doc_ids_tensor(offsets):
+    device = offsets.device
+    # counts = offsets[1:] - offsets[:-1]
+    # return torch.repeat_interleave(
+    #     torch.arange(len(counts), device=device, dtype=torch.int32), counts
+    # )
+    batch_size = offsets.size(0)
+    result = []
+
+    for i in range(batch_size):
+        # Process each batch item separately
+        batch_offsets = offsets[i]
+        counts = batch_offsets[1:] - batch_offsets[:-1]
+        doc_ids = torch.repeat_interleave(
+            torch.arange(len(counts), device=device, dtype=torch.int32),
+            counts
+        )
+        result.append(doc_ids)
+        
+    # Stack results along batch dimension
+    return torch.stack(result)
+
+
+def generate_doc_mask_mod(mask_mod: _mask_mod_signature, offsets: torch.Tensor) -> _mask_mod_signature:
+    document_id = _offsets_to_doc_ids_tensor(offsets)  # shape is (batch_size, seq_len)
+
+    def doc_mask_mod(b, h, q_idx, kv_idx):
+        # b is already a tensor with the batch indices
+        # get the document IDs for queries and keys
+        doc_id = document_id.to(b.device)
+        q_doc = doc_id[b, q_idx]
+        kv_doc = doc_id[b, kv_idx]
+
+        same_doc = q_doc == kv_doc
+
+        # offsets for the corresponding documents
+        offs = offsets.to(b.device)
+        q_offset = offs[b, q_doc]
+        kv_offset = offs[b, kv_doc]
+
+        q_logical = q_idx - q_offset
+        kv_logical = kv_idx - kv_offset
+
+        inner_mask = mask_mod(b, h, q_logical, kv_logical)
+        return same_doc & inner_mask
+
+    return doc_mask_mod
+
+
 class Attention(nn.Module):
     """
     Multi-head attention module.
@@ -173,6 +227,7 @@ class Attention(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
+        block_mask: Optional[torch.Tensor] = None,
     ):
         """
         Forward pass of the attention module.
@@ -205,8 +260,20 @@ class Attention(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
-        # we use casual mask for training
-        output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+        if block_mask is not None:
+            # Use flex attention with document masking
+            output = flex_attention(xq, xk, xv, block_mask=block_mask)
+        else:
+            # we use casual mask for training
+            output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
+
+        # output = flash_attn_func(
+        #     q=xq,
+        #     k=xk,
+        #     v=xv,
+        #     causal=True,
+        # )
+
         output = output.transpose(
             1, 2
         ).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
@@ -308,6 +375,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
+        block_mask: Optional[torch.Tensor] = None,
     ):
         """
         Perform a forward pass through the TransformerBlock.
@@ -320,7 +388,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        h = x + self.attention(self.attention_norm(x), freqs_cis)
+        h = x + self.attention(self.attention_norm(x), freqs_cis, block_mask)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -355,6 +423,7 @@ class Transformer(nn.Module):
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
         self.n_layers = model_args.n_layers
+        self.n_heads = model_args.n_heads
 
         self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
 
@@ -424,7 +493,7 @@ class Transformer(nn.Module):
             self.model_args.rope_theta,
         )
 
-    def forward(self, tokens: torch.Tensor):
+    def forward(self, tokens: torch.Tensor, offsets: Optional[torch.Tensor] = None):
         """
         Perform a forward pass through the Transformer model.
 
@@ -438,8 +507,21 @@ class Transformer(nn.Module):
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
+        mask_mod = generate_doc_mask_mod(causal_mask, offsets) if offsets is not None else causal_mask
+        bs, seqlen, _ = h.shape
+        block_mask = create_block_mask(
+            mask_mod,
+            bs,
+            self.n_heads,
+            seqlen,
+            seqlen,
+            device=h.device,
+            _compile=True,
+        )
+
+
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis)
+            h = layer(h, self.freqs_cis, block_mask)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h

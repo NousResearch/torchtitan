@@ -407,6 +407,11 @@ class JobConfig:
             """,
         )
         self.parser.add_argument(
+            "--experimental.disable_cross_attention",
+            action="store_true",
+            help="Use FlexAttention to disable document cross attention",
+        )
+        self.parser.add_argument(
             "--training.mixed_precision_param",
             type=str,
             default="bfloat16",

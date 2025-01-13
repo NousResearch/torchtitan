@@ -105,6 +105,7 @@ class Nanoset(torch.utils.data.Dataset):
             cache_filename = hashlib.sha256(self.fingerprint().encode()).hexdigest()[:16] + ".packing"
             if use_cached_doc_offsets:
                 if os.path.exists(cache_filename):
+                    logger.info(f"Loading cached sequence offsets from {cache_filename}")
                     self.sequence_offsets = pickle.load(open(cache_filename, "rb"))
 
             if self.sequence_offsets is None:
@@ -124,6 +125,7 @@ class Nanoset(torch.utils.data.Dataset):
                 self.sequence_offsets = self._calculate_sequence_offsets(sequence_to_file_map)
 
                 if use_cached_doc_offsets and ("LOCAL_RANK" not in os.environ or int(os.environ["LOCAL_RANK"]) == 0):
+                    logger.info(f"Saving sequence offset cache to {cache_filename}")
                     pickle.dump(self.sequence_offsets, open(cache_filename, "wb"))
 
         self.print_nanoset_info()
@@ -151,8 +153,8 @@ class Nanoset(torch.utils.data.Dataset):
 
         sample = self.datatrove_datasets[dataset][dataset_sample]
 
-        if self.sequence_offsets is not None:
-            sample["offsets"] = torch.from_numpy(self.sequence_offsets[idx])
+        if self.has_doc_offsets():
+            sample["doc_offsets"] = torch.from_numpy(self.sequence_offsets[idx])
 
         return sample
 
@@ -195,6 +197,11 @@ class Nanoset(torch.utils.data.Dataset):
                 f">   Total number of samples from the {self.dataset_folders[index]} dataset: {sample_count} ({round(normalize(dataset_sample_count).tolist()[index], 2)})",
                 )
 
+        if self.has_doc_offsets():
+            logger.info("> Document offsets enabled")
+        else:
+            logger.info("> Document offsets disabled")
+
     def _calculate_sequence_offsets(self, sequence_to_file_map: Dict[int, Tuple[int, int, int]]) -> Dict[int, torch.Tensor]:
         offsets_map = []
 
@@ -218,13 +225,15 @@ class Nanoset(torch.utils.data.Dataset):
 
         return offsets_map
 
-
     def fingerprint(self) -> str:
         return ":".join(file.file_path for dataset in self.datatrove_datasets for file in dataset.files) \
             + "-" + "|".join([str(x) for x in self.dataset_weights]) \
             + "-" + str(self.sequence_length) \
             + "-" + str(self.token_size) \
             + "-" + str(self.random_seed)
+
+    def has_doc_offsets(self) -> bool:
+        return self.sequence_offsets is not None
 
 
 @jit(nopython=True, cache=True)
@@ -309,6 +318,9 @@ class IterableNanoset(IterableDataset, Stateful):
         rank: int = 0,
         infinite: bool = False,
         random_seed: int = 1234,
+        doc_offsets: bool = False,
+        use_cached_doc_offsets: bool = True
+
     ) -> None:
         self.base_dataset = Nanoset(
             dataset_folders=dataset_folders,
@@ -316,6 +328,8 @@ class IterableNanoset(IterableDataset, Stateful):
             token_size=token_size,
             dataset_weights=dataset_weights,
             random_seed=random_seed,
+            doc_offsets=doc_offsets,
+            use_cached_doc_offsets=use_cached_doc_offsets,
         )
         
         self.world_size = world_size
@@ -332,14 +346,18 @@ class IterableNanoset(IterableDataset, Stateful):
             
             for idx in range(start_idx, end_idx, self.world_size):
                 sample = self.base_dataset[idx]
-                tokens = sample["input_ids"] 
-                
+                tokens = sample["input_ids"]
+                doc_offsets = sample.get("doc_offsets")
+
                 x = torch.LongTensor(tokens)
                 input_ids = x[:-1]
                 labels = x[1:]
                 
                 self._sample_idx = idx + self.world_size
-                yield input_ids, labels
+                if doc_offsets is not None:
+                    yield input_ids, labels, doc_offsets
+                else:
+                    yield input_ids, labels
             
             if not self.infinite:
                 break
@@ -353,6 +371,30 @@ class IterableNanoset(IterableDataset, Stateful):
     def state_dict(self):
         return {"sample_idx": self._sample_idx}
 
+    # @staticmethod
+    def collate_fn(batch):
+        input_ids, labels, offsets = zip(*batch)
+        max_offset_len = max(offset.size(0) for offset in offsets)
+
+        padded_offsets = []
+        for offset_tensor in offsets:
+            padding_len = max_offset_len - offset_tensor.size(0)
+            if padding_len > 0:
+                # use the sequence length + 1 as the padding value (should be the last element already)
+                pad_value = input_ids[0].size(0) + 1
+                padding = torch.full((padding_len,), pad_value,
+                                  dtype=offset_tensor.dtype,
+                                  device=offset_tensor.device)
+                padded_offsets.append(torch.cat([offset_tensor, padding]))
+            else:
+                padded_offsets.append(offset_tensor)
+
+        return (
+            torch.stack(input_ids),
+            torch.stack(labels),
+            torch.stack(padded_offsets)
+        )
+
 
 def build_nanoset_data_loader(
     dataset_folders: List[str],
@@ -364,6 +406,8 @@ def build_nanoset_data_loader(
     rank: int,
     infinite: bool = True,
     random_seed: int = 1234,
+    doc_offsets: bool = False,
+    use_cached_doc_offsets: bool = True,
 ):
     """Build a data loader for Nanoset datasets."""
     nanoset = IterableNanoset(
@@ -375,5 +419,7 @@ def build_nanoset_data_loader(
         rank=rank,
         infinite=infinite,
         random_seed=random_seed,
+        doc_offsets=doc_offsets,
+        use_cached_doc_offsets=use_cached_doc_offsets,
     )
-    return DPAwareDataLoader(rank, nanoset, batch_size=batch_size)
+    return DPAwareDataLoader(rank, nanoset, batch_size=batch_size, collate_fn=IterableNanoset.collate_fn if doc_offsets else None)
