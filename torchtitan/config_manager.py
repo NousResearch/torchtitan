@@ -412,6 +412,11 @@ class JobConfig:
             help="Use FlexAttention to disable document cross attention",
         )
         self.parser.add_argument(
+            "--experimental.loss_masking",
+            action="store_true",
+            help="Mask loss for unwanted tokens",
+        )
+        self.parser.add_argument(
             "--training.mixed_precision_param",
             type=str,
             default="bfloat16",

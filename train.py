@@ -112,6 +112,7 @@ def main(job_config: JobConfig):
             infinite=True,
             random_seed=job_config.training.dataset_random_seed,
             doc_offsets=job_config.experimental.disable_cross_attention,
+            loss_masking=job_config.experimental.loss_masking,
         )
 
     # build model (using meta init)

@@ -59,6 +59,7 @@ class Nanoset(torch.utils.data.Dataset):
         random_seed: int = 1234,
         doc_offsets=False,
         use_cached_doc_offsets=True,
+        return_loss_mask=False,
     ) -> None:
 
         # Checks
@@ -128,6 +129,19 @@ class Nanoset(torch.utils.data.Dataset):
                     logger.info(f"Saving sequence offset cache to {cache_filename}")
                     pickle.dump(self.sequence_offsets, open(cache_filename, "wb"))
 
+        self.loss_files = None
+        if return_loss_mask:
+            self.loss_files = []
+            for dataset in self.datatrove_datasets:
+                dataset_loss_files = []
+                for file_dataset in dataset.files:
+                    loss_path = file_dataset.file_path + ".loss"
+                    if os.path.exists(loss_path):
+                        dataset_loss_files.append(open(loss_path, "rb"))
+                    else:
+                        dataset_loss_files.append(None)
+                self.loss_files.append(dataset_loss_files)
+
         self.print_nanoset_info()
 
     def __len__(self) -> int:
@@ -155,6 +169,18 @@ class Nanoset(torch.utils.data.Dataset):
 
         if self.has_doc_offsets():
             sample["doc_offsets"] = torch.from_numpy(self.sequence_offsets[idx])
+
+        if self.loss_files:
+            dataset_lens = self.datatrove_datasets[dataset].lens
+            file_idx = self.datatrove_datasets[dataset].current_file
+            file_start = dataset_lens[file_idx] if file_idx >= 0 else 0
+            file_offset = dataset_sample - file_start
+
+            loss_file = self.loss_files[dataset][file_idx]
+            offset = file_offset * (self.sequence_length + 1)
+            loss_file.seek(offset)
+            loss_values = np.frombuffer(loss_file.read(self.sequence_length + 1), dtype=np.bool_).copy()
+            sample['loss_mask'] = torch.as_tensor(loss_values, dtype=torch.bool)
 
         return sample
 
@@ -319,7 +345,8 @@ class IterableNanoset(IterableDataset, Stateful):
         infinite: bool = False,
         random_seed: int = 1234,
         doc_offsets: bool = False,
-        use_cached_doc_offsets: bool = True
+        use_cached_doc_offsets: bool = True,
+        loss_masking: bool = False,
 
     ) -> None:
         self.base_dataset = Nanoset(
@@ -330,6 +357,7 @@ class IterableNanoset(IterableDataset, Stateful):
             random_seed=random_seed,
             doc_offsets=doc_offsets,
             use_cached_doc_offsets=use_cached_doc_offsets,
+            return_loss_mask=loss_masking,
         )
         
         self.world_size = world_size
@@ -348,10 +376,13 @@ class IterableNanoset(IterableDataset, Stateful):
                 sample = self.base_dataset[idx]
                 tokens = sample["input_ids"]
                 doc_offsets = sample.get("doc_offsets")
+                loss_mask = sample.get("loss_mask")
 
                 x = torch.LongTensor(tokens)
                 input_ids = x[:-1]
                 labels = x[1:]
+                if loss_mask is not None:
+                    labels = torch.where(loss_mask[1:], labels, torch.tensor(-100, dtype=labels.dtype))
                 
                 self._sample_idx = idx + self.world_size
                 if doc_offsets is not None:
@@ -408,6 +439,7 @@ def build_nanoset_data_loader(
     random_seed: int = 1234,
     doc_offsets: bool = False,
     use_cached_doc_offsets: bool = True,
+    loss_masking: bool = False,
 ):
     """Build a data loader for Nanoset datasets."""
     nanoset = IterableNanoset(
@@ -421,5 +453,6 @@ def build_nanoset_data_loader(
         random_seed=random_seed,
         doc_offsets=doc_offsets,
         use_cached_doc_offsets=use_cached_doc_offsets,
+        loss_masking=loss_masking,
     )
     return DPAwareDataLoader(rank, nanoset, batch_size=batch_size, collate_fn=IterableNanoset.collate_fn if doc_offsets else None)
