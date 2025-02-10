@@ -129,6 +129,7 @@ def convert_llama_weights(input_dir, output_dir, max_seq_len: int):
         dims_per_head,
         max_seq_len,
         params.get("rope_theta", 500000),
+        scaling=True
     )
 
     logger.info(f"Writing to DCP at '{output_dir}'")

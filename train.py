@@ -15,7 +15,7 @@ from torch.distributed.elastic.multiprocessing.errors import record
 from torchtitan import utils
 from torchtitan.checkpoint import CheckpointManager, TrainState
 from torchtitan.config_manager import JobConfig
-from torchtitan.datasets import build_hf_data_loader, build_tokenizer
+from torchtitan.datasets import build_hf_data_loader, build_tokenizer, build_chat_data_loader
 from torchtitan.float8 import Float8Handler
 from torchtitan.logging import init_logger, logger
 from torchtitan.metrics import build_device_memory_monitor, build_metric_logger
@@ -75,6 +75,18 @@ def main(job_config: JobConfig):
     if parallel_dims.pp_enabled:
         pp_mesh = world_mesh["pp"]
 
+    if parallel_dims.cp_enabled:
+        cp_mesh = world_mesh["cp"]
+        cp_degree = cp_mesh.size()
+    else:
+        cp_degree = 1
+
+    if parallel_dims.tp_enabled:
+        tp_mesh = world_mesh["tp"]
+        tp_degree = tp_mesh.size()
+    else:
+        tp_degree = 1
+
     # Set random seed, and maybe enable deterministic mode (mainly for debugging, expect perf loss)
     utils.set_determinism(
         world_mesh, device, job_config.training.seed, job_config.training.deterministic
@@ -85,14 +97,14 @@ def main(job_config: JobConfig):
     tokenizer_type = model_name_to_tokenizer[model_name]
     tokenizer = build_tokenizer(tokenizer_type, job_config.model.tokenizer_path)
     # build dataloader
-    data_loader = build_hf_data_loader(
+    data_loader = build_chat_data_loader(
         job_config.training.dataset,
-        job_config.training.dataset_path,
         tokenizer,
         job_config.training.batch_size,
         job_config.training.seq_len,
         dp_degree,
         dp_rank,
+        pad_to=16 * cp_degree * tp_degree
     )
 
     # build model (using meta init)
@@ -105,6 +117,7 @@ def main(job_config: JobConfig):
     model_config.norm_type = job_config.model.norm_type
     model_config.vocab_size = tokenizer.n_words
     model_config.max_seq_len = job_config.training.seq_len
+    model_config.rope_scaling = job_config.training.rope_scaling
 
     logger.info(f"Building {model_name} {job_config.model.flavor} with {model_config}")
     with torch.device("meta"):
@@ -274,7 +287,7 @@ def main(job_config: JobConfig):
             optional_context_parallel_ctx = (
                 utils.create_context_parallel_ctx(
                     cp_mesh=world_mesh["cp"],
-                    cp_buffers=[input_ids, labels] + [m.freqs_cis for m in model_parts],
+                    cp_buffers=[input_ids, labels] + [m.freqs_cis[:input_ids.shape[-1]] for m in model_parts],
                     cp_seq_dims=[1, 1] + [0 for _ in model_parts],
                     cp_no_restore_buffers={input_ids, labels},
                     cp_rotate_method=job_config.experimental.context_parallel_rotate_method,

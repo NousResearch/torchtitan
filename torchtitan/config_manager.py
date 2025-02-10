@@ -222,6 +222,11 @@ class JobConfig:
             "--training.seq_len", type=int, default=2048, help="Sequence length"
         )
         self.parser.add_argument(
+            "--training.rope_scaling",
+            action="store_true",
+            help="Use Llama 3.1-style rope scaling",
+        )
+        self.parser.add_argument(
             "--training.warmup_steps",
             type=int,
             default=200,
