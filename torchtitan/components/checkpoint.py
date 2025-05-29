@@ -46,6 +46,10 @@ OPTIMIZER = "optimizer"
 LR_SCHEDULER = "lr_scheduler"
 DATALOADER = "dataloader"
 TRAIN_STATE = "train_state"
+# For now, we will manually pop the freqs_cis buffer, as we made this permanent
+# temporarily and we don't want to include it in the exported state_dict.
+# Context: https://github.com/pytorch/torchtitan/blob/main/torchtitan/models/llama3/model.py#L404
+excluded_parameters_for_model_only = {"freqs_cis"}
 
 
 class AsyncMode(str, enum.Enum):
@@ -73,6 +77,7 @@ class ModelWrapper(Stateful):
     def _get_state_dict(self) -> dict[str, Any]:
         state_dict = {
             k: v for sd in map(get_model_state_dict, self.model) for k, v in sd.items()
+            if k not in excluded_parameters_for_model_only
         }
         # Exclude parameters that should not be saved
         for excluded_key in excluded_parameters_for_model_only:
@@ -91,7 +96,10 @@ class ModelWrapper(Stateful):
         list(map(func, self.model))
         # `set_model_state_dict()` does change the keys of the input state_dict,
         # we will need to reinitialize the cache_state_dict.
-        self.cache_state_dict = self._get_state_dict()
+        self.cache_state_dict = {
+            k: v for sd in map(get_model_state_dict, self.model) for k, v in sd.items()
+            if k not in excluded_parameters_for_model_only
+        }
 
 
 class Terminate:

@@ -6,12 +6,14 @@
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
+import importlib
+
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
 from torchtitan.components.tokenizer import build_hf_tokenizer
 from torchtitan.components.validate import build_validator
-from torchtitan.datasets.hf_datasets import build_hf_dataloader
+from torchtitan.datasets.dataloader import build_dataloader
 from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
 
 from .infra.parallelize import parallelize_llama
@@ -49,6 +51,39 @@ llama3_configs = {
         multiple_of=1024,
         rope_theta=500000,
     ),
+    "8B_scaled": TransformerModelArgs(
+        dim=4096,
+        n_layers=32,
+        n_heads=32,
+        n_kv_heads=8,
+        ffn_dim_multiplier=1.3,
+        multiple_of=1024,
+        rope_theta=500000,
+        rope_scaling=True,
+    ),
+    "8B_flex_attn": TransformerModelArgs(
+        dim=4096,
+        n_layers=32,
+        n_heads=32,
+        n_kv_heads=8,
+        ffn_dim_multiplier=1.3,
+        multiple_of=1024,
+        rope_theta=500000,
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_sequence_lengths",
+    ),
+    "8B_flex_attn_scaled": TransformerModelArgs(
+        dim=4096,
+        n_layers=32,
+        n_heads=32,
+        n_kv_heads=8,
+        ffn_dim_multiplier=1.3,
+        multiple_of=1024,
+        rope_theta=500000,
+        rope_scaling=True,
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_sequence_lengths",
+    ),
     "70B": TransformerModelArgs(
         dim=8192,
         n_layers=80,
@@ -69,7 +104,6 @@ llama3_configs = {
     ),
 }
 
-
 register_train_spec(
     TrainSpec(
         name="llama3",
@@ -79,7 +113,7 @@ register_train_spec(
         pipelining_fn=pipeline_llama,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
-        build_dataloader_fn=build_hf_dataloader,
+        build_dataloader_fn=build_dataloader,
         build_tokenizer_fn=build_hf_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         build_validator_fn=build_validator,

@@ -6,7 +6,7 @@
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, Optional
 
 import torch
 import torch.nn.functional as F
@@ -65,7 +65,7 @@ class FlexAttention(torch.nn.Module):
         self, attn_mask_type: str, fixed_block_size: int | None = None
     ) -> None:
         super().__init__()
-        if attn_mask_type not in ["causal", "block_causal"]:
+        if attn_mask_type not in ["causal", "block_causal", "block_causal_by_sequence_lengths"]:
             raise ValueError(f"Unrecognized attn_mask_type {attn_mask_type}.")
         self.attn_mask_type = attn_mask_type
         self.fixed_block_size = fixed_block_size
@@ -77,7 +77,7 @@ class FlexAttention(torch.nn.Module):
         return (self.attn_mask_type, self.fixed_block_size)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         block_mask = FlexAttention.block_masks[self.mask_key]
         return FlexAttention.flex_attn(q, k, v, block_mask=block_mask)
@@ -108,6 +108,60 @@ class FlexAttention(torch.nn.Module):
             return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
 
         return block_causal_mask
+    
+
+    @staticmethod
+    def _get_document_ids_from_seq_lens(
+        seq_lens: list[torch.Tensor],
+    ) -> torch.Tensor:
+        """
+        Convert a batch tensor of seq lens into integer IDs denoting sample ownership.
+        For example, seq_lens = [2, 3, 1] would return [0, 0, 1, 1, 1, 2].
+
+        Args:
+            seq_lens (list[torch.Tensor]): Sequence lengths of samples in each pack in the batch,
+                shape (batch_size, n), where n is the max number of sequences in a pack and can vary
+                across packs.
+
+        Returns:
+            Tensor: Document IDs of shape (batch_size, max_seq_len).
+        """
+        batch_size = len(seq_lens)
+        batch_document_ids = []
+        for sample_idx in range(batch_size):
+            # We assume seq lens sum to max seq lens, so document_ids should be of
+            # shape (max_seq_len, )
+            document_ids = torch.cat(
+                [
+                    torch.full((seq_len,), i, dtype=torch.long, device=seq_len.device)
+                    for i, seq_len in enumerate(seq_lens[sample_idx])
+                ]
+            )
+            batch_document_ids.append(document_ids)
+        batch_document_ids = torch.stack(batch_document_ids)
+        return batch_document_ids
+
+
+    @staticmethod
+    def _get_block_causal_mask_mod_by_seq_lens(
+        seq_lens: list[torch.Tensor],
+    ) -> _mask_mod_signature:
+        document_ids = FlexAttention._get_document_ids_from_seq_lens(seq_lens)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            """
+            Defines the logic of a block causal mask by combining both a standard causal mask
+            and a block diagonal document mask.
+
+            See :func:`~torchtune.modules.attention_utils.create_block_causal_mask`
+            for an illustration.
+            """
+            causal_mask = q_idx >= kv_idx
+            document_mask = document_ids[b, q_idx] == document_ids[b, kv_idx]
+            return causal_mask & document_mask
+
+        return mask_mod
+
 
     @staticmethod
     def _fixed_block_mask_mod(
@@ -146,7 +200,7 @@ class FlexAttention(torch.nn.Module):
 
     @staticmethod
     @torch.no_grad()
-    def init_attention_mask(batch: torch.Tensor, eos_id: int | None = None) -> None:
+    def init_attention_mask(batch: torch.Tensor, eos_id: int | None = None, sequence_lengths: list[torch.Tensor] | None = None) -> None:
         # batch is [b, s, h, d] shape
         for mask_key in FlexAttention.used_attn_mask_types:
             attn_mask_type, fixed_block_size = mask_key
@@ -165,6 +219,13 @@ class FlexAttention(torch.nn.Module):
                         )
                     batch_dimension = batch.shape[0]
                     mask_mod = FlexAttention._get_block_causal_mask_mod(batch, eos_id)
+                case "block_causal_by_sequence_lengths":
+                    if sequence_lengths is None:
+                        raise RuntimeError(
+                            "`sequence_lengths` must be provided for block_causal_by_sequence_lengths"
+                        )
+                    batch_dimension = batch.shape[0]
+                    mask_mod = FlexAttention._get_block_causal_mask_mod_by_seq_lens(sequence_lengths)
                 case _:
                     raise RuntimeError(f"Shouldn't reach here. {attn_mask_type}")
 
@@ -207,11 +268,11 @@ class ScaledDotProductAttention(torch.nn.Module):
             cls.backends.insert(0, SDPBackend.CUDNN_ATTENTION)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         assert self.backends, "SDPA Backends should not be empty."
         with sdpa_kernel(self.backends, set_priority=True):
-            return F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask, is_causal=attention_mask is None)
 
 
 def build_attention(
@@ -231,5 +292,5 @@ def build_attention(
         return ScaledDotProductAttention(attn_mask_type)
 
 
-def init_attention_mask(batch: torch.Tensor, eos_id: int | None = None) -> None:
-    FlexAttention.init_attention_mask(batch, eos_id)
+def init_attention_mask(batch: torch.Tensor, eos_id: int | None = None, sequence_lengths: list[torch.Tensor] | None = None) -> None:
+    FlexAttention.init_attention_mask(batch, eos_id=eos_id, sequence_lengths=sequence_lengths)
