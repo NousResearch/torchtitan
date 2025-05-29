@@ -196,6 +196,18 @@ class Training:
     loaded from this path instead of downloaded.
     """
 
+    dataset_type: Literal["huggingface", "nanoset"] = "nanoset"
+    """Type of dataset to use ['huggingface', 'nanoset']"""
+
+    dataset_folders: list[str] = field(default_factory=list)
+    """List of folders containing tokenized datasets for Nanoset"""
+
+    dataset_weights: list[str] | None = None
+    """Optional list of weights for weighted sampling from datasets"""
+
+    dataset_random_seed: int = 1234
+    """Random seed for dataset shuffling"""
+
     local_batch_size: int = 8
     """Local batch size (i.e., per-device batch size)"""
 

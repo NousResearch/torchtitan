@@ -9,7 +9,7 @@
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
-from torchtitan.datasets.hf_datasets import build_hf_dataloader
+from torchtitan.datasets.dataloader import build_dataloader
 from torchtitan.datasets.tokenizer.tiktoken import build_tiktoken_tokenizer
 from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
 
@@ -78,7 +78,7 @@ register_train_spec(
         pipelining_fn=pipeline_llama,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
-        build_dataloader_fn=build_hf_dataloader,
+        build_dataloader_fn=build_dataloader,
         build_tokenizer_fn=build_tiktoken_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
     )
