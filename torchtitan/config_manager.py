@@ -196,8 +196,8 @@ class Training:
     loaded from this path instead of downloaded.
     """
 
-    dataset_type: Literal["huggingface", "nanoset"] = "nanoset"
-    """Type of dataset to use ['huggingface', 'nanoset']"""
+    dataset_type: Literal["huggingface", "nanoset", "preprocessed"] = "huggingface"
+    """Type of dataset to use ['huggingface', 'nanoset', 'preprocessed']"""
 
     dataset_folders: list[str] = field(default_factory=list)
     """List of folders containing tokenized datasets for Nanoset"""
@@ -838,21 +838,7 @@ class ConfigManager:
         return cls(**result)
 
     def _validate_config(self) -> None:
-        # TODO: temporary mitigation of BC breaking change in
-        #       tokenizer default path, need to remove later
-        if not os.path.exists(self.config.model.tokenizer_path):
-            logger.warning(
-                f"Tokenizer path {self.config.model.tokenizer_path} does not exist!"
-            )
-            old_tokenizer_path = (
-                "torchtitan/datasets/tokenizer/original/tokenizer.model"
-            )
-            if os.path.exists(old_tokenizer_path):
-                self.config.model.tokenizer_path = old_tokenizer_path
-                logger.warning(
-                    f"Temporarily switching to previous default tokenizer path {old_tokenizer_path}. "
-                    "Please update your config."
-                )
+        pass
 
     @staticmethod
     def register_tyro_rules(registry: tyro.constructors.ConstructorRegistry) -> None:

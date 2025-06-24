@@ -6,7 +6,7 @@
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
-from typing import Callable, ClassVar
+from typing import Callable, ClassVar, Optional
 
 import torch
 import torch.nn.functional as F
@@ -65,7 +65,7 @@ class FlexAttention(torch.nn.Module):
         self, attn_mask_type: str, fixed_block_size: int | None = None
     ) -> None:
         super().__init__()
-        if attn_mask_type not in ["causal", "block_causal"]:
+        if attn_mask_type not in ["causal", "block_causal", "block_causal_by_position"]:
             raise ValueError(f"Unrecognized attn_mask_type {attn_mask_type}.")
         self.attn_mask_type = attn_mask_type
         self.fixed_block_size = fixed_block_size
@@ -77,7 +77,7 @@ class FlexAttention(torch.nn.Module):
         return (self.attn_mask_type, self.fixed_block_size)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, #attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         block_mask = FlexAttention.block_masks[self.mask_key]
         return FlexAttention.flex_attn(q, k, v, block_mask=block_mask)
@@ -108,6 +108,25 @@ class FlexAttention(torch.nn.Module):
             return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
 
         return block_causal_mask
+    
+    @staticmethod
+    def _get_position_id_block_causal_mask_mod(
+        position_ids: torch.Tensor,
+    ) -> _mask_mod_signature:
+        """
+        Creates a mask modification function for block-causal attention based on
+        position_ids, where position_ids resetting to 0 indicates a new document.
+        """
+
+        is_boundary = position_ids == 0
+        doc_ids = torch.cumsum(is_boundary, dim=1, dtype=torch.int32)
+
+        def position_id_block_causal_mask(
+            b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+        ):
+            return (doc_ids[b, q_idx] == doc_ids[b, kv_idx]) & (q_idx >= kv_idx)
+
+        return position_id_block_causal_mask
 
     @staticmethod
     def _fixed_block_mask_mod(
@@ -165,6 +184,9 @@ class FlexAttention(torch.nn.Module):
                         )
                     batch_dimension = batch.shape[0]
                     mask_mod = FlexAttention._get_block_causal_mask_mod(batch, eos_id)
+                case "block_causal_by_position":
+                    batch_dimension = batch.shape[0]
+                    mask_mod = FlexAttention._get_position_id_block_causal_mask_mod(batch)
                 case _:
                     raise RuntimeError(f"Shouldn't reach here. {attn_mask_type}")
 

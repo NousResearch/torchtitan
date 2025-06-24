@@ -14,6 +14,7 @@ import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
 import torchtitan.components.ft as ft
+import torchtitan.components.quantization.float8
 import torchtitan.protocols.train_spec as train_spec_module
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.dataloader import DataloaderStopIteration
@@ -366,19 +367,19 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # apply context parallelism if cp is enabled
         # ensure CP handles the separate freqs_cis buffer for each pp stage
-        inputs = input_dict["input"]
         optional_context_parallel_ctx = (
             dist_utils.create_context_parallel_ctx(
                 cp_mesh=self.world_mesh["cp"],
-                cp_buffers=[inputs, labels] + [m.freqs_cis for m in model_parts],
-                cp_seq_dims=[1, 1] + [0 for _ in model_parts],
-                cp_no_restore_buffers={inputs, labels},
+                cp_buffers=list(input_dict.values()) + [m.freqs_cis for m in model_parts],
+                cp_seq_dims=[1] * len(input_dict) + [0 for _ in model_parts],
+                cp_no_restore_buffers=set(input_dict.values()),
                 cp_rotate_method=self.job_config.parallelism.context_parallel_rotate_method,
             )
             if parallel_dims.cp_enabled
             else None
         )
 
+        inputs = input_dict.pop("input")
         if parallel_dims.pp_enabled:
             # Pipeline Parallel forward / backward inside step() call
             with self.train_context(optional_context_parallel_ctx):
@@ -387,11 +388,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 )
                 if self.pp_has_first_stage:
                     self.pp_schedule.step(
-                        inputs, target=targets, losses=losses, input_batch=inputs
+                        inputs, target=targets, losses=losses, input_batch=inputs, **input_dict,
                     )
                 else:
                     self.pp_schedule.step(
-                        target=targets, losses=losses, input_batch=inputs
+                        target=targets, losses=losses, input_batch=inputs, **input_dict,
                     )
 
             # accumulate losses across pipeline microbatches
@@ -406,7 +407,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             with self.train_context(optional_context_parallel_ctx):
                 assert len(model_parts) == 1
                 with self.maybe_enable_amp:
-                    pred = model_parts[0](inputs)
+                    pred = model_parts[0](inputs, **input_dict)
                     loss = self.loss_fn(pred, labels)
                 # need to free to before bwd to avoid peaking memory
                 del pred

@@ -7,6 +7,9 @@
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
 
+from dataclasses import dataclass
+from typing import Optional
+
 import torch
 import torch.nn.functional as F
 from torch import nn
@@ -70,6 +73,7 @@ def apply_rotary_emb(
     xq: torch.Tensor,
     xk: torch.Tensor,
     freqs_cis: torch.Tensor,
+    position_ids: Optional[torch.Tensor] = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Apply rotary embeddings to input tensors using the given frequency tensor.
@@ -83,16 +87,48 @@ def apply_rotary_emb(
         xq (torch.Tensor): Query tensor to apply rotary embeddings.
         xk (torch.Tensor): Key tensor to apply rotary embeddings.
         freqs_cis (torch.Tensor): Precomputed frequency tensor for complex exponentials.
+        position_ids (torch.Tensor, optional): Custom position IDs of shape [batch_size, seq_len].
+                                              If provided, will use these to index into freqs_cis.
 
     Returns:
         tuple[torch.Tensor, torch.Tensor]: Tuple of modified query tensor and key tensor with rotary embeddings.
     """
     xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
     xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
-    xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
-    xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-    return xq_out.type_as(xq), xk_out.type_as(xk)
+
+    if position_ids is not None:
+        # Custom position_ids handling
+        bs, seqlen = position_ids.shape
+        
+        # Create output tensors
+        xq_out = torch.empty_like(xq)
+        xk_out = torch.empty_like(xk)
+        
+        # Apply rotations batch by batch
+        for i in range(bs):
+            # Get frequencies for this batch element's positions
+            batch_freqs = freqs_cis[position_ids[i]]  # [seqlen, head_dim//2]
+            # Reshape for broadcasting
+            batch_freqs = batch_freqs.view(1, seqlen, 1, -1)  # [1, seqlen, 1, head_dim//2]
+            
+            # Apply rotation to this batch element
+            batch_xq = xq_[i:i+1]  # [1, seqlen, heads, head_dim//2]
+            batch_xk = xk_[i:i+1]
+            
+            # Multiply by complex exponential
+            batch_xq_out = batch_xq * batch_freqs
+            batch_xk_out = batch_xk * batch_freqs
+            
+            # Convert back to real and store in output tensors
+            xq_out[i:i+1] = torch.view_as_real(batch_xq_out).flatten(3)
+            xk_out[i:i+1] = torch.view_as_real(batch_xk_out).flatten(3)
+        
+        return xq_out.type_as(xq), xk_out.type_as(xk)
+    else:
+        freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+        xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+        xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+        return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
 def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
@@ -156,6 +192,7 @@ class Attention(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
+        position_ids: Optional[torch.Tensor] = None,
     ):
         """
         Forward pass of the attention module.
@@ -179,7 +216,7 @@ class Attention(nn.Module):
         xk = xk.view(bs, seqlen, -1, self.head_dim)
         xv = xv.view(bs, seqlen, -1, self.head_dim)
 
-        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+        xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis, position_ids=position_ids)
 
         # repeat k/v heads if n_kv_heads < n_heads
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -285,6 +322,7 @@ class TransformerBlock(nn.Module):
         self,
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
+        position_ids: Optional[torch.Tensor] = None,
     ):
         """
         Perform a forward pass through the TransformerBlock.
@@ -297,7 +335,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        h = x + self.attention(self.attention_norm(x), freqs_cis)
+        h = x + self.attention(self.attention_norm(x), freqs_cis, position_ids=position_ids)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -398,7 +436,7 @@ class Transformer(nn.Module, ModelProtocol):
             self.model_args.rope_theta,
         )
 
-    def forward(self, tokens: torch.Tensor, input_batch: torch.Tensor | None = None):
+    def forward(self, tokens: torch.Tensor, input_batch: torch.Tensor | None = None, position_ids: Optional[torch.Tensor] = None):
         """
         Perform a forward pass through the Transformer model.
 
@@ -425,7 +463,7 @@ class Transformer(nn.Module, ModelProtocol):
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis)
+            h = layer(h, self.freqs_cis, position_ids=position_ids)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h

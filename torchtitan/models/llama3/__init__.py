@@ -9,6 +9,8 @@
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
+from torchtitan.components.tokenizer import Tokenizer
+from torchtitan.config_manager import JobConfig
 from torchtitan.datasets.dataloader import build_dataloader
 from torchtitan.datasets.tokenizer.tiktoken import build_tiktoken_tokenizer
 from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
@@ -48,6 +50,17 @@ llama3_configs = {
         multiple_of=1024,
         rope_theta=500000,
     ),
+    "8B_flex_attn": TransformerModelArgs(
+        dim=4096,
+        n_layers=32,
+        n_heads=32,
+        n_kv_heads=8,
+        ffn_dim_multiplier=1.3,
+        multiple_of=1024,
+        rope_theta=500000,
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_position",
+    ),
     "70B": TransformerModelArgs(
         dim=8192,
         n_layers=80,
@@ -69,6 +82,15 @@ llama3_configs = {
 }
 
 
+def _build_llama3_tokenizer(job_config: JobConfig) -> Tokenizer:
+    if job_config.model.tokenizer_path.endswith(".model"):
+        return build_tiktoken_tokenizer(job_config)
+    else:
+        from torchtitan.datasets.tokenizer.hf_tokenizer import build_hf_tokenizer
+
+        return build_hf_tokenizer(job_config)
+
+
 register_train_spec(
     TrainSpec(
         name="llama3",
@@ -79,7 +101,7 @@ register_train_spec(
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
         build_dataloader_fn=build_dataloader,
-        build_tokenizer_fn=build_tiktoken_tokenizer,
+        build_tokenizer_fn=_build_llama3_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
     )
 )
