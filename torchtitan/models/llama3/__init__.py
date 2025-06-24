@@ -6,6 +6,8 @@
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
+import importlib
+
 from torchtitan.components.loss import build_cross_entropy_loss
 from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
@@ -85,10 +87,11 @@ llama3_configs = {
 def _build_llama3_tokenizer(job_config: JobConfig) -> Tokenizer:
     if job_config.model.tokenizer_path.endswith(".model"):
         return build_tiktoken_tokenizer(job_config)
-    else:
+    elif importlib.util.find_spec("transformers") is not None:
         from torchtitan.datasets.tokenizer.hf_tokenizer import build_hf_tokenizer
-
         return build_hf_tokenizer(job_config)
+    else:
+        raise ValueError(f"Unknown tokenizer type for `{job_config.model.tokenizer_path}`")
 
 
 register_train_spec(

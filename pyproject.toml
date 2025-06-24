@@ -38,6 +38,8 @@ dev = [
     "pytest-cov",
     "tensorboard",
 ]
+nanosets = ["datatrove"]
+transformers = ["transformers"]
 
 [tool.setuptools.dynamic]
 version = {file = "assets/version.txt"}

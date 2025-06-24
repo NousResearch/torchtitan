@@ -1,11 +1,9 @@
 from torchtitan.components.tokenizer import Tokenizer
 from torchtitan.config_manager import JobConfig
-
+from transformers import AutoTokenizer
 
 class HfTokenizer(Tokenizer):
     def __init__(self, tokenizer_path: str):
-        from transformers import AutoTokenizer
-
         self.hf_tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
 
     def encode(self, *args, **kwargs) -> list[int]:
