@@ -77,7 +77,7 @@ class FlexAttention(torch.nn.Module):
         return (self.attn_mask_type, self.fixed_block_size)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, #attention_mask: Optional[torch.Tensor] = None,
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         block_mask = FlexAttention.block_masks[self.mask_key]
         return FlexAttention.flex_attn(q, k, v, block_mask=block_mask)
@@ -229,11 +229,11 @@ class ScaledDotProductAttention(torch.nn.Module):
             cls.backends.insert(0, SDPBackend.CUDNN_ATTENTION)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         assert self.backends, "SDPA Backends should not be empty."
         with sdpa_kernel(self.backends, set_priority=True):
-            return F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            return F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask, is_causal=attention_mask is None)
 
 
 def build_attention(

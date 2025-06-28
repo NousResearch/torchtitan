@@ -19,8 +19,28 @@ from torchtitan.protocols.train_spec import ModelProtocol
 
 from .args import TransformerModelArgs
 
+def apply_scaling(freqs: torch.Tensor) -> torch.Tensor:
+    # Values obtained from grid search
+    scale_factor = 8
+    low_freq_factor = 1
+    high_freq_factor = 4
+    old_context_len = 8192  # original llama3 length
 
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
+    low_freq_wavelen = old_context_len / low_freq_factor
+    high_freq_wavelen = old_context_len / high_freq_factor
+
+    wavelen = 2 * torch.pi / freqs
+    new_freqs = torch.where(wavelen > low_freq_wavelen, freqs / scale_factor, freqs)
+    smooth = (old_context_len / wavelen - low_freq_factor) / (
+        high_freq_factor - low_freq_factor
+    )
+    return torch.where(
+        (wavelen >= high_freq_wavelen) & (wavelen <= low_freq_wavelen),
+        (1 - smooth) * new_freqs / scale_factor + smooth * new_freqs,
+        new_freqs,
+    )
+
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0, rope_scaling: bool = False) -> torch.Tensor:
     """
     Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
 
@@ -38,6 +58,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Te
     """
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
     t = torch.arange(end, device=freqs.device)
+    if rope_scaling:
+        freqs = apply_scaling(freqs)
     freqs = torch.outer(t, freqs).float()
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
     return freqs_cis
@@ -193,6 +215,7 @@ class Attention(nn.Module):
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
         position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
     ):
         """
         Forward pass of the attention module.
@@ -226,7 +249,7 @@ class Attention(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
-        output = self.sdpa(xq, xk, xv)
+        output = self.sdpa(xq, xk, xv, attention_mask=attention_mask)
 
         output = output.transpose(
             1, 2
@@ -323,6 +346,7 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
         position_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
     ):
         """
         Perform a forward pass through the TransformerBlock.
@@ -335,7 +359,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        h = x + self.attention(self.attention_norm(x), freqs_cis, position_ids=position_ids)
+        h = x + self.attention(self.attention_norm(x), freqs_cis, position_ids=position_ids, attention_mask=attention_mask)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -434,9 +458,10 @@ class Transformer(nn.Module, ModelProtocol):
             # relaxing in our CP enablement PR
             self.model_args.max_seq_len,
             self.model_args.rope_theta,
+            self.model_args.rope_scaling,
         )
 
-    def forward(self, tokens: torch.Tensor, input_batch: torch.Tensor | None = None, position_ids: Optional[torch.Tensor] = None):
+    def forward(self, tokens: torch.Tensor, input_batch: torch.Tensor | None = None, position_ids: Optional[torch.Tensor] = None, attention_mask: Optional[torch.Tensor] = None):
         """
         Perform a forward pass through the Transformer model.
 
@@ -463,7 +488,7 @@ class Transformer(nn.Module, ModelProtocol):
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis, position_ids=position_ids)
+            h = layer(h, self.freqs_cis, position_ids=position_ids, attention_mask=attention_mask)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h
