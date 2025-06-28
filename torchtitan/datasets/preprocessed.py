@@ -36,11 +36,13 @@ class PreprocessedDataset(IterableDataset, Stateful):
         else:
             ds = load_dataset(dataset_name, split="train")
 
+        logger.info(f"Loaded preprocessed dataset with {len(ds)} samples")
+
         self._data = split_dataset_by_node(ds, dp_rank, dp_world_size)
         self._tokenizer = tokenizer
         self.seq_len = seq_len
         self.infinite = infinite
-        self.dp_rank = 0
+        self.dataset_name = dataset_name
 
         # Variables for checkpointing
         self._sample_idx = 0
@@ -74,7 +76,7 @@ class PreprocessedDataset(IterableDataset, Stateful):
                 }
                 if "position_ids" in keys:
                     args["position_ids"] = torch.LongTensor(sample["position_ids"][:-1])
-                
+
                 yield args, labels
 
             if not self.infinite:
@@ -90,6 +92,9 @@ class PreprocessedDataset(IterableDataset, Stateful):
                         self._data, "epoch"
                     ):
                         self._data.set_epoch(self._data.epoch + 1)
+
+    def __len__(self):
+        return len(self._data)
 
     def load_state_dict(self, state_dict):
 
@@ -111,22 +116,51 @@ class PreprocessedDataset(IterableDataset, Stateful):
 
         return _state_dict
 
-def collate_fn(batch):
+
+def collate_fn(batch, seq_len):
     # Unpack the batch
     inputs, labels = zip(*batch)
 
-    # Stack tensors
+    # Stack tensors, padding to longest sampple
     args = {
-        "input": torch.stack(tuple(x["input"] for x in inputs)),
+        "input": torch.stack(
+            [
+                torch.cat(
+                    [
+                        x["input"],
+                        torch.zeros(seq_len - len(x["input"]), dtype=torch.long),
+                    ]
+                )
+                for x in inputs
+            ]
+        ),
     }
     if len(inputs) > 0:
         keys = list(inputs[0].keys())
         if "position_ids" in keys:
-            args["position_ids"] = torch.stack(tuple(x["position_ids"] for x in inputs))
+            args["position_ids"] = torch.stack(
+                [
+                    torch.cat(
+                        [
+                            x["position_ids"],
+                            torch.arange(
+                                seq_len - len(x["position_ids"]), dtype=torch.long
+                            ),
+                        ]
+                    )
+                    for x in inputs
+                ]
+            )
 
-    labels = torch.stack(labels)
+    labels = torch.stack(
+        [
+            torch.cat([x, torch.full((seq_len - len(x),), -100, dtype=torch.long)])
+            for x in labels
+        ]
+    )
 
     return args, labels
+
 
 def build_preprocessed_dataloader(
     dp_world_size: int,
@@ -156,5 +190,5 @@ def build_preprocessed_dataloader(
         dp_rank=dp_rank,
         dp_world_size=dp_world_size,
         batch_size=batch_size,
-        collate_fn=collate_fn,
+        collate_fn=lambda x: collate_fn(x, seq_len),
     )

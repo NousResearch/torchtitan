@@ -1,5 +1,12 @@
 import argparse
-import torch
+import os
+import shutil
+import multiprocessing
+import numpy as np
+import pyarrow as pa
+import pyarrow.dataset as pa_ds
+import random
+import json
 
 from typing import Optional
 from torch.nn import functional as F
@@ -7,6 +14,104 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from datasets import load_dataset, Dataset as DatasetsDataset
 from transformers import AutoTokenizer
+
+SCHEMA = pa.schema(
+    [
+        pa.field("inputs", pa.large_list(pa.int32())),
+        pa.field("labels", pa.large_list(pa.int32())),
+        pa.field("position_ids", pa.large_list(pa.int32())),
+        pa.field("sequence_lengths", pa.large_list(pa.int64())),
+    ]
+)
+
+DATASET_INFO = r"""{
+  "citation": "",
+  "description": "",
+  "features": {
+    "inputs": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    },
+    "labels": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    },
+    "position_ids": {
+      "feature": {
+        "dtype": "int32",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    },
+    "sequence_lengths": {
+      "feature": {
+        "dtype": "int64",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}"""
+
+
+def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
+    packer = PackedDataset(
+        shard,
+        max_seq_len=args.pack_to_sequence_length,
+        padding_idx=tokenizer_pad_id,
+        split_across_pack=not args.chat,
+        show_pbar=rank == 0,
+    )
+
+    if args.save_to_disk:
+        # create a schema that uses int64 for list sizes
+
+        example = (
+            {
+                "inputs": packer.packs[0]["inputs"],
+                "labels": packer.packs[0]["labels"],
+                "position_ids": packer.packs[0]["position_ids"],
+                "sequence_lengths": packer.packs[0]["sequence_lengths"],
+            }
+            if len(packer.packs) > 0
+            else None
+        )
+
+        oriented_data = {
+            "inputs": [pack["inputs"] for pack in packer.packs],
+            "labels": [pack["labels"] for pack in packer.packs],
+            "position_ids": [pack["position_ids"] for pack in packer.packs],
+            "sequence_lengths": [pack["sequence_lengths"] for pack in packer.packs],
+        }
+        pa_table = pa.Table.from_pydict(oriented_data, schema=SCHEMA)
+        del oriented_data
+
+        pa_ds.write_dataset(
+            pa_table,
+            os.path.join(args.save_to_disk, str(rank)),
+            format="arrow",
+        )
+
+        filename = f"data-{rank:05d}-of-{world_size:05d}.arrow"
+
+        shutil.move(
+            os.path.join(args.save_to_disk, str(rank), "part-0.arrow"),
+            os.path.join(args.save_to_disk, filename),
+        )
+
+        os.rmdir(os.path.join(args.save_to_disk, str(rank)))
+    else:
+        filename = None
+
+    return packer.total_tokens, packer.packed_tokens, packer.dropped, filename, example
 
 
 # https://github.com/pytorch/torchtune/blob/9d91fe39f08661952da4180b9e7fb2eba5a7a5e7/torchtune/datasets/_packed.py
@@ -84,74 +189,82 @@ class PackedDataset(Dataset):
         padding_idx: int = 0,
         max_packs: Optional[int] = None,
         split_across_pack: bool = False,
+        show_pbar=True,
     ) -> None:
         self.ds = ds
         self.max_seq_len = max_seq_len
         self.padding_idx = padding_idx
         self.max_packs = max_packs
         self.split_across_pack = split_across_pack
-        # Where final samples will be held
         self.packs = []
         self.previous_sample_boundary: int = 0
+        self.packed_tokens: int = 0
+        self.total_tokens: int = 0
+        self.dropped: int = 0
+        self.show_pbar = show_pbar
         self._pack()
+
+    def _get_empty_pack(self):
+
+        return {
+            "inputs": np.empty(0, dtype=np.int32),
+            "labels": np.empty(0, dtype=np.int32),
+            "position_ids": np.empty(0, dtype=np.int32),
+            "sequence_lengths": [],
+        }
 
     def _pack(self) -> None:
         """Iterate through the dataset. Use a buffer to hold samples until max_seq_len,
         then append the buffer to self.packs as a single "packed" sample. Continue
         until max_packs or end of dataset."""
-        # Buffer to hold samples until they are long enough to be added to self.packs
-        current_pack = {
-            "inputs": [],
-            "labels": [],
-            "position_ids": [],
-            "sequence_lengths": [],
-        }
 
-        # Only show progress bar on rank 0
-        pbar = tqdm(total=len(self.ds), desc="Packing dataset", dynamic_ncols=True)
+        current_pack = self._get_empty_pack()
+
+        pbar = (
+            tqdm(total=len(self.ds), desc="Packing dataset", dynamic_ncols=True)
+            if self.show_pbar
+            else None
+        )
 
         for sample in self.ds:
-            tokens, labels = sample["inputs"], sample["labels"]
+            tokens = np.array(sample["inputs"], dtype=np.int32)
+            labels = np.array(sample["labels"], dtype=np.int32)
 
-            # If the dataset outputs samples that are larger than the specified
-            # max_seq_len and we're unable to split it, user needs to modify
-            # one of the two parameters
             seq_len = len(tokens)
             if seq_len > self.max_seq_len and not self.split_across_pack:
                 # print(
                 #     f"Dropping sample that is too long ({seq_len} > {self.max_seq_len})"
                 # )
+                self.dropped += 1
                 continue
 
-            # Update the current pack
-            current_pack["inputs"] += tokens
-            current_pack["labels"] += labels
-            current_pack["position_ids"] += [
-                x % self.max_seq_len for x in range(seq_len)
-            ]
+            current_pack["inputs"] = np.concatenate((current_pack["inputs"], tokens))
+            current_pack["labels"] = np.concatenate((current_pack["labels"], labels))
+
+            position_ids = np.arange(seq_len, dtype=np.int32)
+            current_pack["position_ids"] = np.concatenate(
+                (current_pack["position_ids"], position_ids)
+            )
+
             current_pack["sequence_lengths"] += [seq_len]
 
-            # If the current pack is over the max_seq_len, add it to self.packs and
-            # retain any truncated or bumped samples for next pack
             while (
                 len(current_pack["inputs"]) > self.max_seq_len
                 and not self._should_stop_packing()
             ):
                 current_pack = self._split_and_add_pack(current_pack)
 
-            pbar.update()
+            if pbar:
+                pbar.update()
 
-            # Keep track of previous sample boundary
             self.previous_sample_boundary = len(current_pack["inputs"])
 
             if self._should_stop_packing():
                 break
 
-        # Handle the last pack if there's leftover and we haven't filled up the max packs
         if len(current_pack["inputs"]) > 0 and (
             self.max_packs is None or len(self.packs) < self.max_packs
         ):
-            # No need to handle splitting at this point so we can just add the current pack
             self._add_pack(current_pack)
 
     def _should_stop_packing(self) -> bool:
@@ -183,7 +296,6 @@ class PackedDataset(Dataset):
             "sequence_lengths": current_pack["sequence_lengths"][:-1] + seq_len_padding,
         }
 
-        # Process and add the pack
         self._add_pack(pack)
 
         # Return the length of the first sample in next pack if we are splitting across packs,
@@ -208,39 +320,44 @@ class PackedDataset(Dataset):
 
     def _pad_pack(self, pack, padding_idx: int):
         """Pads a pack to ``self.max_seq_len``."""
-        # Pad tokens
-        num_padding_tokens = self.max_seq_len - len(pack["inputs"])
-        padded_tokens = pack["inputs"] + [padding_idx] * num_padding_tokens
+        num_tokens = len(pack["inputs"])
+        num_padding_tokens = self.max_seq_len - num_tokens
 
-        # Pad labels
-        padded_labels = pack["labels"] + [-100] * num_padding_tokens
+        self.packed_tokens += num_tokens
+        self.total_tokens += self.max_seq_len
 
-        # Add padding tokens as a last seq len to ensure sum is max_seq_len
+        padded_inputs = np.pad(
+            pack["inputs"], (0, num_padding_tokens), constant_values=self.padding_idx
+        )
+        padded_labels = np.pad(
+            pack["labels"], (0, num_padding_tokens), constant_values=-100
+        )
+
+        if num_padding_tokens > 0:
+            # don't care much about padded position_ids, but create them for consistency
+            start_pos = int(pack["position_ids"][-1] + 1) if num_tokens > 0 else 0
+            pad_positions = np.arange(
+                start_pos, start_pos + num_padding_tokens, dtype=np.int32
+            )
+            padded_position_ids = np.concatenate((pack["position_ids"], pad_positions))
+        else:
+            padded_position_ids = pack["position_ids"]
+
         padded_seq_lens = pack["sequence_lengths"]
         if num_padding_tokens > 0:
-            padded_seq_lens += [num_padding_tokens]
-
-        # Pad input_pos continuing the sequence from last value
-        # in input_pos
-        # e.g. [0 1 2] -> [0 1 2 3 4 5] for self.max_seq_len = 6
-        start_pos = pack["position_ids"][-1] + 1 if pack["position_ids"] else 0
-        num_positions_to_generate = self.max_seq_len - len(pack["position_ids"])
-        new_positions = range(start_pos, start_pos + num_positions_to_generate)
-        # Clamp to max_seq_len - 1 to avoid out of bounds error
-        clamped_new_positions = [min(p, self.max_seq_len - 1) for p in new_positions]
-        padded_input_pos = pack["position_ids"] + clamped_new_positions
+            padded_seq_lens.append(num_padding_tokens)
 
         return {
-            "inputs": padded_tokens,
+            "inputs": padded_inputs,
             "labels": padded_labels,
-            "position_ids": padded_input_pos,
+            "position_ids": padded_position_ids,
             "sequence_lengths": padded_seq_lens,
         }
 
     def __len__(self) -> int:
         return len(self.packs)
 
-    def __getitem__(self, idx: int) -> dict[str, torch.Tensor]:
+    def __getitem__(self, idx: int) -> dict[str, np.ndarray]:
         return self.packs[idx]
 
 
@@ -262,15 +379,23 @@ def main(args):
         for conversation in sample["conversations"]:
             for message in conversation:
 
-                message_from = message.pop("from")
-                if message_from == "gpt":
-                    message["role"] = "assistant"
-                elif message_from == "human":
-                    message["role"] = "user"
-                else:
-                    message["role"] = message_from
+                keys = list(message.keys())
 
-                message["content"] = message.pop("value")
+                if "from" in keys and "value" in keys:
+                    # sharegpt format
+                    message_from = message.pop("from")
+                    if message_from == "gpt":
+                        message["role"] = "assistant"
+                    elif message_from == "human":
+                        message["role"] = "user"
+                    else:
+                        message["role"] = message_from
+
+                    message["content"] = message.pop("value")
+                elif "role" in keys and "content" in keys:
+                    pass
+                else:
+                    raise RuntimeError(f"Unknown chat format, keys are {keys}")
 
             tokens = tokenizer.apply_chat_template(conversation, tokenize=True)
             label = []
@@ -317,52 +442,93 @@ def main(args):
         _tokenize_chat if args.chat else _tokenize,
         batched=True,
         batch_size=args.batch_size,
-        num_proc=args.num_proc
+        num_proc=args.num_proc,
     )
     dataset = dataset.remove_columns(original_column_names)
 
+    efficiency = 1.0
+    dropped = 0
     if args.pack_to_sequence_length:
-        dataset = PackedDataset(
-            dataset,
-            max_seq_len=args.pack_to_sequence_length + 1, # one extra, so that after causal shift we're at the sequence length
-            padding_idx=tokenizer.pad_token_id,
-            max_packs=args.limit,
-            split_across_pack=not args.chat,
-        )
-        column_names = ["inputs", "labels", "position_ids", "sequence_lengths"]
-        oriented_dataset = {key: [] for key in column_names}
-        for row in dataset:
-            for key in column_names:
-                oriented_dataset[key].append(row[key])
-        dataset = DatasetsDataset.from_dict(oriented_dataset)
+        num_shards = 64  # args.num_proc
+        shards = [
+            dataset.shard(num_shards=num_shards, index=i) for i in range(num_shards)
+        ]
+        with multiprocessing.Pool(processes=num_shards) as pool:
+            process_args = [
+                (shard, args, tokenizer.pad_token_id, index, num_shards)
+                for index, shard in enumerate(shards)
+            ]
 
-    example = dataset[0]
-    inputs = example["inputs"]
-    labels = example["labels"] if "labels" in example else None
-    position_ids = example["position_ids"] if "position_ids" in example else None
+            results = pool.starmap(process_packing_shard, process_args)
 
-    example_out = ""
-    for i in range(0, len(inputs)):
-        token = inputs[i]
-        label = labels[i] if labels is not None else token
-        position_id = position_ids[i] if position_ids is not None else None
+        examples = []
+        filenames = []
+        total_tokens = 0
+        packed_tokens = 0
 
-        decoded = tokenizer.decode(token)
+        for total, packed, dropped_, filename, example in tqdm(results):
+            if example:
+                examples.append(example)
+            if filename:
+                filenames.append(filename)
+            total_tokens += total
+            packed_tokens += packed
+            dropped += dropped_
 
-        if label == -100:
-            example_out += f"\033[31m{decoded}\033[0m({token}"
-        else:
-            example_out += f"\033[32m{decoded}\033[0m({token}"
-        
-        if position_id != None:
-            example_out += f"@{position_id})"
-        else:
-            example_out += ")"
+        if total_tokens > 0:
+            efficiency = packed_tokens / total_tokens
 
-    print(example_out)
+        example = examples[0]
 
-    if args.save_to_disk:
-        dataset.save_to_disk(args.save_to_disk)
+        if args.save_to_disk:
+            with open(os.path.join(args.save_to_disk, "dataset_info.json"), "wb") as f:
+                f.write(DATASET_INFO.encode())
+
+            # verify we can open and do any conversion needed
+            dataset = load_dataset(args.save_to_disk, num_proc=args.num_proc)
+
+    else:
+        if args.drop_larger_than:
+            len_before = len(dataset)
+            dataset = dataset.filter(
+                lambda x: len(x["inputs"]) <= args.drop_larger_than
+            )
+            dropped = len_before - len(dataset)
+
+        if args.save_to_disk:
+            print(f"Saving to {args.save_to_disk}")
+            dataset.save_to_disk(args.save_to_disk)
+
+        example = dataset[0]
+
+    if args.show_example:
+        inputs = example["inputs"]
+        labels = example["labels"] if "labels" in example else None
+        position_ids = example["position_ids"] if "position_ids" in example else None
+
+        example_out = ""
+        for i in range(0, len(inputs)):
+            token = inputs[i]
+            label = labels[i] if labels is not None else token
+            position_id = position_ids[i] if position_ids is not None else None
+
+            decoded = tokenizer.decode(token)
+
+            if label == -100:
+                example_out += f"\033[31m{decoded}\033[0m({token}"
+            else:
+                example_out += f"\033[32m{decoded}\033[0m({token}"
+
+            if position_id != None:
+                example_out += f"@{position_id})"
+            else:
+                example_out += ")"
+
+        print(example_out)
+
+    if dropped > 0:
+        print(f"Dropped {dropped} too-long samples")
+    print(f"Efficiency: {efficiency * 100:.1f}%")
 
 
 if __name__ == "__main__":
@@ -378,7 +544,9 @@ if __name__ == "__main__":
     parser.add_argument("--chat", action="store_true")
     parser.add_argument("--multiturn-only", action="store_true")
     parser.add_argument("--pack-to-sequence-length", type=int)
+    parser.add_argument("--drop-larger-than", type=int)
     parser.add_argument("--save-to-disk", type=str)
+    parser.add_argument("--show-example", action="store_true")
     args = parser.parse_args()
 
     main(args)
