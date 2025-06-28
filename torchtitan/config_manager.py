@@ -225,6 +225,9 @@ class Training:
     steps: int = 10000
     """How many train steps to run"""
 
+    epochs: int | None = None
+    """Override steps to instead train by epochs of the dataset. Requires a deterministic length dataset"""
+
     enable_cpu_offload: bool = False
     """
     Whether to apply CPU offloading of parameters, gradients, and optimizer states in FSDP
@@ -413,7 +416,7 @@ class Checkpoint:
     `--checkpoint.no_initial_load_model_weights_only` to override the default setting.
     """
 
-    interval: int = 500
+    interval: int | Literal["epoch"] = 500
     """Checkpointing interval in steps."""
 
     last_save_model_weights_only: bool = False
