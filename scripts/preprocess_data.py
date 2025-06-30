@@ -8,7 +8,7 @@ import pyarrow.dataset as pa_ds
 import random
 import json
 
-from typing import Optional
+from typing import List, Optional, Tuple
 from torch.nn import functional as F
 from torch.utils.data import Dataset
 from tqdm import tqdm
@@ -189,6 +189,7 @@ class PackedDataset(Dataset):
         padding_idx: int = 0,
         max_packs: Optional[int] = None,
         split_across_pack: bool = False,
+        group_size: int = 5000,
         show_pbar=True,
     ) -> None:
         self.ds = ds
@@ -202,7 +203,11 @@ class PackedDataset(Dataset):
         self.total_tokens: int = 0
         self.dropped: int = 0
         self.show_pbar = show_pbar
-        self._pack()
+        self.group_size = group_size
+        if split_across_pack:
+            self._pack_greedy()
+        else:
+            self._pack_ffd()
 
     def _get_empty_pack(self):
 
@@ -213,7 +218,106 @@ class PackedDataset(Dataset):
             "sequence_lengths": [],
         }
 
-    def _pack(self) -> None:
+    def _pack_ffd(self) -> None:
+        ds_iterator = iter(self.ds)
+        finished_iterating = False
+
+        pbar = (
+            tqdm(
+                total=len(self.ds),
+                desc="Packing dataset (FFD)",
+                dynamic_ncols=True,
+            )
+            if self.show_pbar
+            else None
+        )
+
+        while not finished_iterating:
+            # 1. Fetch a large group of samples into memory.
+            group = []
+            try:
+                for _ in range(self.group_size):
+                    sample = next(ds_iterator)
+                    seq_len = len(sample["inputs"])
+
+                    if seq_len > self.max_seq_len:
+                        self.dropped += 1
+                        continue
+                    # Store sample and its length for sorting
+                    group.append({"sample": sample, "seq_len": seq_len})
+            except StopIteration:
+                finished_iterating = True
+
+            if not group:
+                break
+
+            # 2. Sort the group by length in descending order (the "Decreasing" part of FFD).
+            group.sort(key=lambda x: x["seq_len"], reverse=True)
+
+            # 3. Pack this group using the "First-Fit" heuristic.
+            # Each bin holds the samples it contains and its remaining space.
+            bins = []  # List of {"samples": [], "remaining_space": max_seq_len}
+
+            for item in group:
+                placed = False
+                # Try to place the item in the first available bin.
+                for bin in bins:
+                    if bin["remaining_space"] >= item["seq_len"]:
+                        bin["samples"].append(item["sample"])
+                        bin["remaining_space"] -= item["seq_len"]
+                        placed = True
+                        break
+
+                # If no existing bin could accommodate the item, create a new one.
+                if not placed:
+                    bins.append(
+                        {
+                            "samples": [item["sample"]],
+                            "remaining_space": self.max_seq_len - item["seq_len"],
+                        }
+                    )
+
+            # 4. Convert the completed bins from this group into final, padded packs.
+            for bin_info in bins:
+                if self._should_stop_packing():
+                    break
+
+                current_pack = self._get_empty_pack()
+                for sample in bin_info["samples"]:
+                    tokens = np.array(sample["inputs"], dtype=np.int32)
+                    labels = np.array(sample["labels"], dtype=np.int32)
+                    seq_len = len(tokens)
+
+                    current_pack["inputs"] = np.concatenate(
+                        (current_pack["inputs"], tokens)
+                    )
+                    current_pack["labels"] = np.concatenate(
+                        (current_pack["labels"], labels)
+                    )
+                    current_pack["position_ids"] = np.concatenate(
+                        (
+                            current_pack["position_ids"],
+                            np.arange(seq_len, dtype=np.int32),
+                        )
+                    )
+                    current_pack["sequence_lengths"].append(seq_len)
+
+                self._add_pack(current_pack)
+
+            if pbar:
+                pbar.update(len(group))
+
+            if self._should_stop_packing():
+                # Ensure the outer loop breaks if max_packs is reached.
+                break
+
+        if pbar:
+            # Manually set pbar to total to show 100% at the end
+            pbar.n = pbar.total
+            pbar.refresh()
+            pbar.close()
+
+    def _pack_greedy(self) -> None:
         """Iterate through the dataset. Use a buffer to hold samples until max_seq_len,
         then append the buffer to self.packs as a single "packed" sample. Continue
         until max_packs or end of dataset."""
