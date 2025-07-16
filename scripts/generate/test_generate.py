@@ -24,10 +24,14 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torchtitan.components.checkpoint import excluded_parameters_for_model_only
+from torchtitan.components.checkpoint import (
+    CheckpointManager,
+    excluded_parameters_for_model_only,
+)
 from torchtitan.components.metrics import build_device_memory_monitor
 from torchtitan.config_manager import ConfigManager
 from torchtitan.distributed import ParallelDims, utils as dist_utils
+from torch.distributed.checkpoint import HuggingFaceStorageReader
 from torchtitan.protocols.train_spec import get_train_spec
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
@@ -40,7 +44,7 @@ sys.path.append(str(wd))
 from generate._generation import generate
 
 
-def apply_tp_minus_sp(model: nn.Module, tp_mesh: DeviceMesh):
+def apply_tp_minus_sp_llama(model: nn.Module, tp_mesh: DeviceMesh):
     parallelize_module(
         model,
         tp_mesh,
@@ -131,7 +135,12 @@ def test_generate(
 
         # apply_tp (with Sequence Parallel) on unevenly sharded
         # sequences would require https://github.com/pytorch/torchtitan/pull/686
-        apply_tp_minus_sp(model, parallel_dims.world_mesh["tp"])
+        if config.model.name == "llama3":
+            apply_tp_minus_sp_llama(model, parallel_dims.world_mesh["tp"])
+        else:
+            raise ValueError(
+                f"Unknown model type `${config.model.name}` to apply parallelism to"
+            )
 
     dist_utils.set_determinism(world_mesh, device, seed, deterministic)
 
@@ -146,10 +155,18 @@ def test_generate(
         state_dict.pop(k, None)
 
     # Checkpoint Loading
-    begin = time.monotonic()
-    logger.info(f"Loading chkpt at: {checkpoint_path}")
-    dcp.load(state_dict, checkpoint_id=checkpoint_path)
-    logger.info(f"Finished loading chkpt in {time.monotonic() - begin:.2f} seconds.")
+    config.checkpoint.enable_checkpoint = True
+    config.checkpoint.initial_load_model_weights_only = True
+    config.checkpoint.initial_load_path = checkpoint_path
+    checkpoint_manager = CheckpointManager(
+        dataloader=None,
+        model_parts=[model],
+        optimizers=[],
+        lr_schedulers=[],
+        states=dict(),
+        job_config=config,
+    )
+    checkpoint_manager.load()
 
     device_mem_stats = device_memory_monitor.get_peak_stats()
     logger.info(

@@ -97,7 +97,9 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
         """
         Update the model_config config from the given job config.
         """
-        self.vocab_size = tokenizer.vocab_size
+        # dsv2 tokenizer is only 100002 but the the embeddings are sized for 102400.
+        # we'll trust the vocab size from the model config for now
+        # self.vocab_size = tokenizer.vocab_size
         self.max_seq_len = job_config.training.seq_len
 
     def get_nparams_and_flops(self, model: nn.Module, seq_len: int) -> tuple[int, int]:
