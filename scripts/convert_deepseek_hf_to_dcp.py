@@ -116,7 +116,11 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
             state_dict[f"layers.{layer}.moe.experts.w2"] = torch.stack(w2_list)
 
             # Ephemeral for training, but torchtitan expects them
-            state_dict[f"layers.{layer}.moe.expert_bias"] = torch.zeros(num_experts, dtype=torch.float32)
+            bias_key = f"model.layers.{layer}.mlp.gate.e_score_correction_bias"
+            if bias_key in hf_state_dict:
+                state_dict[f"layers.{layer}.moe.router.expert_bias"] = hf_state_dict[bias_key]
+            else:
+                state_dict[f"layers.{layer}.moe.router.expert_bias"] = torch.zeros(num_experts, dtype=torch.float32)
             state_dict[f"layers.{layer}.moe.tokens_per_expert"] = torch.zeros(num_experts, dtype=torch.float32)
 
             # Shared expert (if exists)

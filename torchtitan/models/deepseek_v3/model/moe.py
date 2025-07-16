@@ -170,6 +170,10 @@ class TokenChoiceTopKRouter(nn.Module):
         top_k: int,
         use_sigmoid: bool = False,
         route_sclaing_factor: float = 1.0,
+        topk_method: str = "greedy",
+        norm_topk_prob: bool = False,
+        n_group: int = 1,
+        topk_group: int = 1,
     ):
         super().__init__()
 
@@ -178,6 +182,10 @@ class TokenChoiceTopKRouter(nn.Module):
         self.top_k = top_k
         self.use_sigmoid = use_sigmoid
         self.route_sclaing_factor = route_sclaing_factor
+        self.topk_method = topk_method
+        self.norm_topk_prob = norm_topk_prob
+        self.n_group = n_group
+        self.topk_group = topk_group
         self.gate = nn.Linear(self.dim, self.num_experts, bias=False)
 
     def forward(
@@ -270,6 +278,10 @@ class MoE(nn.Module):
             top_k=top_k,
             use_sigmoid=model_args.score_func == "sigmoid",
             route_sclaing_factor=route_scaling_factor,
+            topk_method=model_args.topk_method,
+            norm_topk_prob=model_args.norm_topk_prob,
+            n_group=model_args.n_expert_groups,
+            topk_group=model_args.n_limited_groups,
         )
         self.shared_expert = (
             # Reference: https://huggingface.co/deepseek-ai/DeepSeek-V3-Base/blob/main/modeling_deepseek.py#L517
