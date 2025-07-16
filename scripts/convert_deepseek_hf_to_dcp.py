@@ -19,18 +19,25 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
     if os.path.exists(deepseek_model):
         local_path = deepseek_model
     else:
-        local_path = snapshot_download(repo_id=deepseek_model, allow_patterns=["*.safetensors", "config.json", "tokenizer*"])
+        local_path = snapshot_download(
+            repo_id=deepseek_model,
+            allow_patterns=["*.safetensors", "config.json", "tokenizer*"],
+        )
     tok = AutoTokenizer.from_pretrained(local_path, trust_remote_code=True)
     config = AutoConfig.from_pretrained(local_path, trust_remote_code=True)
     n_layers = config.num_hidden_layers
     dim = config.hidden_size
 
-    logger.info(f"Loading original DeepSeek V3 weights from {deepseek_model} using safetensors")
+    logger.info(
+        f"Loading original DeepSeek V3 weights from {deepseek_model} using safetensors"
+    )
 
     # Find all safetensors files
     safetensors_files = glob.glob(f"{local_path}/*.safetensors")
     if not safetensors_files:
-        raise ValueError("No safetensors files found in the downloaded model directory. Ensure the model uses safetensors format.")
+        raise ValueError(
+            "No safetensors files found in the downloaded model directory. Ensure the model uses safetensors format."
+        )
 
     # Load state dict directly from safetensors files
     hf_state_dict = {}
@@ -107,33 +114,59 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
             w2_list = []
             w3_list = []
             for i in range(num_experts):
-                w1_list.append(hf_state_dict[f"model.layers.{layer}.mlp.experts.{i}.gate_proj.weight"].t())
-                w3_list.append(hf_state_dict[f"model.layers.{layer}.mlp.experts.{i}.up_proj.weight"].t())
-                w2_list.append(hf_state_dict[f"model.layers.{layer}.mlp.experts.{i}.down_proj.weight"].t())
+                w1_list.append(
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.experts.{i}.gate_proj.weight"
+                    ].t()
+                )
+                w3_list.append(
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.experts.{i}.up_proj.weight"
+                    ].t()
+                )
+                w2_list.append(
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.experts.{i}.down_proj.weight"
+                    ].t()
+                )
 
             state_dict[f"layers.{layer}.moe.experts.w1"] = torch.stack(w1_list)
             state_dict[f"layers.{layer}.moe.experts.w3"] = torch.stack(w3_list)
             state_dict[f"layers.{layer}.moe.experts.w2"] = torch.stack(w2_list)
 
-            # Ephemeral for training, but torchtitan expects them
             bias_key = f"model.layers.{layer}.mlp.gate.e_score_correction_bias"
             if bias_key in hf_state_dict:
-                state_dict[f"layers.{layer}.moe.router.expert_bias"] = hf_state_dict[bias_key]
-            else:
-                state_dict[f"layers.{layer}.moe.router.expert_bias"] = torch.zeros(num_experts, dtype=torch.float32)
-            state_dict[f"layers.{layer}.moe.tokens_per_expert"] = torch.zeros(num_experts, dtype=torch.float32)
+                state_dict[f"layers.{layer}.moe.router.expert_bias"] = hf_state_dict[
+                    bias_key
+                ]
+                # Ephemeral for training, but torchtitan expects it
+                state_dict[f"layers.{layer}.moe.tokens_per_expert"] = torch.zeros(
+                    num_experts, dtype=torch.float32
+                )
 
             # Shared expert (if exists)
             if config.n_shared_experts is not None:
-                state_dict[f"layers.{layer}.moe.shared_expert.w1"] = hf_state_dict[
-                    f"model.layers.{layer}.mlp.shared_experts.gate_proj.weight"
-                ].t().unsqueeze(0)
-                state_dict[f"layers.{layer}.moe.shared_expert.w3"] = hf_state_dict[
-                    f"model.layers.{layer}.mlp.shared_experts.up_proj.weight"
-                ].t().unsqueeze(0)
-                state_dict[f"layers.{layer}.moe.shared_expert.w2"] = hf_state_dict[
-                    f"model.layers.{layer}.mlp.shared_experts.down_proj.weight"
-                ].t().unsqueeze(0)
+                state_dict[f"layers.{layer}.moe.shared_expert.w1"] = (
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.shared_experts.gate_proj.weight"
+                    ]
+                    .t()
+                    .unsqueeze(0)
+                )
+                state_dict[f"layers.{layer}.moe.shared_expert.w3"] = (
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.shared_experts.up_proj.weight"
+                    ]
+                    .t()
+                    .unsqueeze(0)
+                )
+                state_dict[f"layers.{layer}.moe.shared_expert.w2"] = (
+                    hf_state_dict[
+                        f"model.layers.{layer}.mlp.shared_experts.down_proj.weight"
+                    ]
+                    .t()
+                    .unsqueeze(0)
+                )
 
     state_dict["norm.weight"] = hf_state_dict["model.norm.weight"]
     state_dict["tok_embeddings.weight"] = hf_state_dict["model.embed_tokens.weight"]
@@ -150,8 +183,12 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
 
 if __name__ == "__main__":
     init_logger()
-    parser = argparse.ArgumentParser(description="Convert DeepSeek V3 weights to DCP format.")
-    parser.add_argument("deepseek_model", type=str, help="HF Model in DeepSeek V3 format")
+    parser = argparse.ArgumentParser(
+        description="Convert DeepSeek V3 weights to DCP format."
+    )
+    parser.add_argument(
+        "deepseek_model", type=str, help="HF Model in DeepSeek V3 format"
+    )
     parser.add_argument("output_dir", type=Path, help="Output directory for DCP.")
     args = parser.parse_args()
 
