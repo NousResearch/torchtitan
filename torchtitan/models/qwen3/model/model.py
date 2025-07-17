@@ -24,7 +24,7 @@ def apply_scaling(freqs: torch.Tensor) -> torch.Tensor:
     scale_factor = 8
     low_freq_factor = 1
     high_freq_factor = 4
-    old_context_len = 8192  # original llama3 length
+    old_context_len = 8192  # original Qwen3 length
 
     low_freq_wavelen = old_context_len / low_freq_factor
     high_freq_wavelen = old_context_len / high_freq_factor
@@ -176,7 +176,11 @@ class Attention(nn.Module):
             else model_args.n_kv_heads
         )
         self.n_rep = self.n_heads // self.n_kv_heads
-        self.head_dim = model_args.dim // model_args.n_heads
+        self.head_dim = (
+            model_args.dim // model_args.n_heads
+            if model_args.head_dim == -1
+            else model_args.head_dim
+        )
 
         self.wq = nn.Linear(
             model_args.dim, model_args.n_heads * self.head_dim, bias=False
@@ -186,6 +190,10 @@ class Attention(nn.Module):
         self.wo = nn.Linear(
             model_args.n_heads * self.head_dim, model_args.dim, bias=False
         )
+        self.qk_norm = model_args.qk_norm
+        if self.qk_norm:
+            self.q_norm = nn.RMSNorm(self.head_dim, eps=model_args.norm_eps)
+            self.k_norm = nn.RMSNorm(self.head_dim, eps=model_args.norm_eps)
         self.sdpa = build_attention(model_args.use_flex_attn, model_args.attn_mask_type)
 
     def init_weights(self, init_std: float):
@@ -221,6 +229,10 @@ class Attention(nn.Module):
         xq = xq.view(bs, seqlen, -1, self.head_dim)
         xk = xk.view(bs, seqlen, -1, self.head_dim)
         xv = xv.view(bs, seqlen, -1, self.head_dim)
+
+        if self.qk_norm:
+            xq = self.q_norm(xq)
+            xk = self.k_norm(xk)
 
         xq, xk = apply_rotary_emb(
             xq, xk, freqs_cis=freqs_cis, position_ids=position_ids
