@@ -54,7 +54,7 @@ qwen3_configs = {
         ffn_dim_multiplier=1.425,  # To get intermediate_size=17408
         multiple_of=128,
         use_flex_attn=True,
-        attn_mask_type="block_causal_by_sequence_lengths",
+        attn_mask_type="block_causal",
     ),
     "8B": TransformerModelArgs(
         dim=4096,
@@ -68,9 +68,52 @@ qwen3_configs = {
         ffn_dim_multiplier=1.125,  # To get intermediate_size=12288
         multiple_of=256,
         use_flex_attn=True,
-        attn_mask_type="block_causal_by_sequence_lengths",
+        attn_mask_type="block_causal",
     ),
     "14B": TransformerModelArgs(
+        dim=5120,
+        n_layers=40,
+        n_heads=40,
+        n_kv_heads=8,
+        qk_norm=True,
+        rope_theta=1000000,
+        norm_eps=1e-06,
+        vocab_size=151936,
+        ffn_dim_multiplier=1.275,  # To get intermediate_size=17408
+        multiple_of=256,
+        use_flex_attn=True,
+        attn_mask_type="block_causal",
+    ),
+    "4B_finetuning": TransformerModelArgs(
+        dim=2560,
+        n_layers=36,
+        n_heads=32,
+        n_kv_heads=8,
+        qk_norm=True,
+        rope_theta=1000000,
+        head_dim=128,
+        norm_eps=1e-06,
+        vocab_size=151936,
+        ffn_dim_multiplier=1.425,  # To get intermediate_size=17408
+        multiple_of=128,
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_sequence_lengths",
+    ),
+    "8B_finetuning": TransformerModelArgs(
+        dim=4096,
+        n_layers=36,
+        n_heads=32,
+        n_kv_heads=8,
+        qk_norm=True,
+        rope_theta=1000000,
+        norm_eps=1e-06,
+        vocab_size=151936,
+        ffn_dim_multiplier=1.125,  # To get intermediate_size=12288
+        multiple_of=256,
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_sequence_lengths",
+    ),
+    "14B_finetuning": TransformerModelArgs(
         dim=5120,
         n_layers=40,
         n_heads=40,
