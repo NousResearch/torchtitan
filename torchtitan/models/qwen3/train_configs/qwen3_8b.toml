@@ -19,7 +19,7 @@ save_tb_folder = "tb"
 [model]
 name = "qwen3"
 flavor = "8B"
-tokenizer_path = "./assets/tokenizer/Qwen3"
+tokenizer_path = "/home/shared/torchtitan-conversions/qwen3_8b_base/tokenizer"
 # converters = ["float8"]
 
 [optimizer]
