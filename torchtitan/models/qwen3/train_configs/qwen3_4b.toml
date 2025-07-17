@@ -47,7 +47,7 @@ context_parallel_degree = 1
 
 [checkpoint]
 enable_checkpoint = true
-initial_load_path = "/home/shared/qwen3_4b_base"
+initial_load_path = "/home/shared/torchtitan-conversions/qwen3_4b_base"
 folder = "checkpoint"
 interval = 500
 last_save_model_weights_only = false
