@@ -7,6 +7,7 @@ outputs
 dist/*
 .vscode
 .vs
+.venv
 
 # data
 data
@@ -25,6 +26,7 @@ torchtitan/experiments/flux/assets/*
 *.log
 error.json
 _remote_module_non_scriptable.py
+slurm-*
 
 # Editor temporaries (VIM)
 [._]*.s[a-v][a-z]
