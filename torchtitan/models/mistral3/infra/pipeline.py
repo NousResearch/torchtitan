@@ -16,15 +16,15 @@ from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import _PipelineSchedule, get_schedule_class
 
 from torchtitan.config_manager import JobConfig
-from torchtitan.logging import logger
-from torchtitan.parallelisms import ParallelDims
-from torchtitan.parallelisms.pipeline import (
+from torchtitan.tools.logging import logger
+from torchtitan.distributed import ParallelDims
+from torchtitan.distributed.pipeline import (
     build_pipeline_schedule,
     generate_split_points,
     stage_ids_this_rank,
 )
 
-from .model import ModelArgs
+from ..model.model import ModelArgs
 
 
 DeviceType = Union[int, str, torch.device]

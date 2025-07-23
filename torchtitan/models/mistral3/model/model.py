@@ -6,13 +6,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from torchtitan.models.norms import RMSNorm
-from torchtitan.models.norms import build_norm
-from time import sleep
 
+#from torchtitan.models.norms import build_norm
 
-from torchtitan.logging import logger
-from torchtitan.train_spec import ModelProtocol
+#from torchtitan.logging import logger
+#from torchtitan.train_spec import ModelProtocol
+from torchtitan.protocols.train_spec import ModelProtocol
 from torchtitan.models.attention import build_attention, init_attention_mask
 from torch.distributed._tensor import Replicate, Shard, distribute_tensor
 
@@ -142,7 +141,8 @@ class Mistral3PatchMerger(nn.Module):
 class Mistral3MultiModalProjector(nn.Module):
     def __init__(self, config: ModelArgs):
         super().__init__()
-        self.norm = build_norm("rmsnorm", config.vision_embed_dim, config.norm_eps)
+        ##self.norm = build_norm("rmsnorm", config.vision_embed_dim, config.norm_eps)
+        self.norm = nn.RMSNorm(config.vision_embed_dim, eps=config.norm_eps)
         self.patch_merger = Mistral3PatchMerger(config)
         # We have hidden_size * the number of vision feature layers
         num_feature_layers = 1 if isinstance(config.vision_feature_layer, int) else len(config.vision_feature_layer)

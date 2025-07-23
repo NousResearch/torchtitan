@@ -32,8 +32,8 @@ from torch.distributed.tensor.parallel import (
 )
 
 from torchtitan.config_manager import JobConfig, TORCH_DTYPE_MAP
-from torchtitan.logging import logger
-from torchtitan.parallelisms import ParallelDims
+#from torchtitan.logging import logger
+from torchtitan.distributed import ParallelDims
 
 
 def parallelize_mistral3(
@@ -89,6 +89,7 @@ def parallelize_mistral3(
             cpu_offload=job_config.training.enable_cpu_offload,
             reshard_after_forward_policy=job_config.training.fsdp_reshard_after_forward,
         )
+        """
 
         if parallel_dims.dp_replicate_enabled:
             logger.info("Applied HSDP to the model")
@@ -100,6 +101,7 @@ def parallelize_mistral3(
 
         if job_config.training.enable_cpu_offload:
             logger.info("Applied CPU Offloading to the model")
+        """
     elif parallel_dims.dp_replicate_enabled:
         if world_mesh.ndim > 1:
             raise RuntimeError("DDP has not supported > 1D parallelism")
@@ -202,10 +204,10 @@ def apply_tp(
         torch._inductor.config._micro_pipeline_tp = True
         enable_symm_mem_for_group(tp_mesh.get_group().group_name)
 
-    logger.info(
-        f"Applied {'Float8 ' if enable_float8 else ''}{'Async ' if enable_async_tp else ''}"
-        "Tensor Parallelism to the model"
-    )
+    #logger.info(
+    #    f"Applied {'Float8 ' if enable_float8 else ''}{'Async ' if enable_async_tp else ''}"
+    #    "Tensor Parallelism to the model"
+    #)
 
 
 # for selective op activation checkpointing

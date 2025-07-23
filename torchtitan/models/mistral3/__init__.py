@@ -1,22 +1,13 @@
 # Copyright (c) 2025, Anthropic Research Labs
 # All rights reserved.
 
-from torchtitan.datasets import build_hf_dataloader
-from torchtitan.datasets.tokenizer import TikTokenizer
-from torchtitan.models.mistral3.model import (
-    ModelArgs,
-    Mistral3RMSNorm,
-    Mistral3PatchMerger,
-    Mistral3MultiModalProjector,
-    VisionEncoder,
-    MultimodalDecoder,
-    Mistral3ForConditionalGeneration,
-)
-from torchtitan.optimizer import build_lr_schedulers, build_optimizers
-from torchtitan.train_spec import register_train_spec, TrainSpec
+from torchtitan.datasets.hf_datasets import build_hf_dataloader
 
-from .parallelize_mistral3 import parallelize_mistral3
-from .pipeline_mistral3 import pipeline_mistral3
+from .model.configuration_pixtral import PixtralVisionConfig
+from .model.model import Mistral3ForConditionalGeneration, ModelArgs, Mistral3RMSNorm, Mistral3PatchMerger, Mistral3MultiModalProjector, VisionEncoder, MultimodalDecoder
+
+from .infra.parallelize import parallelize_mistral3
+from .infra.pipeline import pipeline_mistral3
 
 
 from torchtitan.components.loss import build_cross_entropy_loss
@@ -24,7 +15,7 @@ from torchtitan.components.lr_scheduler import build_lr_schedulers
 from torchtitan.components.optimizer import build_optimizers
 from torchtitan.components.tokenizer import build_hf_tokenizer
 from torchtitan.components.validate import build_validator
-from torchtitan.datasets.hf_datasets import build_hf_dataloader
+#from torchtitan.datasets.hf_datasets import build_hf_dataloader
 from torchtitan.protocols.train_spec import register_train_spec, TrainSpec
 
 from .infra.parallelize import parallelize_mistral3
@@ -88,13 +79,11 @@ mistral3_configs = {
 register_train_spec(
     TrainSpec(
         name="mistral3",
-        cls=Mistral3ForConditionalGeneration,
         config=mistral3_configs,
         parallelize_fn=parallelize_mistral3,
         pipelining_fn=pipeline_mistral3,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
         build_dataloader_fn=build_hf_dataloader,
-        tokenizer_cls=TikTokenizer,
     )
 )
