@@ -20,7 +20,7 @@ seed = 42
 
 [model]
 name = "mistral3"
-flavor = "Test"
+flavor = "24B"
 norm_type = "rmsnorm"  # layernorm / np_layernorm / rmsnorm
 tokenizer_path = "./assets/tokenizer/Mistral-Small-3.1-24B-Instruct-2503"
 #tokenizer_path = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-hf"
@@ -66,3 +66,10 @@ mode = 'full'  # ['none', 'selective', 'full']
 [float8]
 enable_fsdp_float8_all_gather = true
 precompute_float8_dynamic_scale_for_fsdp = true
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 1

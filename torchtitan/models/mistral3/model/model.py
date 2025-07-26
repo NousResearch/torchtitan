@@ -844,90 +844,18 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
 
         init_attention_mask(input_ids, eos_id=self.config.eos_id)
 
-
-
-        if not self.vision_model_initialized:
-            from transformers import Mistral3ForConditionalGeneration as Mistral3Model
-
-            full = Mistral3Model.from_pretrained(
-                "mistralai/Mistral-Small-3.1-24B-Instruct-2503", trust_remote_code=True, device_map="auto", torch_dtype=torch.float16
-            ).eval()
-
-            from safetensors.torch import load_file
-
-            if device == None:
-                device = torch.device("cuda")
-
-            self.vision_tower = full.vision_tower.eval().to(device, dtype=torch.bfloat16)
-
-            self.multi_modal_projector = full.multi_modal_projector.eval().to(device, dtype=torch.bfloat16)
-
-            del full
-            self.vision_model_initialized = True
-        
-        if pixel_values is not None and image_sizes is not None:
-
-            inputs_embeds = self.language_model.tok_embeddings(input_ids)
-
-            if type(inputs_embeds) is torch.Tensor:
-
-                if image_features is None:
-                    image_features = self.get_image_features(
-                        pixel_values=pixel_values,
-                        vision_feature_layer=-1,
-                        image_sizes=image_sizes
-                    ).to(device=device, dtype=inputs_embeds.dtype)
-
-                image_token_index = self.config.image_token_index
-
-                special_image_mask = (input_ids == self.config.image_token_index).unsqueeze(-1)
-                special_image_mask = special_image_mask.expand_as(inputs_embeds)
-                image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype) 
-                inputs_embeds = inputs_embeds.masked_scatter(special_image_mask, image_features) #.detach().contiguous()
-            
-            else:
-                # dtensor
-                inputs_embeds = inputs_embeds.redistribute(tp_mesh, [Replicate()]).to_local()   # all-gather
-
-                image_features = self.get_image_features(
-                        pixel_values=pixel_values,
-                        vision_feature_layer=-1,
-                        image_sizes=image_sizes,
-                ).to(device=device, dtype=inputs_embeds.dtype)
-
-                image_token_index = self.config.image_token_index
-
-                special_image_mask = (input_ids == self.config.image_token_index).unsqueeze(-1)
-                special_image_mask = special_image_mask.expand_as(inputs_embeds)
-                image_features = image_features.to(inputs_embeds.device, inputs_embeds.dtype)
-
-
-                leaf = inputs_embeds.masked_scatter(special_image_mask, image_features).detach().contiguous()
-
-                rep_dt = distribute_tensor(leaf, tp_mesh, [Replicate()])         # OK now
-                sharded_dt = rep_dt.redistribute(tp_mesh, [Shard(1)])            # reduce-scatter
-
-                inputs_embeds = sharded_dt 
-
+        if position_ids is not None:
+            # for the case where we want to do sequence packing, we need to pass the nonstandard position_ids
             logits = self.language_model(
                         tokens=input_ids,
-                        encoder_input=inputs_embeds,
                         encoder_mask=None,
                         position_ids=position_ids
                     )
         else:
-            if position_ids is not None:
-                # for the case where we want to do sequence packing, we need to pass the nonstandard position_ids
-                logits = self.language_model(
-                            tokens=input_ids,
-                            encoder_mask=None,
-                            position_ids=position_ids
-                        )
-            else:
-                logits = self.language_model(
-                            tokens=input_ids,
-                            encoder_mask=None,
-                        )
+            logits = self.language_model(
+                        tokens=input_ids,
+                        encoder_mask=None,
+                    )
     
         return logits
 
