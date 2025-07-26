@@ -28,10 +28,10 @@ tokenizer_path = "./assets/tokenizer/Mistral-Small-3.1-24B-Instruct-2503"
 
 [optimizer]
 name = "AdamW"
-lr = 1e-6
+lr = 1e-3
 
 [training]
-#base_model_dir = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-dcp"
+#base_model_dir = "/home/ubuntu/torchtitan/llama_dcp"
 #train_type = "sft"
 #seed=42
 batch_size = 1
@@ -41,7 +41,7 @@ warmup_steps = 200  # lr scheduler warm up
 lr_ramp_type = "cosine"
 lr_ramp_end_lr_ratio = 0.0
 max_norm = 1.0  # grad norm clipping
-steps = 10
+steps = 10000
 compile = "false"
 local_batch_size = 1
 dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
