@@ -79,8 +79,12 @@ mistral3_configs = {
 register_train_spec(
     TrainSpec(
         name="mistral3",
-        config=mistral3_configs,
         parallelize_fn=parallelize_mistral3,
+        model_cls=Mistral3ForConditionalGeneration,
+        model_args=mistral3_configs,
+        build_tokenizer_fn=build_hf_tokenizer,
+        build_loss_fn=build_cross_entropy_loss,
+        build_validator_fn=build_validator,
         pipelining_fn=pipeline_mistral3,
         build_optimizers_fn=build_optimizers,
         build_lr_schedulers_fn=build_lr_schedulers,
