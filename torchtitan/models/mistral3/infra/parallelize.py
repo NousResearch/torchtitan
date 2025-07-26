@@ -33,12 +33,13 @@ from torch.distributed.tensor.parallel import (
 
 from torchtitan.config_manager import JobConfig, TORCH_DTYPE_MAP
 #from torchtitan.logging import logger
+
+from torchtitan.tools.logging import logger
 from torchtitan.distributed import ParallelDims
 
 
 def parallelize_mistral3(
     model: nn.Module,
-    world_mesh: DeviceMesh,
     parallel_dims: ParallelDims,
     job_config: JobConfig,
 ):
@@ -48,7 +49,20 @@ def parallelize_mistral3(
 
     NOTE: The passed-in model preferably should be on meta device. Otherwise,
     the model must fit on GPU or CPU memory.
+
     """
+
+    world_mesh = parallel_dims.world_mesh
+    # TODO: TP currently cannot handle uneven seq_len because we set
+    #       `use_local_output=True` to use plain Tensors for legacy reasons.
+    #       Need to revisit this.
+    assert (
+        job_config.training.seq_len % parallel_dims.seq_len_divisor == 0
+    ), f"""
+        Sequence length {job_config.training.seq_len} must be divisible by the product of TP degree
+        ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
+        """
+
 
     if parallel_dims.tp_enabled:
         if (
@@ -57,11 +71,21 @@ def parallelize_mistral3(
         ):
             raise RuntimeError("Async TP requires --training.compile")
         enable_float8_linear = "float8" in job_config.model.converters
+        float8_is_rowwise = job_config.float8.recipe_name in (
+            "rowwise",
+            "rowwise_with_gw_hp",
+        )
+
+        # For now, float8 all-gather with TP is only supported for tensorwise
+        # float8 scaling recipes. For rowwise recipes, we use regular TP and
+        # all-gather happens in high precision.
+        enable_float8_tensorwise_tp = enable_float8_linear and not float8_is_rowwise
+
         apply_tp(
             model,
             world_mesh["tp"],
             loss_parallel=parallel_dims.loss_parallel_enabled,
-            enable_float8=enable_float8_linear,
+            enable_float8=enable_float8_tensorwise_tp,
             enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
         )
 
@@ -87,9 +111,8 @@ def parallelize_mistral3(
             reduce_dtype=TORCH_DTYPE_MAP[job_config.training.mixed_precision_reduce],
             pp_enabled=parallel_dims.pp_enabled,
             cpu_offload=job_config.training.enable_cpu_offload,
-            reshard_after_forward_policy=job_config.training.fsdp_reshard_after_forward,
+            reshard_after_forward_policy=job_config.parallelism.fsdp_reshard_after_forward,
         )
-        """
 
         if parallel_dims.dp_replicate_enabled:
             logger.info("Applied HSDP to the model")
@@ -101,7 +124,7 @@ def parallelize_mistral3(
 
         if job_config.training.enable_cpu_offload:
             logger.info("Applied CPU Offloading to the model")
-        """
+
     elif parallel_dims.dp_replicate_enabled:
         if world_mesh.ndim > 1:
             raise RuntimeError("DDP has not supported > 1D parallelism")
@@ -111,6 +134,7 @@ def parallelize_mistral3(
             enable_compile=job_config.training.compile,
             enable_compiled_autograd=job_config.experimental.enable_compiled_autograd,
         )
+    return model
 
 
 def apply_tp(

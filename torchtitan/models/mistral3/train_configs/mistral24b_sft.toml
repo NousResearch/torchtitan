@@ -20,9 +20,9 @@ seed = 42
 
 [model]
 name = "mistral3"
-flavor = "24B"
+flavor = "Test"
 norm_type = "rmsnorm"  # layernorm / np_layernorm / rmsnorm
-tokenizer_path = "mistralai/Mistral-Small-3.1-24B-Instruct-2503"
+tokenizer_path = "./assets/tokenizer/Mistral-Small-3.1-24B-Instruct-2503"
 #tokenizer_path = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-hf"
 # converters = "float8"
 
@@ -31,22 +31,20 @@ name = "AdamW"
 lr = 1e-6
 
 [training]
-base_model_dir = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-dcp"
-train_type = "sft"
-seed=42
-batch_size = 2
-seq_len = 16384
+#base_model_dir = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-dcp"
+#train_type = "sft"
+#seed=42
+batch_size = 1
+seq_len = 1000
 gradient_accumulation_steps = 1
 warmup_steps = 200  # lr scheduler warm up
 lr_ramp_type = "cosine"
 lr_ramp_end_lr_ratio = 0.0
 max_norm = 1.0  # grad norm clipping
-steps = 700
-data_parallel_replicate_degree = 1
-data_parallel_shard_degree = -1
-tensor_parallel_degree = 8
-compile = false 
-dataset = "metamath"
+steps = 10
+compile = "false"
+local_batch_size = 1
+dataset = "c4_test"  # supported datasets: c4_test (2K), c4 (177M)
 
 [experimental]
 context_parallel_degree = 1
