@@ -13,7 +13,7 @@ import torch.distributed.checkpoint.format_utils
 
 from torchtitan.tools.logging import init_logger, logger
 
-from transformers import AutoTokenizer, LlamaConfig, LlamaForCausalLM  # noqa F401
+from transformers import AutoTokenizer, AutoConfig, AutoModelForCausalLM  # noqa F401
 
 
 # permute for sliced rotary
@@ -77,9 +77,9 @@ def param_to_hf_processing(name, param, num_heads, dim1, dim2, num_kv_heads=None
 
 @torch.inference_mode()
 def convert_llama_weights(input_dir, output_dir, model_base, tokenizer):
-    hf_model = LlamaForCausalLM.from_pretrained(model_base)
+    hf_model = AutoModelForCausalLM.from_pretrained(model_base)
     tok = AutoTokenizer.from_pretrained(tokenizer if tokenizer else model_base)
-    config = hf_model.config  # type: LlamaConfig
+    config = hf_model.config  # type: AutoConfig
     dim = config.hidden_size
     n_heads = config.num_attention_heads
     n_kv_heads = config.num_key_value_heads
