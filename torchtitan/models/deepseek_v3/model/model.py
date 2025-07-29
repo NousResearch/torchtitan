@@ -380,9 +380,9 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
             )
 
         h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
-
+        freqs_cis = self.freqs_cis[:tokens.shape[1]]
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis)
+            h = layer(h, freqs_cis)
         h = self.norm(h) if self.norm is not None else h
         output = self.output(h) if self.output is not None else h
         return output

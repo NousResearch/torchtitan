@@ -76,7 +76,9 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     score_func: Literal["softmax", "sigmoid"] = "softmax"
     route_scale: float = 1.0
     use_grouped_mm: bool = True
-    load_balance_coeff: float = 1e-3
+    load_balance_coeff: float = 1e-3 # compat with existing l4 code
+    topk_method: Literal["greedy", "noaux_tc"] = "greedy"
+    norm_topk_prob: bool = False  # Normalize top-k weights to sum=1 (esp. for sigmoid)
     # Multi-Head Latent Attention (MLA)
     q_lora_rank: int = 0
     kv_lora_rank: int = 512
@@ -97,7 +99,9 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
         """
         Update the model_config config from the given job config.
         """
-        self.vocab_size = tokenizer.vocab_size
+        # dsv2 tokenizer is only 100002 but the the embeddings are sized for 102400.
+        # we'll trust the vocab size from the model config for now
+        # self.vocab_size = tokenizer.vocab_size
         self.max_seq_len = job_config.training.seq_len
 
     def get_nparams_and_flops(self, model: nn.Module, seq_len: int) -> tuple[int, int]:

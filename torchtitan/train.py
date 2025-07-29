@@ -210,6 +210,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self.loss_fn, self.gradient_accumulation_steps
         )
 
+        if job_config.training.epochs is not None:
+            steps_per_epoch = len(self.dataloader) // max(self.gradient_accumulation_steps, 1)
+            self.job_config.training.steps = steps_per_epoch * job_config.training.epochs
+            logger.info(f"Set total training steps to {self.job_config.training.steps} ({job_config.training.epochs} epochs at {steps_per_epoch} steps/epcoh)")
+        if job_config.checkpoint.interval == "epoch":
+            steps_per_epoch = len(self.dataloader) // max(self.gradient_accumulation_steps, 1)
+            self.job_config.checkpoint.interval = steps_per_epoch
+            logger.info(f"Set checkpoint interval to {self.job_config.checkpoint.interval}")
+
         # apply parallelisms and initialization
         if parallel_dims.pp_enabled:
             if not self.train_spec.pipelining_fn:
@@ -379,19 +388,19 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # apply context parallelism if cp is enabled
         # ensure CP handles the separate freqs_cis buffer for each pp stage
-        inputs = input_dict["input"]
         optional_context_parallel_ctx = (
             dist_utils.create_context_parallel_ctx(
                 cp_mesh=parallel_dims.world_mesh["cp"],
-                cp_buffers=[inputs, labels] + [m.freqs_cis for m in model_parts],
-                cp_seq_dims=[1, 1] + [0 for _ in model_parts],
-                cp_no_restore_buffers={inputs, labels},
+                cp_buffers=list(input_dict.values()) + [labels] + [m.freqs_cis for m in model_parts],
+                cp_seq_dims=[1] * len(input_dict) + [1] + [0 for _ in model_parts],
+                cp_no_restore_buffers=set(input_dict.values()).union([labels]),
                 cp_rotate_method=self.job_config.parallelism.context_parallel_rotate_method,
             )
             if parallel_dims.cp_enabled
             else None
         )
 
+        inputs = input_dict.pop("input")
         if parallel_dims.pp_enabled:
             # Pipeline Parallel forward / backward inside step() call
             with self.train_context(optional_context_parallel_ctx):
@@ -400,11 +409,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 )
                 if self.pp_has_first_stage:
                     self.pp_schedule.step(
-                        inputs, target=targets, losses=losses, input_batch=inputs
+                        inputs, target=targets, losses=losses, input_batch=inputs, **input_dict,
                     )
                 else:
                     self.pp_schedule.step(
-                        target=targets, losses=losses, input_batch=inputs
+                        target=targets, losses=losses, input_batch=inputs, **input_dict,
                     )
 
             # accumulate losses across pipeline microbatches
@@ -419,7 +428,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             with self.train_context(optional_context_parallel_ctx):
                 assert len(model_parts) == 1
                 with self.maybe_enable_amp:
-                    pred = model_parts[0](inputs)
+                    pred = model_parts[0](inputs, **input_dict)
                     loss = self.loss_fn(pred, labels)
                 # need to free to before bwd to avoid peaking memory
                 del pred
@@ -478,11 +487,18 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         else:
             global_avg_loss = global_max_loss = loss.detach().item()
 
+        extra_metrics = dict()
+
+        lrs = self.lr_schedulers.get_last_lr()
+        if len(lrs) > 0:
+            extra_metrics["lr"] = lrs[0]
+
         self.metrics_processor.log(
             self.step,
             global_avg_loss,
             global_max_loss,
             grad_norm.item(),
+            extra_metrics=extra_metrics,
         )
 
     @record

@@ -6,6 +6,7 @@
 
 import copy
 import functools
+from itertools import chain
 import math
 from typing import Any, Callable, Iterator
 
@@ -79,6 +80,9 @@ class LRSchedulersContainer(Stateful):
         # approach is safe. We call ``copy()`` here to ensure extra safety.
         for scheduler in self.schedulers:
             scheduler.load_state_dict(copy.deepcopy(state_dict))
+
+    def get_last_lr(self) -> list[float]:
+        return list(chain(*[x.get_last_lr() for x in self.schedulers]))
 
 
 def build_lr_schedulers(

@@ -73,6 +73,7 @@ class ModelWrapper(Stateful):
     def _get_state_dict(self) -> dict[str, Any]:
         state_dict = {
             k: v for sd in map(get_model_state_dict, self.model) for k, v in sd.items()
+            if k not in excluded_parameters_for_model_only
         }
         # Exclude parameters that should not be saved
         for excluded_key in excluded_parameters_for_model_only:
@@ -91,7 +92,10 @@ class ModelWrapper(Stateful):
         list(map(func, self.model))
         # `set_model_state_dict()` does change the keys of the input state_dict,
         # we will need to reinitialize the cache_state_dict.
-        self.cache_state_dict = self._get_state_dict()
+        self.cache_state_dict = {
+            k: v for sd in map(get_model_state_dict, self.model) for k, v in sd.items()
+            if k not in excluded_parameters_for_model_only
+        }
 
 
 class Terminate:

@@ -28,6 +28,8 @@ class TransformerModelArgs(BaseModelArgs):
     norm_eps: float = 1e-5
     rope_theta: float = 10000
     rope_scaling: bool = False
+    head_dim: int = -1  # if not specified, will be set to dim // n_heads
+    qk_norm: bool = False  # Applies RMSNorm to queries and keys before rotary embeddings, one RMSNorm for all heads
 
     max_seq_len: int = 2048
     # If `True`, then each transformer block init uses its layer ID, and if
@@ -41,15 +43,11 @@ class TransformerModelArgs(BaseModelArgs):
     def update_from_config(
         self, job_config: JobConfig, tokenizer: BaseTokenizer
     ) -> None:
-        self.vocab_size = tokenizer.get_vocab_size()
+        self.vocab_size = (
+            tokenizer.get_vocab_size() if self.vocab_size == -1 else self.vocab_size
+        )
         self.max_seq_len = job_config.training.seq_len
         self.eos_id = tokenizer.eos_id
-
-        if job_config.activation_checkpoint.mode == "selective" and self.use_flex_attn:
-            raise ValueError(
-                "FlexAttention is not compatible with selective AC yet. "
-                "See https://github.com/pytorch/pytorch/issues/147879"
-            )
 
         if job_config.parallelism.context_parallel_degree > 1 and self.use_flex_attn:
             raise ValueError(

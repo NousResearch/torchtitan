@@ -196,6 +196,18 @@ class Training:
     loaded from this path instead of downloaded.
     """
 
+    dataset_type: Literal["huggingface", "nanoset", "preprocessed"] = "huggingface"
+    """Type of dataset to use ['huggingface', 'nanoset', 'preprocessed']"""
+
+    dataset_folders: list[str] = field(default_factory=list)
+    """List of folders containing tokenized datasets for Nanoset"""
+
+    dataset_weights: list[str] | None = None
+    """Optional list of weights for weighted sampling from datasets"""
+
+    dataset_random_seed: int = 1234
+    """Random seed for dataset shuffling"""
+
     local_batch_size: int = 8
     """Local batch size (i.e., per-device batch size)"""
 
@@ -212,6 +224,9 @@ class Training:
 
     steps: int = 10000
     """How many train steps to run"""
+
+    epochs: int | None = None
+    """Override steps to instead train by epochs of the dataset. Requires a deterministic length dataset"""
 
     enable_cpu_offload: bool = False
     """
@@ -409,7 +424,7 @@ class Checkpoint:
     `--checkpoint.no_initial_load_model_weights_only` to override the default setting.
     """
 
-    interval: int = 500
+    interval: int | Literal["epoch"] = 500
     """Checkpointing interval in steps."""
 
     last_save_model_weights_only: bool = True
@@ -882,29 +897,7 @@ class ConfigManager:
         return cls(**result)
 
     def _validate_config(self) -> None:
-        # TODO: temporary mitigation of BC breaking change in
-        #       tokenizer default path, need to remove later
-        if not os.path.exists(self.config.model.tokenizer_path):
-            logger.warning(
-                f"Tokenizer path {self.config.model.tokenizer_path} does not exist!"
-            )
-            old_tokenizer_path = (
-                "torchtitan/datasets/tokenizer/original/tokenizer.model"
-            )
-            if os.path.exists(old_tokenizer_path):
-                self.config.model.tokenizer_path = old_tokenizer_path
-                logger.warning(
-                    f"Temporarily switching to previous default tokenizer path {old_tokenizer_path}. "
-                    "Please download the new tokenizer model (python scripts/download_tokenizer.py) and update your config."
-                )
-        else:
-            # Check if we are using tokenizer.model, if so then we need to alert users to redownload the tokenizer
-            if self.config.model.tokenizer_path.endswith("tokenizer.model"):
-                raise Exception(
-                    "You are using the old tokenizer.model, please redownload the tokenizer ",
-                    "(python scripts/download_tokenizer.py --repo_id meta-llama/Llama-3.1-8B) ",
-                    " and update your config to the directory of the downloaded tokenizer.",
-                )
+        pass
 
     @staticmethod
     def register_tyro_rules(registry: tyro.constructors.ConstructorRegistry) -> None:
