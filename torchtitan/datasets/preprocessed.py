@@ -32,7 +32,16 @@ class PreprocessedDataset(IterableDataset, Stateful):
         infinite: bool = False,
         shuffle_seed: int | None = 42,
     ) -> None:
-        ds = load_dataset(dataset_path if dataset_path else dataset_name, split="train")
+
+        ds_dict = load_dataset(dataset_path if dataset_path else dataset_name)
+
+        if 'train' in ds_dict:
+            ds = ds_dict['train']
+        else:
+            # If no 'train' split, use the first available split
+            split_name = list(ds_dict.keys())[0]
+            ds = ds_dict[split_name]
+            logger.info(f"No 'train' split found, using '{split_name}' split instead")
 
         if shuffle_seed is not None:
             ds = ds.shuffle(shuffle_seed)
