@@ -24,7 +24,7 @@ from torchtitan.distributed.pipeline import (
     stage_ids_this_rank,
 )
 
-from ..model.model import ModelArgs
+from ..model.args import VLMArgs
 
 
 DeviceType = Union[int, str, torch.device]
@@ -36,7 +36,7 @@ def pipeline_mistral3(
     parallel_dims: ParallelDims,
     job_config: JobConfig,
     device: DeviceType,
-    model_config: ModelArgs,
+    model_config: VLMArgs,
     loss_fn: Callable[..., torch.Tensor],
 ) -> tuple[_PipelineSchedule, list[nn.Module], bool, bool]:
     stages, models = pipeline_llama_manual_split(
@@ -63,7 +63,7 @@ def pipeline_llama_manual_split(
     parallel_dims: ParallelDims,
     job_config: JobConfig,
     device: DeviceType,
-    model_config: ModelArgs,
+    model_config: VLMArgs,
 ) -> tuple[list[PipelineStage], list[nn.Module]]:
     """
     This API extracts one torch.nn.Module objects for the part of the model configured to run inside this stage.
