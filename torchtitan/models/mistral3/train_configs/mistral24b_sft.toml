@@ -2,7 +2,7 @@
 # NOTE: this toml config is a preset for 8 H100 GPUs.
 
 [job]
-dump_folder = "./24b_test_2"
+dump_folder = "./mistral-small-24b-sft"
 description = "Mistral 24B training"
 
 [profiling]
@@ -22,9 +22,7 @@ seed = 42
 name = "mistral3"
 flavor = "24B"
 norm_type = "rmsnorm"  # layernorm / np_layernorm / rmsnorm
-tokenizer_path = "./assets/tokenizer/Mistral-Small-3.1-24B-Instruct-2503"
-#tokenizer_path = "/mnt/weka/home/artem/new2/simple-trainer/mistral-2503-base-hf"
-# converters = "float8"
+tokenizer_path = "/home/artem_nous/tt/torchtitan/assets/tokenizer/Mistral-Small-3.1-24B-Base-2503"
 
 [optimizer]
 name = "AdamW"
@@ -32,8 +30,8 @@ lr = 1e-3
 
 [training]
 #base_model_dir = "/home/ubuntu/torchtitan/llama_dcp"
-#train_type = "sft"
-#seed=42
+#base_model_dir = "/home/artem_nous/tt/torchtitan/mistral-small-base-dcp"
+
 batch_size = 1
 seq_len = 1000
 gradient_accumulation_steps = 1
@@ -52,10 +50,11 @@ pipeline_parallel_degree = 1
 
 [checkpoint]
 enable_checkpoint = true
+initial_load_path = "/home/artem_nous/tt/torchtitan/mistral-small-base-dcp"
+last_save_model_weights_only = false
 folder = "checkpoint"
 interval_type = "steps"
 interval = 72000
-model_weights_only = false
 export_dtype = "float32"
 async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
 

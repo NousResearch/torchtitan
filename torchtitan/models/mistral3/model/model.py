@@ -119,6 +119,12 @@ class Mistral3RMSNorm(nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.variance_epsilon)
         return self.weight * hidden_states.to(input_dtype)
 
+    def reset_parameters(self):
+        """
+        Reset parameters following the Llama3 pattern.
+        """
+        nn.init.ones_(self.weight)
+
 
 def get_sub_grids(
     x: torch.Tensor,
@@ -158,6 +164,13 @@ class Mistral3PatchMerger(nn.Module):
         self.patch_size = self.config.patch_size
         self.merging_layer = nn.Linear(hidden_size * self.spatial_merge_size**2, hidden_size, bias=False)
         
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize merging layer with truncated normal
+        nn.init.trunc_normal_(self.merging_layer.weight, mean=0.0, std=0.02)
 
     def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor) -> torch.Tensor:
         image_sizes = [
@@ -201,6 +214,24 @@ class Mistral3MultiModalProjector(nn.Module):
         self.linear_2 = nn.Linear(
             config.decoder_embed_dim, config.decoder_embed_dim, bias=config.multimodal_projector_bias
         )
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize norm layer
+        if hasattr(self.norm, 'reset_parameters'):
+            self.norm.reset_parameters()
+        
+        # Initialize patch merger
+        if hasattr(self.patch_merger, 'init_weights'):
+            self.patch_merger.init_weights()
+        
+        # Initialize linear layers with truncated normal
+        for linear in (self.linear_1, self.linear_2):
+            nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
+            if linear.bias is not None:
+                nn.init.zeros_(linear.bias)
 
     def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor):
         image_features = self.norm(image_features)
@@ -372,9 +403,6 @@ class SelfAttention(nn.Module):
 
         self.sdpa = build_attention(True, "causal")
 
-
-
-
     def init_weights(self, init_std: float):
         for linear in (self.wq, self.wk, self.wv):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
@@ -407,6 +435,7 @@ class SelfAttention(nn.Module):
             # Apply RoPE with position_ids if provided
             xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis, position_ids=position_ids)
 
+
         # repeat k/v heads if num_kv_heads < num_heads
         keys = repeat_kv(xk, self.num_rep)  # (bs, seqlen, n_local_heads, head_dim)
         values = repeat_kv(xv, self.num_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -415,6 +444,7 @@ class SelfAttention(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
+        #output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv)
         output = self.sdpa(xq, xk, xv)
 
         output = output.transpose(1, 2).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
@@ -540,6 +570,18 @@ class VisionTransformerBlock(nn.Module):
         self.attn_scale = attn_scale or nn.Identity()
         self.mlp_scale = mlp_scale or nn.Identity()
 
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize attention and feedforward components
+        self.attn.init_weights(0.02)  # Use standard init_std for attention
+        self.mlp.init_weights(0.02)   # Use standard init_std for feedforward
+        
+        # Initialize norm layers
+        for norm in (self.ln_attn, self.ln_mlp):
+            norm.reset_parameters()
+
     def forward(
         self,
         x: torch.Tensor,
@@ -567,6 +609,18 @@ class DecoderTransformerSelfAttnBlock(nn.Module):
         )
         #self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
         self.ln_mlp = Mistral3RMSNorm(config.decoder_embed_dim, config.norm_eps)
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize attention and feedforward components
+        self.attn.init_weights(0.02)  # Use standard init_std for attention
+        self.mlp.init_weights(0.02)   # Use standard init_std for feedforward
+        
+        # Initialize norm layers
+        for norm in (self.ln_attn, self.ln_mlp):
+            norm.reset_parameters()
 
     def forward(
         self,
@@ -626,6 +680,18 @@ class VisionEncoder(nn.Module):
         # Add projection to connect to the decoder
         self.multi_modal_projector = Mistral3MultiModalProjector(config)
 
+    def init_weights(self):
+        """
+        Initialize weights for the vision encoder components.
+        """
+        # Initialize pixtral vision model if it has init_weights
+        if hasattr(self.pixtral_vision, 'init_weights'):
+            self.pixtral_vision.init_weights()
+        
+        # Initialize multimodal projector if it has init_weights
+        if hasattr(self.multi_modal_projector, 'init_weights'):
+            self.multi_modal_projector.init_weights()
+
     def forward(self, pixel_values: torch.Tensor, image_sizes: torch.Tensor, output_hidden_states: Optional[bool] = None, return_dict: Optional[bool] = None) -> torch.Tensor:
         """
         Args:
@@ -665,33 +731,52 @@ class MultimodalDecoder(nn.Module):
         super().__init__()
 
         self.register_buffer(
-            "freqs_cis", self._precompute_freqs_cis(config), persistent=True
+            "freqs_cis", self._precompute_freqs_cis(config), persistent=False
         )
 
         self.layers = nn.ModuleDict()
         for idx in range(config.decoder_num_layers):
             # define a llama3-like decoder layer
             decoder_layer = DecoderTransformerSelfAttnBlock(config)
-            # cross attention layers, mixing text and vision,
-            # placed every `fusion_interval` layers
-            """
-            if idx % config.fusion_interval == 0:
-                cross_attn_layer = DecoderTransformerCrossAttnBlock(config)
-                fusion_layer = FusionLayer(
-                    layer=decoder_layer, fusion_layer=cross_attn_layer
-                )
-                self.layers[str(idx)] = fusion_layer
-            else:
-            """
             self.layers[str(idx)] = decoder_layer
 
         self.tok_embeddings = nn.Embedding(131072, config.decoder_embed_dim)
         #self.norm = build_norm(
         #    config.norm_type, dim=config.decoder_embed_dim, eps=config.norm_eps
-        self.norm=nn.LayerNorm(config.decoder_embed_dim, eps=config.norm_eps)
+        #self.norm=nn.LayerNorm(config.decoder_embed_dim, eps=config.norm_eps)
+        self.norm = nn.RMSNorm(config.decoder_embed_dim, eps=config.norm_eps)
         self.output = nn.Linear(
             config.decoder_embed_dim, 131072, bias=False
         )
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize token embeddings
+        if self.tok_embeddings is not None:
+            nn.init.normal_(self.tok_embeddings.weight)
+        
+        # Initialize all layers
+        for layer in self.layers.values():
+            if layer is not None:
+                layer.init_weights()
+        
+        # Initialize norm layer
+        if self.norm is not None:
+            self.norm.reset_parameters()
+        
+        # Initialize output layer with truncated normal
+        if self.output is not None:
+            final_out_std = self.output.in_features**-0.5
+            cutoff_factor = 3
+            nn.init.trunc_normal_(
+                self.output.weight,
+                mean=0.0,
+                std=final_out_std,
+                a=-cutoff_factor * final_out_std,
+                b=cutoff_factor * final_out_std,
+            )
 
     def _precompute_freqs_cis(self, config) -> torch.Tensor:
         return precompute_freqs_cis(
@@ -792,10 +877,29 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
         ``Transformer`` root module to avoid reinitializing tensors.
         """
 
+
+
         buffer_device = buffer_device or self.language_model.freqs_cis.device
         with torch.device(buffer_device):
             self.language_model._precompute_freqs_cis(self.config)
-    
+        
+        # Initialize language model components
+        if hasattr(self.language_model, 'init_weights'):
+            self.language_model.init_weights()
+        
+        ## Initialize vision tower if it exists
+        if hasattr(self, 'vision_tower') and self.vision_tower is not None:
+            if hasattr(self.vision_tower, 'init_weights'):
+                self.vision_tower.init_weights()
+        
+        ## Initialize multimodal projector if it exists
+        if hasattr(self, 'multi_modal_projector') and self.multi_modal_projector is not None:
+            if hasattr(self.multi_modal_projector, 'init_weights'):
+                self.multi_modal_projector.init_weights()
+        
+        print("MODEL WEIGHTS")
+        print(self.state_dict().keys())
+
 
     def get_image_features(
         self,
@@ -805,12 +909,6 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
         **kwargs,
     ):
         kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        #image_outputs = self.vision_tower(pixel_values.to(dtype=torch.float16), image_sizes=image_sizes, output_hidden_states=True)
-
-        # this is not memory efficient at all (output_hidden_states=True) will save all the hidden states.
-        #with open("my_file.txt", "w") as f:
-        #    #print(pixel_values, file=f)
-
         with torch.no_grad():
             image_outputs = self.vision_tower(pixel_values, image_sizes=image_sizes, output_hidden_states=False)
             # If we have one vision feature layer, return the corresponding hidden states,
@@ -826,6 +924,7 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
 
 
         
+    @torch.compiler.disable()
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -842,7 +941,9 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
     ):
 
 
+
         init_attention_mask(input_ids, eos_id=self.config.eos_id)
+
 
         if position_ids is not None:
             # for the case where we want to do sequence packing, we need to pass the nonstandard position_ids
@@ -856,7 +957,7 @@ class Mistral3ForConditionalGeneration(nn.Module, ModelProtocol):
                         tokens=input_ids,
                         encoder_mask=None,
                     )
-    
+                
         return logits
 
     def generate(

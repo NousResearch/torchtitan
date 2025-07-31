@@ -169,11 +169,13 @@ def convert_mistral3_weights(mistral_model, output_dir, max_seq_len: int):
         text_config.rope_theta,
     )
 
+    print(state_dict.keys())
+
     logger.info(f"Writing to DCP at '{output_dir}'")
     output_dir.mkdir(parents=True, exist_ok=True)
     storage_writer = DCP.filesystem.FileSystemWriter(output_dir, thread_count=8)
 
-    DCP.save({"model": state_dict}, storage_writer=storage_writer)
+    DCP.save(state_dict, storage_writer=storage_writer)
     tokenizer_dir = output_dir / "tokenizer"
     tokenizer_dir.mkdir(parents=True, exist_ok=True)
     tok.save_pretrained(tokenizer_dir)
