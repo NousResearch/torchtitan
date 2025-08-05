@@ -302,6 +302,7 @@ class MultimodalPackedDataset(Dataset):
                 for _ in range(self.group_size):
                     sample = next(ds_iterator)
                     seq_len = len(sample["inputs"])
+                    print(seq_len)
 
                     if seq_len > self.max_seq_len:
                         self.dropped += 1
@@ -403,7 +404,6 @@ class MultimodalPackedDataset(Dataset):
             tokens = np.array(sample["inputs"], dtype=np.int32)
             labels = np.array(sample["labels"], dtype=np.int32)
 
-            seq_len = len(tokens)
             if seq_len > self.max_seq_len and not self.split_across_pack:
                 # print(
                 #     f"Dropping sample that is too long ({seq_len} > {self.max_seq_len})"
@@ -563,7 +563,7 @@ def main(args):
         json.dump(ds, f)
     """
 
-    dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train']
+    dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(100))
 
     #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
 
@@ -577,17 +577,31 @@ def main(args):
 
     #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
     #tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-    tokenizer = MistralTokenizer.from_hf_hub(args.preprocessor)
+    #tokenizer = MistralTokenizer.from_hf_hub(args.preprocessor)
+    from transformers import AutoProcessor
+    tokenizer = AutoProcessor.from_pretrained(args.preprocessor, use_fast=True)
+ 
 
     def _tokenize_chat_multimodal(sample):
         inputs = []
         labels = []
         images = []
 
-        for conversation in sample["messages"]:
+        for conversation in [sample["messages"]]:
             for message in conversation:
 
                 keys = list(message.keys())
+
+                """
+                for content in message['content']:
+                    if content.get('base64'):
+                        content['type'] = 'image_url'
+                        content['image_url'] = content['base64']
+                        content['image_url'] = f"data:image/jpeg;base64,{content['base64']}" 
+                        #print(content['base64'][:100])
+                        # remove base64
+                        content.pop('base64')
+                """
 
                 if "from" in keys and "value" in keys:
                     # sharegpt format
@@ -608,20 +622,27 @@ def main(args):
 
             conversation = remove_none_recursively(conversation)
 
-            tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation))
-            tokens = tokenized.tokens #tokenizer.apply_chat_template(conversation, tokenize=True)
-            image = tokenized.images
-            label = []
+            #print(conversation)
+
+            #tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation))
+            tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True)
+            tokens = tokenized["input_ids"][0] #tokenizer.apply_chat_template(conversation, tokenize=True)
+            image = tokenized["pixel_values"][0]
 
             current_len = 0
+            label = []
             for i in range(len(conversation)):
                 if i + 1 == len(conversation):
-                    next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation)).tokens[current_len:]
+                    next_tokens = tokenizer.apply_chat_template(conversation, 
+                    tokenize=True, return_dict=True, return_tensors="pt")["input_ids"][0][current_len:]
                 else:
                     if "assistant" == conversation[i + 1]["role"]:
-                        next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation[: i + 1])).tokens[current_len:]
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
+                        add_generation_prompt=True, tokenize=True, return_dict=True)["input_ids"][0][current_len:]
                     else:
-                        next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation[: i + 1])).tokens[current_len:]
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
+                        tokenize=True, return_dict=True)["input_ids"][0][current_len:]
+                        #next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation[: i + 1])).tokens[current_len:]
 
                 if conversation[i]["role"] == "assistant":
                     label.extend(next_tokens)
@@ -634,11 +655,11 @@ def main(args):
             labels.append(label)
             images.append(image)
 
-        return {
-            "inputs": inputs,
-            "labels": labels,
-            "images": images,
-        }
+            return {
+                "inputs": tokens,
+                "labels": label,
+                "images": image,
+            }
 
     def _tokenize_mistral_format(sample):
         messages = sample["messages"]
@@ -652,9 +673,8 @@ def main(args):
 
     dataset = dataset.map(
         _tokenize_chat_multimodal,
-        batched=True,
-        batch_size=args.batch_size,
-        num_proc=args.num_proc,
+        #batched=True,
+        #batch_size=args.batch_size,
     )
 
     dataset = dataset.remove_columns(original_column_names)
@@ -670,7 +690,7 @@ def main(args):
 
         with multiprocessing.Pool(processes=num_shards) as pool:
             process_args = [
-                (shard, args, tokenizer.instruct_tokenizer.tokenizer.pad_id, index, num_shards)
+                (shard, args, tokenizer.tokenizer.pad_token_id, index, num_shards)
                 for index, shard in enumerate(shards)
             ]
 
