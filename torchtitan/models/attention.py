@@ -17,6 +17,7 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
+from torch.nn.utils.rnn import pad_sequence
 
 from torchtitan.tools.utils import has_cuda_capability
 
@@ -47,7 +48,7 @@ class FlexAttention(torch.nn.Module):
     # We registered flex_attention related attributes as class variables as we
     # need to amortize the cost of compilation.
     flex_attn: ClassVar[Callable] = torch.compile(
-        flex_attention, mode="max-autotune-no-cudagraphs"
+        flex_attention, mode="default"
     )
     compiled_create_block_mask: ClassVar[Callable] = torch.compile(create_block_mask)
     used_attn_mask_types: ClassVar[set[FLEX_ATTN_MASK_T]] = set()
@@ -77,10 +78,10 @@ class FlexAttention(torch.nn.Module):
         return (self.attn_mask_type, self.fixed_block_size)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: torch.Tensor | None = None,
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float | None = None
     ) -> torch.Tensor:
         block_mask = FlexAttention.block_masks[self.mask_key]
-        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask)
+        return FlexAttention.flex_attn(q, k, v, block_mask=block_mask, scale=scale)
 
     @staticmethod
     def _get_causal_mask_mod() -> _mask_mod_signature:
@@ -268,11 +269,11 @@ class ScaledDotProductAttention(torch.nn.Module):
             cls.backends.insert(0, SDPBackend.CUDNN_ATTENTION)
 
     def forward(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, attention_mask: torch.Tensor | None = None,
+        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float | None = None,
     ) -> torch.Tensor:
         assert self.backends, "SDPA Backends should not be empty."
         with sdpa_kernel(self.backends, set_priority=True):
-            return F.scaled_dot_product_attention(q, k, v, attn_mask=attention_mask, is_causal=attention_mask is None)
+            return F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=scale)
 
 
 def build_attention(
