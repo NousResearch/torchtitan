@@ -57,6 +57,7 @@ def download_hf_tokenizer_files(
         "tokenizer.json",
         "tokenizer_config.json",
         "tokenizer.model",
+        "tiktoken.model",
         "vocab.txt",
         "vocab.json",
         "merges.txt",

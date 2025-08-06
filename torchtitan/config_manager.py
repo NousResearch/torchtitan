@@ -250,6 +250,9 @@ class Training:
     compile: bool = False
     """Whether to compile the model"""
 
+    chunked_loss: bool = False
+    """Use chunked cross-entropy loss to save memory"""
+
     gc_freq: int = 50
     """Python garbage control scheduling interval, in steps"""
 

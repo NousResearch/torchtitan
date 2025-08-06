@@ -21,7 +21,7 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
     else:
         local_path = snapshot_download(
             repo_id=deepseek_model,
-            allow_patterns=["*.safetensors", "config.json", "tokenizer*"],
+            allow_patterns=["*.safetensors", "config.json", "tokenizer*", "*.py"],
         )
     tok = AutoTokenizer.from_pretrained(local_path, trust_remote_code=True)
     config = AutoConfig.from_pretrained(local_path, trust_remote_code=True)
@@ -136,7 +136,7 @@ def convert_deepseekv3_weights(deepseek_model, output_dir):
 
             bias_key = f"model.layers.{layer}.mlp.gate.e_score_correction_bias"
             if bias_key in hf_state_dict:
-                state_dict[f"layers.{layer}.moe.router.expert_bias"] = hf_state_dict[
+                state_dict[f"layers.{layer}.moe.expert_bias"] = hf_state_dict[
                     bias_key
                 ]
                 # Ephemeral for training, but torchtitan expects it

@@ -150,9 +150,9 @@ class ExpertParallel(ParallelStyle):
         # each expert gets locally is a multiple of ALIGN_SIZE_M.
 
         return routed_input, num_tokens_per_expert_group
+    
 
-    @staticmethod
-    def _partition_fn(name, mod, device_mesh):
+    def _partition_fn(self, name, mod, device_mesh):
         # shard on the expert dimension
         for name, param in mod.named_parameters(recurse=False):
             dist_param = nn.Parameter(distribute_tensor(param, device_mesh, [Shard(0)]))
@@ -172,7 +172,7 @@ class ExpertParallel(ParallelStyle):
         return distribute_module(
             module,
             device_mesh,
-            partition_fn=ExpertParallel._partition_fn,
+            partition_fn=self._partition_fn,
             input_fn=self._token_dispatch,
             output_fn=self._token_combine,
         )

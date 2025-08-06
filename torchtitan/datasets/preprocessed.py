@@ -14,6 +14,7 @@ from datasets.distributed import split_dataset_by_node
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.utils.data import IterableDataset
 
+
 from torchtitan.components.dataloader import ParallelAwareDataloader
 from torchtitan.components.tokenizer import Tokenizer
 from torchtitan.config_manager import JobConfig
@@ -68,7 +69,9 @@ class PreprocessedDataset(IterableDataset, Stateful):
                 keys = list(sample.keys())
 
                 inputs = torch.LongTensor(sample["inputs"])
-                labels = torch.LongTensor(sample["labels"] if "labels" in keys else sample["inputs"])
+                labels = torch.LongTensor(
+                    sample["labels"] if "labels" in keys else sample["inputs"]
+                )
 
                 labels = torch.roll(labels, shifts=-1, dims=0)
                 labels[-1] = -100
@@ -79,7 +82,9 @@ class PreprocessedDataset(IterableDataset, Stateful):
                 if "position_ids" in keys:
                     args["position_ids"] = torch.LongTensor(sample["position_ids"])
                 if "sequence_lengths" in keys:
-                    args["sequence_lengths"] = torch.LongTensor(sample["sequence_lengths"])
+                    args["sequence_lengths"] = torch.LongTensor(
+                        sample["sequence_lengths"]
+                    )
 
                 yield args, labels
 
@@ -134,7 +139,9 @@ def collate_fn(batch):
                 f"an input length of {input_len} and a label length of {label_len}."
             )
 
-    args = {"input": torch.stack([x["input"] for x in inputs])}
+    args = {
+        "input": torch.stack([x["input"] for x in inputs]),
+    }
 
     if "position_ids" in inputs[0]:
         args["position_ids"] = torch.stack([x["position_ids"] for x in inputs])
@@ -153,7 +160,7 @@ def build_preprocessed_dataloader(
     job_config: JobConfig,
     infinite: bool = True,
 ) -> ParallelAwareDataloader:
-    """Build a data loader for HuggingFace datasets."""
+    """Build a data loader for pre-processed datasets."""
     dataset_name = job_config.training.dataset
     dataset_path = job_config.training.dataset_path
     batch_size = job_config.training.local_batch_size

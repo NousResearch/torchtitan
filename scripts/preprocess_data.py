@@ -467,7 +467,7 @@ class PackedDataset(Dataset):
 
 def main(args):
     dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, trust_remote_code=True)
 
     def _tokenize(sample):
         # assumes "text" is the column
@@ -590,6 +590,7 @@ def main(args):
 
             # verify we can open and do any conversion needed
             dataset = load_dataset(args.save_to_disk, num_proc=args.num_proc)
+            print(f"Warning, data is sorted by packed sequence lengths, shuffle before using")
 
     else:
         if args.drop_larger_than:

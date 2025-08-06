@@ -72,6 +72,16 @@ def apply_tp_minus_sp_llama(model: nn.Module, tp_mesh: DeviceMesh):
         )
 
 
+def apply_fsdp_deepseek(model: nn.Module, dp_shard_mesh: DeviceMesh):
+    from torchtitan.experiments.llama4.infra.parallelize import apply_fsdp
+    apply_fsdp(
+        model,
+        dp_shard_mesh,
+        param_dtype=torch.bfloat16,
+        reduce_dtype=torch.float32,
+        pp_enabled=False,
+    )
+
 @record
 def test_generate(
     config_path: str,
@@ -122,21 +132,33 @@ def test_generate(
     # Init distributed env
     if world_size > 1:
         dist_utils.init_distributed(config)
-        parallel_dims = ParallelDims(
-            dp_replicate=1,
-            dp_shard=-1,
-            cp=1,
-            tp=world_size,
-            pp=1,
-            ep=1,
-            world_size=world_size,
-        )
-        world_mesh = parallel_dims.world_mesh
 
         # apply_tp (with Sequence Parallel) on unevenly sharded
         # sequences would require https://github.com/pytorch/torchtitan/pull/686
         if config.model.name == "llama3":
+            parallel_dims = ParallelDims(
+                dp_replicate=1,
+                dp_shard=-1,
+                cp=1,
+                tp=world_size,
+                pp=1,
+                ep=1,
+                world_size=world_size,
+            )
             apply_tp_minus_sp_llama(model, parallel_dims.world_mesh["tp"])
+            world_mesh = parallel_dims.world_mesh
+        elif config.model.name == "deepseek_v3":
+            parallel_dims = ParallelDims(
+                dp_replicate=1,
+                dp_shard=world_size,
+                cp=1,
+                tp=1,
+                pp=1,
+                ep=1,
+                world_size=world_size,
+            )
+            apply_fsdp_deepseek(model, parallel_dims.world_mesh["dp_shard"])
+            world_mesh = parallel_dims.world_mesh
         else:
             raise ValueError(
                 f"Unknown model type `${config.model.name}` to apply parallelism to"

@@ -18,7 +18,7 @@ from torch.distributed.tensor.parallel import (
 from torchtitan.config_manager import JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims
 from torchtitan.experiments.llama4.infra.expert_parallel import NoParallel
-from torchtitan.experiments.llama4.infra.parallelize import apply_fsdp, apply_moe_ep_tp
+from torchtitan.experiments.llama4.infra.parallelize import apply_fsdp, apply_moe_ep_tp, apply_compile
 from torchtitan.models.llama3.infra.parallelize import apply_ac, apply_ddp
 from torchtitan.tools.logging import logger
 
@@ -85,7 +85,8 @@ def parallelize_deepseekv3(
         apply_ac(model, job_config.activation_checkpoint)
 
     if job_config.training.compile:
-        raise NotImplementedError("torch.compile is not supported yet for deepseekv3")
+        apply_compile(model)
+        # raise NotImplementedError("torch.compile is not supported yet for deepseekv3")
 
     dp_mesh: DeviceMesh | None = None
     if parallel_dims.fsdp_enabled or parallel_dims.ep_enabled:
@@ -187,11 +188,26 @@ def apply_non_moe_tp(
             "attention": prepare_module_input(
                 input_layouts=(Shard(1), Replicate()),
                 desired_input_layouts=(Replicate(), Replicate()),
+                input_kwarg_layouts={
+                    "position_ids": Replicate(),
+                },
+                desired_input_kwarg_layouts={
+                    "position_ids": Replicate(),
+                },
             ),
-            # use_local_output=False make the output to be a DTensor instead of a plain Tensor
+            ## use_local_output=False make the output to be a DTensor instead of a plain Tensor
+            # NOTE: use_local_output=False make the output to be a DTensor instead of a plain Tensor
+            # so that the intermedidate results k is generated as a DTensor and its gradient is
+            # correctly handled by the autograd engine.
             "attention.wkv_a": NoParallel(use_local_output=False),
             "attention.wkv_b": colwise_parallel(use_local_output=False),
             "attention.kv_norm": NoParallel(use_local_output=False),
+            # NOTE: use_local_output=True so that the inputs to FlexAttention are plain Tensors
+            "attention.sdpa": prepare_module_input(
+                input_layouts=(Shard(1), Shard(1), Shard(1)),
+                desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
+                use_local_output=True,
+            ),
             "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
             "ffn_norm": SequenceParallel(),
         }

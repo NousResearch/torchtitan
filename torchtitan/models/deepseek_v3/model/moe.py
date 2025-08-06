@@ -228,6 +228,10 @@ class TokenChoiceTopKRouter(nn.Module):
                 scores, k=self.top_k, dim=1
             )
 
+        if self.use_sigmoid:
+            denominator = top_scores.sum(dim=-1, keepdim=True) + 1e-20
+            top_scores = top_scores / denominator
+
         # group tokens together by expert indices from 0 to num_experts and pass that to experts forward
         num_tokens_per_expert = torch.histc(
             selected_experts_indices.view(-1),
@@ -250,6 +254,93 @@ class TokenChoiceTopKRouter(nn.Module):
             top_scores * self.route_sclaing_factor
         )  # must multiply the scaling factor
         return top_scores, token_indices_experts_sorted, num_tokens_per_expert
+
+
+#    def forward(
+#        self, x: torch.Tensor, expert_bias: torch.Tensor | None = None
+#    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+#        """
+#        TODO: We haven't implement the group-based routing (node limit routing),
+#        and currently EP is not supporting node limit routing yet.
+#
+#        Args:
+#            x (torch.Tensor): Input tensor with shape ``(bs*slen, dim)``.
+#
+#        Returns:
+#            routed_input (torch.Tensor):
+#                Tokens grouped together by experts indices with shape ``(bs*slen*top_k,)``.
+#            token_indices (torch.Tensor):
+#                Token indices for routed_input with shape ``(bs*slen*top_k,)``.
+#            num_tokens_per_expert (torch.Tensor):
+#                Number of tokens assigned to each expert with shape ``(num_experts,)``.
+#        """
+#        # scores shape (bs*slen, num_experts)
+#        scores = self.gate(x)
+#
+#        # By default, sigmoid or softmax is performed in float32 to avoid loss explosion
+#        if self.use_sigmoid:
+#            scores = torch.sigmoid(scores.to(torch.float32))
+#        else:
+#            scores = F.softmax(scores.to(torch.float32), dim=1)
+#
+#        original_scores = scores
+#
+#        # Apply bias only for selection (not weights)
+#        scores_for_choice = scores
+#        if expert_bias is not None:
+#            scores_for_choice = scores + expert_bias.unsqueeze(0)
+#
+#        n = scores.size(0)  # bs*slen
+#
+#        # Group handling if n_group > 1
+#        if self.n_group > 1:
+#            scores_for_choice_view = scores_for_choice.view(n, self.n_group, -1)
+#            if expert_bias is not None:
+#                group_scores = scores_for_choice_view.topk(2, dim=-1)[0].sum(dim=-1)
+#            else:
+#                group_scores = scores_for_choice_view.max(dim=-1)[0]  # amax
+#            group_idx = torch.topk(group_scores, k=self.topk_group, dim=-1)[1]
+#            group_mask = torch.zeros(n, self.n_group, device=scores.device, dtype=torch.bool)
+#            group_mask.scatter_(1, group_idx, True)
+#            score_mask = group_mask.unsqueeze(-1).repeat(1, 1, self.num_experts // self.n_group).view(n, -1)
+#            tmp_scores = scores_for_choice.masked_fill(~score_mask, float("-inf"))
+#        else:
+#            tmp_scores = scores_for_choice
+#
+#        # Top-k selection on (potentially biased/masked) scores
+#        _, selected_experts_indices = torch.topk(tmp_scores, k=self.top_k, dim=-1)
+#
+#        # Weights from original (unbiased) scores
+#        top_scores = original_scores.gather(dim=1, index=selected_experts_indices)
+#
+#        # Normalize if enabled (e.g., for sigmoid)
+#        if self.top_k > 1 and self.norm_topk_prob:
+#            denominator = top_scores.sum(dim=-1, keepdim=True) + 1e-20
+#            top_scores = top_scores / denominator
+#
+#        # Apply scaling
+#        top_scores = top_scores * self.route_sclaing_factor
+#
+#        # Existing logic for histc, sorting, etc. (unchanged)
+#        num_tokens_per_expert = torch.histc(
+#            selected_experts_indices.view(-1),
+#            bins=self.num_experts,
+#            min=0,
+#            max=self.num_experts,
+#        )
+#
+#        # Reorder the token indices to match the order of the experts
+#        # token_indices_experts_sorted shape (bs*slen*top_k,)
+#        token_indices_experts_sorted = torch.argsort(
+#            selected_experts_indices.view(-1), stable=True
+#        )
+#
+#        # reorder the scores to match the order of the token indices
+#        top_scores = top_scores.view(-1)[token_indices_experts_sorted]
+#        token_indices_experts_sorted = token_indices_experts_sorted // self.top_k
+#
+#        return top_scores, token_indices_experts_sorted, num_tokens_per_expert
+
 
     def init_weights(self, init_std: float):
         nn.init.trunc_normal_(self.gate.weight, mean=0.0, std=init_std)

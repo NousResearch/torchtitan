@@ -195,7 +195,6 @@ class Attention(nn.Module):
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
         position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
     ):
         """
         Forward pass of the attention module.
@@ -229,7 +228,7 @@ class Attention(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
-        output = self.sdpa(xq, xk, xv, attention_mask=attention_mask)
+        output = self.sdpa(xq, xk, xv)
 
         output = output.transpose(
             1, 2
@@ -326,7 +325,6 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         freqs_cis: torch.Tensor,
         position_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
     ):
         """
         Perform a forward pass through the TransformerBlock.
@@ -339,7 +337,7 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        h = x + self.attention(self.attention_norm(x), freqs_cis, position_ids=position_ids, attention_mask=attention_mask)
+        h = x + self.attention(self.attention_norm(x), freqs_cis, position_ids=position_ids)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -446,7 +444,6 @@ class Transformer(nn.Module, ModelProtocol):
             tokens: torch.Tensor,
             input_batch: torch.Tensor | None = None,
             position_ids: torch.Tensor | None = None,
-            attention_mask: torch.Tensor | None = None,
             sequence_lengths: list[torch.Tensor] | None = None,
         ):
         """
@@ -477,7 +474,7 @@ class Transformer(nn.Module, ModelProtocol):
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
         for layer in self.layers.values():
-            h = layer(h, self.freqs_cis, position_ids=position_ids, attention_mask=attention_mask)
+            h = layer(h, self.freqs_cis, position_ids=position_ids)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h
