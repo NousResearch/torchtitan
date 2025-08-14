@@ -174,7 +174,7 @@ CONFIG_FILE="./torchtitan/models/qwen3/train_configs/qwen3_8b_finetuning.toml" .
 ## Training Mistral Small 3.1 with multimodal sample packing
 To preprocess and pack a multimodal chat dataset, run `scripts/preprocess_multimodal_data.py`:
 ```
-python3 scripts/preprocess_multimodal_data.py --dataset /home/shared/datasets/cambrian_sample.json --preprocessor mistralai/Mistral-Small-3.1-24B-Instruct-2503  --chat --pack-to-sequence-length 8000 --split "train" --save-to-disk ./multimodal_dataset
+python3 scripts/preprocess_multimodal_data.py --dataset /home/shared/datasets/cambrian_sample.json --preprocessor mistralai/Mistral-Small-3.1-24B-Instruct-2503  --chat --pack-to-sequence-length 8000 --split "train" --save-to-disk ./multimodal_dataset --limit 1000
 ```
 
 Mistral Small 3.1 can be trained using this dataset:
