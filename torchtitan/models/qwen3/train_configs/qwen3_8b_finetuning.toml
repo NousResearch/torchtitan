@@ -32,11 +32,14 @@ warmup_steps = 200  # lr scheduler warm up
 
 [training]
 local_batch_size = 1
-seq_len = 8192
+seq_len = 8000
 max_norm = 1.0  # grad norm clipping
 steps = 1000
 compile = false
-dataset = "c4"
+dataset = "hermes4"
+dataset_path = "./dataset"
+dataset_type = "preprocessed"
+
 
 [parallelism]
 data_parallel_replicate_degree = 1

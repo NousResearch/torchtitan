@@ -3,7 +3,7 @@
 
 [job]
 dump_folder = "./outputs"
-description = "Mistral 24B multimodal training"
+description = "Mistral 24B training"
 
 
 [profiling]
@@ -37,7 +37,7 @@ max_norm = 1.0  # grad norm clipping
 steps = 1000
 compile = false
 dataset = "hermes4"
-dataset_path = "/home/artem_nous/tt/torchtitan/scripts/dataset_multimodal"
+dataset_path = "./multimodal_dataset"
 dataset_type = "preprocessed_multimodal"
 
 [parallelism]
