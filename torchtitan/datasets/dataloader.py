@@ -5,10 +5,12 @@ from torchtitan.config_manager import JobConfig
 
 from .hf_datasets import build_hf_dataloader
 from .preprocessed import build_preprocessed_dataloader
+from .preprocessed import build_preprocessed_multimodal_dataloader
 
 DATALOADERS = {
     "huggingface": build_hf_dataloader,
     "preprocessed": build_preprocessed_dataloader,
+    "preprocessed_multimodal": build_preprocessed_multimodal_dataloader,
 }
 
 

@@ -3,7 +3,7 @@
 
 [job]
 dump_folder = "./outputs"
-description = "Mistral 24B training"
+description = "Mistral 24B multimodal training"
 
 
 [profiling]
@@ -20,8 +20,7 @@ save_tb_folder = "tb"
 [model]
 name = "mistral3"
 flavor = "24B"
-tokenizer_path = "/home/artem_nous/tt/torchtitan/assets/tokenizer/Mistral-Small-3.1-24B-Base-2503"
-# converters = ["float8"]
+tokenizer_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct/tokenizer"
 
 [optimizer]
 name = "AdamW"
@@ -50,7 +49,7 @@ context_parallel_degree = 1
 
 [checkpoint]
 enable_checkpoint = true
-initial_load_path = "/home/artem_nous/tt/torchtitan/mistral-small-base-dcp"
+initial_load_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct"
 folder = "checkpoint"
 interval = 500
 last_save_model_weights_only = false
