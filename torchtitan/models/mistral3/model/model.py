@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from transformers.image_utils import load_image
 
 from torchtitan.protocols.train_spec import ModelProtocol
 from torchtitan.models.attention import build_attention, init_attention_mask
@@ -127,6 +128,100 @@ def repeat_kv(x: torch.Tensor, num_rep: int) -> torch.Tensor:
         .expand(bsz, seq_len, num_kv_heads, num_rep, head_dim)
         .reshape(bsz, seq_len, num_kv_heads * num_rep, head_dim)
     )
+
+
+class Mistral3PatchMerger(nn.Module):
+    """
+    Learned merging of spatial_merge_size ** 2 patches
+    """
+
+    def __init__(self, config: VLMArgs):
+        super().__init__()
+        self.config = config
+
+        hidden_size = config.vision_embed_dim
+        self.spatial_merge_size = config.spatial_merge_size
+        self.patch_size = config.patch_size
+        self.merging_layer = nn.Linear(hidden_size * self.spatial_merge_size**2, hidden_size, bias=False)
+        
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize merging layer with truncated normal
+        nn.init.trunc_normal_(self.merging_layer.weight, mean=0.0, std=0.02)
+
+    def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor) -> torch.Tensor:
+        image_sizes = [
+            (image_size[0] // self.patch_size, image_size[1] // self.patch_size) for image_size in image_sizes
+        ]
+
+        tokens_per_image = [h * w for h, w in image_sizes]
+        d = image_features.shape[-1]
+
+        permuted_tensor = []
+        for image_index, image_tokens in enumerate(image_features.split(tokens_per_image)):
+            # Reshape image_tokens into a 2D grid
+            h, w = image_sizes[image_index]
+            image_grid = image_tokens.view(h, w, d).permute(2, 0, 1).unsqueeze(0)
+            grid = torch.nn.functional.unfold(
+                image_grid, kernel_size=self.spatial_merge_size, stride=self.spatial_merge_size
+            )
+            grid = grid.view(d * self.spatial_merge_size**2, -1).t()
+            permuted_tensor.append(grid)
+
+        image_features = torch.cat(permuted_tensor, dim=0)
+        image_features = self.merging_layer(image_features)
+
+        return image_features.unsqueeze(0)
+    
+
+
+class Mistral3MultiModalProjector(nn.Module):
+    def __init__(self, config: VLMArgs):
+        super().__init__()
+        self.norm = nn.RMSNorm(config.vision_embed_dim, eps=config.norm_eps)
+        self.patch_merger = Mistral3PatchMerger(config)
+        # We have hidden_size * the number of vision feature layers
+        num_feature_layers = 1 if isinstance(config.vision_feature_layer, int) else len(config.vision_feature_layer)
+        self.linear_1 = nn.Linear(
+            config.vision_embed_dim * num_feature_layers,
+            config.decoder_embed_dim,
+            bias=config.multimodal_projector_bias,
+        )
+        self.act = config.activation
+        self.linear_2 = nn.Linear(
+            config.decoder_embed_dim, config.decoder_embed_dim, bias=config.multimodal_projector_bias
+        )
+
+    def init_weights(self):
+        """
+        Initialize weights following the Llama3 pattern.
+        """
+        # Initialize norm layer
+        if hasattr(self.norm, 'reset_parameters'):
+            self.norm.reset_parameters()
+        
+        # Initialize patch merger
+        if hasattr(self.patch_merger, 'init_weights'):
+            self.patch_merger.init_weights()
+        
+        # Initialize linear layers with truncated normal
+        for linear in (self.linear_1, self.linear_2):
+            nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
+            if linear.bias is not None:
+                nn.init.zeros_(linear.bias)
+
+    def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor):
+        image_features = self.norm(image_features)
+
+        image_features = self.patch_merger(image_features, image_sizes)
+        hidden_states = self.linear_1(image_features)
+        hidden_states = self.act(hidden_states)
+        hidden_states = self.linear_2(hidden_states)
+        return hidden_states
+
 
 
 class Attention(nn.Module):
@@ -258,6 +353,8 @@ class TransformerBlock(nn.Module):
         #self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
         self.ln_mlp = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
 
+        self.image_token_id = config.image_token_id
+
     def init_weights(self):
         """
         Initialize weights following the Llama3 pattern.
@@ -292,73 +389,6 @@ class TransformerBlock(nn.Module):
         x = x + self.mlp(self.ln_mlp(x))
         return x
 
-
-class VisionEncoder(nn.Module):
-    """Vision encoder model using Pixtral Vision for Mistral3. This integrates the Pixtral vision encoder
-    with a projection to connect to the multimodal decoder.
-
-    Args:
-        config (VLMArgs): configs for the vision encoder.
-    """
-
-    def __init__(self, config: VLMArgs) -> None:
-        super().__init__()
-        
-        # Import Pixtral components here to avoid circular imports
-        from .modeling_pixtral import PixtralVisionModel, PixtralVisionConfig
-        
-        # Create a PixtralVisionConfig based on the ModelArgs 
-        pixtral_config = PixtralVisionConfig(
-            hidden_size=config.vision_embed_dim,
-            intermediate_size=4 * config.vision_embed_dim,  # Standard multiplier
-            num_hidden_layers=config.vision_num_layers,
-            num_attention_heads=config.vision_num_heads,
-            num_channels=config.in_channels,
-            image_size=config.image_size,
-            patch_size=config.patch_size,
-            hidden_act="gelu",  # Standard activation
-            attention_dropout=0.0,  # No dropout by default
-            rope_theta=config.rope_theta,
-            initializer_range=0.02  # Standard initialization
-        )
-        
-        # Initialize the Pixtral vision model
-        self.pixtral_vision = PixtralVisionModel(pixtral_config)
-        
-        # Add projection to connect to the decoder
-        #self.multi_modal_projector = Mistral3MultiModalProjector(config)
-
-    def init_weights(self):
-        """
-        Initialize weights for the vision encoder components.
-        """
-        # Initialize pixtral vision model if it has init_weights
-        if hasattr(self.pixtral_vision, 'init_weights'):
-            self.pixtral_vision.init_weights()
-        
-        # Initialize multimodal projector if it has init_weights
-        if hasattr(self.multi_modal_projector, 'init_weights'):
-            self.multi_modal_projector.init_weights()
-
-    def forward(self, pixel_values: torch.Tensor, image_sizes: torch.Tensor, output_hidden_states: Optional[bool] = None, return_dict: Optional[bool] = None) -> torch.Tensor:
-
-        # Pass through Pixtral vision model
-        vision_outputs = self.pixtral_vision(
-            pixel_values=pixel_values,
-            image_sizes=image_sizes,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict
-        )
-
-        return vision_outputs
-
-        
-        # Get the last hidden state
-        #image_features = vision_outputs.last_hidden_state
-        
-        # Project to decoder dimension
-        #return self.multi_modal_projector(image_features, image_sizes)
-
 class Transformer(nn.Module):
     """Decoder multimodal model for Mistral3.
 
@@ -387,6 +417,8 @@ class Transformer(nn.Module):
         self.output = nn.Linear(
             config.decoder_embed_dim, 131072, bias=False
         )
+
+        self.image_token_id = config.image_token_id
 
     def init_weights(self):
         """
@@ -425,6 +457,30 @@ class Transformer(nn.Module):
             config.max_seq_len,
             config.rope_theta,
         )
+    
+    def get_placeholder_mask(
+        self, input_ids: torch.LongTensor, inputs_embeds: torch.FloatTensor, image_features: torch.FloatTensor
+    ) -> torch.BoolTensor:
+        """
+        Obtains multimodal placeholdr mask from `input_ids` or `inputs_embeds`, and checks that the placeholder token count is
+        equal to the length of multimodal features. If the lengths are different, an error is raised.
+        """
+        if input_ids is None:
+            special_image_mask = inputs_embeds == self.get_input_embeddings()(
+                torch.tensor(self.image_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
+            special_image_mask = special_image_mask.all(-1)
+        else:
+            special_image_mask = input_ids == self.image_token_id
+
+        n_image_tokens = special_image_mask.sum()
+        special_image_mask = special_image_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
+        n_image_features = image_features.shape[0] * image_features.shape[1]
+        if inputs_embeds[special_image_mask].numel() != image_features.numel():
+            raise ValueError(
+                f"Image features and image tokens do not match: tokens: {n_image_tokens}, features {n_image_features}"
+            )
+        return special_image_mask
 
     def forward(
         self,
@@ -434,6 +490,7 @@ class Transformer(nn.Module):
         encoder_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        image_features: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
 
         # input tensor of shape [b, s]
@@ -444,6 +501,16 @@ class Transformer(nn.Module):
             h = self.tok_embeddings(tokens)
         else:
             h = inputs_embeds
+        
+        if image_features is not None:
+
+            image_features = image_features.unsqueeze(0)
+
+            special_image_mask = self.get_placeholder_mask(
+                input_ids=tokens, inputs_embeds=h, image_features=image_features
+            )
+
+            h= h.masked_scatter(special_image_mask, image_features)
 
         # Setup freqs_cis based on position_ids or sequence length
         if position_ids is not None:
@@ -491,6 +558,30 @@ class VLM(nn.Module, ModelProtocol):
 
         self.vision_model_initialized = False
 
+        from .modeling_pixtral import PixtralVisionModel, PixtralVisionConfig
+
+        # Create a PixtralVisionConfig based on the ModelArgs 
+        pixtral_config = PixtralVisionConfig(
+            hidden_size=config.vision_embed_dim,
+            intermediate_size=4 * config.vision_embed_dim,  # Standard multiplier
+            num_hidden_layers=config.vision_num_layers,
+            num_attention_heads=config.vision_num_heads,
+            num_channels=config.in_channels,
+            image_size=config.image_size,
+            patch_size=config.patch_size,
+            hidden_act="gelu",  # Standard activation
+            attention_dropout=0.0,  # No dropout by default
+            rope_theta=config.rope_theta,
+            initializer_range=0.02  # Standard initialization
+        )
+
+        self.vision_tower = PixtralVisionModel(pixtral_config)
+
+        # Add projection to connect to the decoder
+        self.multi_modal_projector = Mistral3MultiModalProjector(config)
+
+        from transformers import AutoProcessor
+        self.preprocessor = AutoProcessor.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", use_fast=True)
 
     def init_weights(
         self,
@@ -535,7 +626,7 @@ class VLM(nn.Module, ModelProtocol):
 
             image_features = self.multi_modal_projector(selected_image_feature.squeeze(0), image_sizes)
             return image_features
-
+    
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -543,24 +634,70 @@ class VLM(nn.Module, ModelProtocol):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         sequence_lengths: list[torch.Tensor] | None = None,
+        images: Optional[list] = None
     ):
+
+        image_features = None
+
+        if position_ids is not None:
+
+            all_image_features = []
+            for i, batch in enumerate(images):
+                image_features_batch = []
+                images = [load_image(im) if isinstance(im, str) else im for im in batch]
+
+                image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
+
+                image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.bfloat16), 2, image_inputs["image_sizes"])
+
+                # Collect image features from all images in the batch
+                all_image_features.append(image_encoder_outputs)
+
+            # Concatenate all image features along the sequence dimension (dim=1)
+            if all_image_features:
+                image_features = torch.cat(all_image_features, dim=1)  # Shape: (1, sum_of_image_patches_of_all_images)
+            else:
+                image_features = None
+
+                #special_image_mask = self.get_placeholder_mask(input_ids, inputs_embeds, image_features)
+
+                #input_ids[special_image_mask] = self.config.image_token_id
+
+                #exit(0)
+        else:
+            return NotImplementedError("Position IDs are required for multimodal input.")
+
 
         if self.config.use_flex_attn:
             init_attention_mask(input_ids, eos_id=self.config.eos_id, sequence_lengths=sequence_lengths)
 
         if position_ids is not None:
-            # for the case where we want to do sequence packing, we need to pass the nonstandard position_ids
-            logits = self.language_model(
+            if image_features is not None:
+                logits = self.language_model(
                         tokens=input_ids,
                         encoder_mask=None,
-                        position_ids=position_ids
+                        position_ids=position_ids, 
+                        image_features=image_features,
+                    )
+            else:
+                logits = self.language_model(
+                        tokens=input_ids,
+                        encoder_mask=None,
+                        position_ids=position_ids, 
                     )
         else:
-            logits = self.language_model(
+            if image_features is not None:
+                logits = self.language_model(
+                            tokens=input_ids,
+                            encoder_mask=None,
+                            image_features=image_features,
+                        )
+            else:
+                logits = self.language_model(
                         tokens=input_ids,
                         encoder_mask=None,
                     )
-                
+                    
         return logits
 
     @classmethod

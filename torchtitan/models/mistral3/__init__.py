@@ -4,8 +4,8 @@
 from torchtitan.datasets.hf_datasets import build_hf_dataloader
 from torchtitan.datasets.dataloader import build_dataloader
 
-from .model.configuration_pixtral import PixtralVisionConfig
-from .model.model import VLMArgs, VisionEncoder, VLM
+#from .model.configuration_pixtral import PixtralVisionConfig
+from .model.model import VLMArgs, VLM
 
 from .infra.parallelize import parallelize_mistral3
 from .infra.pipeline import pipeline_mistral3
@@ -27,7 +27,6 @@ __all__ = [
     "parallelize_mistral3",
     "pipeline_mistral3",
     "VLMArgs",
-    "VisionEncoder",
     "VLM",
     "mistral3_configs",
 ]

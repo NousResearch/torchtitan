@@ -65,11 +65,13 @@ def parallelize_mistral3(
 
 
     if parallel_dims.tp_enabled:
+        """
         if (
             job_config.experimental.enable_async_tensor_parallel
             and not job_config.training.compile
         ):
             raise RuntimeError("Async TP requires --training.compile")
+        """
         enable_float8_linear = "float8" in job_config.model.converters
         float8_is_rowwise = job_config.float8.recipe_name in (
             "rowwise",
@@ -84,9 +86,10 @@ def parallelize_mistral3(
         apply_tp(
             model,
             world_mesh["tp"],
-            loss_parallel=parallel_dims.loss_parallel_enabled,
-            enable_float8=enable_float8_tensorwise_tp,
-            enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
+            loss_parallel=False,
+            enable_float8=False,
+            enable_async_tp=False,
+            #enable_async_tp=job_config.experimental.enable_async_tensor_parallel,
         )
 
     if job_config.activation_checkpoint.mode != "none":

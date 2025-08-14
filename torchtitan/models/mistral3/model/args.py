@@ -68,6 +68,7 @@ class VLMArgs(BaseModelArgs):
     use_flex_attn: bool = False
     attn_mask_type: str = "block_causal_by_sequence_lengths"
     eos_id: int = 0
+    image_token_id: int = 10
 
     def update_from_config(
         self, job_config: JobConfig, tokenizer: BaseTokenizer

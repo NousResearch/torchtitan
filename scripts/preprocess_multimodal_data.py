@@ -37,6 +37,10 @@ import pyarrow as pa
 import pyarrow.dataset as pa_ds
 import random
 import json
+import base64
+import uuid
+from PIL import Image
+import io
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
@@ -56,12 +60,15 @@ from huggingface_hub import hf_hub_download
 from transformers import Mistral3ForConditionalGeneration
 
 
+LOCAL_IMAGE_DIR = "/home/artem_nous/tt/torchtitan/scripts/images"
+
 SCHEMA = pa.schema(
     [
         pa.field("inputs", pa.large_list(pa.int32())),
         pa.field("labels", pa.large_list(pa.int32())),
         pa.field("position_ids", pa.large_list(pa.int32())),
         pa.field("sequence_lengths", pa.large_list(pa.int64())),
+        pa.field("images", pa.large_list(pa.string())),
     ]
 )
 
@@ -97,16 +104,9 @@ DATASET_INFO = r"""{
       },
       "_type": "LargeList"
     }
-    "pixel_values": {
+    "images": {
       "feature": {
-        "dtype": "bfloat16",
-        "_type": "Value"
-      },
-      "_type": "LargeList"
-    }
-    "image_sizes": {
-      "feature": {
-        "dtype": "bfloat16",
+        "dtype": "str",
         "_type": "Value"
       },
       "_type": "LargeList"
@@ -126,7 +126,6 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
         show_pbar=rank == 0,
     )
 
-    print(packer.packs)
 
     if args.save_to_disk:
         # create a schema that uses int64 for list sizes
@@ -137,8 +136,7 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
                 "labels": packer.packs[0]["labels"],
                 "position_ids": packer.packs[0]["position_ids"],
                 "sequence_lengths": packer.packs[0]["sequence_lengths"],
-                "pixel_values": packer.packs[0]["pixel_values"],
-                "image_sizes": packer.packs[0]["image_sizes"],
+                "images": packer.packs[0]["images"],
             }
             if len(packer.packs) > 0
             else None
@@ -149,8 +147,7 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
             "labels": [pack["labels"] for pack in packer.packs],
             "position_ids": [pack["position_ids"] for pack in packer.packs],
             "sequence_lengths": [pack["sequence_lengths"] for pack in packer.packs],
-            "pixel_values": [pack["pixel_values"] for pack in packer.packs],
-            "image_sizes": [pack["image_sizes"] for pack in packer.packs],
+            "images": [pack["images"] for pack in packer.packs],
         }
         pa_table = pa.Table.from_pydict(oriented_data, schema=SCHEMA)
         del oriented_data
@@ -277,8 +274,7 @@ class MultimodalPackedDataset(Dataset):
             "labels": np.empty(0, dtype=np.int32),
             "position_ids": np.empty(0, dtype=np.int32),
             "sequence_lengths": [],
-            "pixel_values": [],
-            "image_sizes": [],
+            "images": [],
         }
 
     def _pack_ffd(self) -> None:
@@ -302,7 +298,7 @@ class MultimodalPackedDataset(Dataset):
                 for _ in range(self.group_size):
                     sample = next(ds_iterator)
                     seq_len = len(sample["inputs"])
-                    print(seq_len)
+
 
                     if seq_len > self.max_seq_len:
                         self.dropped += 1
@@ -315,6 +311,7 @@ class MultimodalPackedDataset(Dataset):
             if not group:
                 break
 
+                
             # 2. Sort the group by length in descending order (the "Decreasing" part of FFD).
             group.sort(key=lambda x: x["seq_len"], reverse=True)
 
@@ -341,6 +338,7 @@ class MultimodalPackedDataset(Dataset):
                         }
                     )
 
+
             # 4. Convert the completed bins from this group into final, padded packs.
             for bin_info in bins:
                 if self._should_stop_packing():
@@ -353,8 +351,6 @@ class MultimodalPackedDataset(Dataset):
                     images = sample["images"]
                     seq_len = len(tokens)
 
-                    pixel_values = torch.tensor(images).to(dtype=torch.bfloat16)
-                    image_sizes = torch.tensor([[pixel_values.shape[-2], pixel_values.shape[-1]]] * len(images))
 
                     current_pack["inputs"] = np.concatenate(
                         (current_pack["inputs"], tokens)
@@ -369,10 +365,11 @@ class MultimodalPackedDataset(Dataset):
                         )
                     )
                     current_pack["sequence_lengths"].append(seq_len)
-                    current_pack["pixel_values"].extend(pixel_values)
-                    current_pack["image_sizes"].extend(image_sizes)
+                    current_pack["images"].append(images)
+
 
                 self._add_pack(current_pack)
+
 
             if pbar:
                 pbar.update(len(group))
@@ -525,8 +522,7 @@ class MultimodalPackedDataset(Dataset):
             "labels": padded_labels,
             "position_ids": padded_position_ids,
             "sequence_lengths": padded_seq_lens,
-            "pixel_values": pack["pixel_values"],
-            "image_sizes": pack["image_sizes"],
+            "images": pack["images"],
         }
 
     def __len__(self) -> int:
@@ -539,33 +535,8 @@ class MultimodalPackedDataset(Dataset):
 def main(args):
 
     from datasets import load_dataset
-    """
-
-    SYSTEM_PROMPT = "You are a helpful assistant."
-    image_url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"
-
-    ds = [{"messages": [
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": "What action do you think I should take in this situation? List all the possible actions and explain why you think they are good or bad.",
-            },
-            {"type": "image_url", "image_url": {"url": image_url}},
-        ],
-    },
-]}]
-
-    ds = ds * 10 
-
-    with open('dataset.json', 'w') as f:
-        json.dump(ds, f)
-    """
 
     dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(100))
-
-    #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
 
     def remove_none_recursively(obj):
         if isinstance(obj, dict):
@@ -587,21 +558,39 @@ def main(args):
         labels = []
         images = []
 
-        for conversation in [sample["messages"]]:
+        for conversation in sample["messages"]:
+
+            image = None
+            conversation = remove_none_recursively(conversation)
+
             for message in conversation:
 
                 keys = list(message.keys())
 
-                """
-                for content in message['content']:
-                    if content.get('base64'):
-                        content['type'] = 'image_url'
-                        content['image_url'] = content['base64']
-                        content['image_url'] = f"data:image/jpeg;base64,{content['base64']}" 
-                        #print(content['base64'][:100])
-                        # remove base64
-                        content.pop('base64')
-                """
+                for item in message['content']:
+                    if 'base64' in item.keys():
+                        # save image in local folder as PIL image with uuid 
+                        # Decode base64 image data
+                        image_data = base64.b64decode(item['base64'])
+                        image = Image.open(io.BytesIO(image_data))
+                        
+                        # Generate UUID4 filename
+                        image_filename = f"{uuid.uuid4()}.jpg"
+                        image_path = os.path.join(LOCAL_IMAGE_DIR, image_filename)
+                        
+                        # Ensure directory exists
+                        os.makedirs(LOCAL_IMAGE_DIR, exist_ok=True)
+                        
+                        # Save image as JPG
+                        image.save(image_path, 'JPEG')
+                        
+                        # remove base64 key, set type image
+                        item.pop('base64')
+                        item['type'] = 'image'
+                        item['path'] = image_path
+
+                        image = image_path
+
 
                 if "from" in keys and "value" in keys:
                     # sharegpt format
@@ -620,14 +609,10 @@ def main(args):
                     raise RuntimeError(f"Unknown chat format, keys are {keys}")
                 
 
-            conversation = remove_none_recursively(conversation)
+            tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
 
-            #print(conversation)
-
-            #tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation))
-            tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True)
             tokens = tokenized["input_ids"][0] #tokenizer.apply_chat_template(conversation, tokenize=True)
-            image = tokenized["pixel_values"][0]
+
 
             current_len = 0
             label = []
@@ -655,11 +640,12 @@ def main(args):
             labels.append(label)
             images.append(image)
 
-            return {
-                "inputs": tokens,
-                "labels": label,
-                "images": image,
-            }
+
+        return {
+            "inputs": inputs,
+            "labels": labels,
+            "images": images,
+        }
 
     def _tokenize_mistral_format(sample):
         messages = sample["messages"]
@@ -673,16 +659,17 @@ def main(args):
 
     dataset = dataset.map(
         _tokenize_chat_multimodal,
-        #batched=True,
+        batched=True,
         #batch_size=args.batch_size,
     )
 
     dataset = dataset.remove_columns(original_column_names)
+    #print(dataset[0]['images'])
 
     efficiency = 1.0
     dropped = 0
     if args.pack_to_sequence_length:
-        num_shards = 1 # args.num_proc
+        num_shards = 32 # args.num_proc
         shards = [
             dataset.shard(num_shards=num_shards, index=i) for i in range(num_shards)
         ]

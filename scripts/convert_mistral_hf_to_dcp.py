@@ -150,14 +150,16 @@ def convert_mistral3_weights(mistral_model, output_dir, max_seq_len: int):
         # Copy over vision tower weights, restructuring to put them under model.vision_encoder.pixtral_vision
         vision_keys = [k for k in hf_state_dict.keys() if k.startswith("vision_tower.")]
         for key in vision_keys:
-            # Replace vision_tower with vision_encoder.pixtral_vision in the key path
-            new_key = key.replace("vision_tower", "vision_encoder.pixtral_vision")
-            state_dict[new_key] = hf_state_dict[key]
+            state_dict[key] = hf_state_dict[key]
+        #    # Replace vision_tower with vision_encoder.pixtral_vision in the key path
+        #    new_key = key.replace("vision_tower", "vision_encoder.pixtral_vision")
+        #    state_dict[new_key] = hf_state_dict[key]
+        #state_dict['']
     
     # Multi-modal projector
     mm_keys = [k for k in hf_state_dict.keys() if k.startswith("multi_modal_projector.")]
     for key in mm_keys:
-        state_dict["vision_encoder." + key] = hf_state_dict[key]
+        state_dict[ key] = hf_state_dict[key]
 
     # TODO figure out how to not hardcode
     dims_per_head = 128
