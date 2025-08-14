@@ -37,10 +37,6 @@ import pyarrow as pa
 import pyarrow.dataset as pa_ds
 import random
 import json
-import base64
-import uuid
-from PIL import Image
-import io
 from mistral_common.protocol.instruct.request import ChatCompletionRequest
 from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
@@ -60,15 +56,12 @@ from huggingface_hub import hf_hub_download
 from transformers import Mistral3ForConditionalGeneration
 
 
-LOCAL_IMAGE_DIR = "./images"
-
 SCHEMA = pa.schema(
     [
         pa.field("inputs", pa.large_list(pa.int32())),
         pa.field("labels", pa.large_list(pa.int32())),
         pa.field("position_ids", pa.large_list(pa.int32())),
         pa.field("sequence_lengths", pa.large_list(pa.int64())),
-        pa.field("images", pa.large_list(pa.string())),
     ]
 )
 
@@ -104,9 +97,16 @@ DATASET_INFO = r"""{
       },
       "_type": "LargeList"
     }
-    "images": {
+    "pixel_values": {
       "feature": {
-        "dtype": "str",
+        "dtype": "bfloat16",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    }
+    "image_sizes": {
+      "feature": {
+        "dtype": "bfloat16",
         "_type": "Value"
       },
       "_type": "LargeList"
@@ -136,7 +136,8 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
                 "labels": packer.packs[0]["labels"],
                 "position_ids": packer.packs[0]["position_ids"],
                 "sequence_lengths": packer.packs[0]["sequence_lengths"],
-                "images": packer.packs[0]["images"],
+                "pixel_values": packer.packs[0]["pixel_values"],
+                "image_sizes": packer.packs[0]["image_sizes"],
             }
             if len(packer.packs) > 0
             else None
@@ -147,7 +148,8 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
             "labels": [pack["labels"] for pack in packer.packs],
             "position_ids": [pack["position_ids"] for pack in packer.packs],
             "sequence_lengths": [pack["sequence_lengths"] for pack in packer.packs],
-            "images": [pack["images"] for pack in packer.packs],
+            "pixel_values": [pack["pixel_values"] for pack in packer.packs],
+            "image_sizes": [pack["image_sizes"] for pack in packer.packs],
         }
         pa_table = pa.Table.from_pydict(oriented_data, schema=SCHEMA)
         del oriented_data
@@ -274,7 +276,8 @@ class MultimodalPackedDataset(Dataset):
             "labels": np.empty(0, dtype=np.int32),
             "position_ids": np.empty(0, dtype=np.int32),
             "sequence_lengths": [],
-            "images": [],
+            "pixel_values": [],
+            "image_sizes": [],
         }
 
     def _pack_ffd(self) -> None:
@@ -312,8 +315,11 @@ class MultimodalPackedDataset(Dataset):
                 break
 
                 
+            print("done")
+
             # 2. Sort the group by length in descending order (the "Decreasing" part of FFD).
             group.sort(key=lambda x: x["seq_len"], reverse=True)
+            print("sorted")
 
             # 3. Pack this group using the "First-Fit" heuristic.
             # Each bin holds the samples it contains and its remaining space.
@@ -338,6 +344,7 @@ class MultimodalPackedDataset(Dataset):
                         }
                     )
 
+            print("bins")
 
             # 4. Convert the completed bins from this group into final, padded packs.
             for bin_info in bins:
@@ -350,6 +357,13 @@ class MultimodalPackedDataset(Dataset):
                     labels = np.array(sample["labels"], dtype=np.int32)
                     images = sample["images"]
                     seq_len = len(tokens)
+
+
+
+                    pixel_values = torch.tensor(images).to(dtype=torch.bfloat16)
+
+
+                    image_sizes = torch.tensor([[pixel_values.shape[-2], pixel_values.shape[-1]]] * len(images))
 
 
                     current_pack["inputs"] = np.concatenate(
@@ -365,11 +379,12 @@ class MultimodalPackedDataset(Dataset):
                         )
                     )
                     current_pack["sequence_lengths"].append(seq_len)
-                    current_pack["images"].append(images)
-
+                    current_pack["pixel_values"].extend(pixel_values)
+                    current_pack["image_sizes"].extend(image_sizes)
 
                 self._add_pack(current_pack)
 
+            print("done")
 
             if pbar:
                 pbar.update(len(group))
@@ -522,7 +537,8 @@ class MultimodalPackedDataset(Dataset):
             "labels": padded_labels,
             "position_ids": padded_position_ids,
             "sequence_lengths": padded_seq_lens,
-            "images": pack["images"],
+            "pixel_values": pack["pixel_values"],
+            "image_sizes": pack["image_sizes"],
         }
 
     def __len__(self) -> int:
@@ -535,16 +551,33 @@ class MultimodalPackedDataset(Dataset):
 def main(args):
 
     from datasets import load_dataset
+    """
 
-    #dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(100))
+    SYSTEM_PROMPT = "You are a helpful assistant."
+    image_url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"
 
-    if 'json' in args.dataset:
-        dataset = load_dataset('json', data_files=args.dataset)['train']
-        if args.limit is not None:
-            dataset = dataset.select(range(args.limit))
-    else:
-        dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
+    ds = [{"messages": [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "What action do you think I should take in this situation? List all the possible actions and explain why you think they are good or bad.",
+            },
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ],
+    },
+]}]
 
+    ds = ds * 10 
+
+    with open('dataset.json', 'w') as f:
+        json.dump(ds, f)
+    """
+
+    dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(10))
+
+    #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
 
     def remove_none_recursively(obj):
         if isinstance(obj, dict):
@@ -567,38 +600,20 @@ def main(args):
         images = []
 
         for conversation in sample["messages"]:
-
-            image = None
-            conversation = remove_none_recursively(conversation)
-
             for message in conversation:
 
                 keys = list(message.keys())
 
-                for item in message['content']:
-                    if 'base64' in item.keys():
-                        # save image in local folder as PIL image with uuid 
-                        # Decode base64 image data
-                        image_data = base64.b64decode(item['base64'])
-                        image = Image.open(io.BytesIO(image_data))
-                        
-                        # Generate UUID4 filename
-                        image_filename = f"{uuid.uuid4()}.jpg"
-                        image_path = os.path.join(LOCAL_IMAGE_DIR, image_filename)
-                        
-                        # Ensure directory exists
-                        os.makedirs(LOCAL_IMAGE_DIR, exist_ok=True)
-                        
-                        # Save image as JPG
-                        image.save(image_path, 'JPEG')
-                        
-                        # remove base64 key, set type image
-                        item.pop('base64')
-                        item['type'] = 'image'
-                        item['path'] = image_path
-
-                        image = image_path
-
+                """
+                for content in message['content']:
+                    if content.get('base64'):
+                        content['type'] = 'image_url'
+                        content['image_url'] = content['base64']
+                        content['image_url'] = f"data:image/jpeg;base64,{content['base64']}" 
+                        #print(content['base64'][:100])
+                        # remove base64
+                        content.pop('base64')
+                """
 
                 if "from" in keys and "value" in keys:
                     # sharegpt format
@@ -617,10 +632,14 @@ def main(args):
                     raise RuntimeError(f"Unknown chat format, keys are {keys}")
                 
 
+            conversation = remove_none_recursively(conversation)
+
+            #print(conversation)
+
+            #tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation))
             tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
-
             tokens = tokenized["input_ids"][0] #tokenizer.apply_chat_template(conversation, tokenize=True)
-
+            image = tokenized["pixel_values"]
 
             current_len = 0
             label = []
@@ -648,7 +667,6 @@ def main(args):
             labels.append(label)
             images.append(image)
 
-
         return {
             "inputs": inputs,
             "labels": labels,
@@ -672,12 +690,12 @@ def main(args):
     )
 
     dataset = dataset.remove_columns(original_column_names)
-    #print(dataset[0]['images'])
+    print(dataset[0]['images'])
 
     efficiency = 1.0
     dropped = 0
     if args.pack_to_sequence_length:
-        num_shards = 32 # args.num_proc
+        num_shards = 1 # args.num_proc
         shards = [
             dataset.shard(num_shards=num_shards, index=i) for i in range(num_shards)
         ]
@@ -777,7 +795,6 @@ if __name__ == "__main__":
     parser.add_argument("--drop-larger-than", type=int)
     parser.add_argument("--save-to-disk", type=str)
     parser.add_argument("--show-example", action="store_true")
-    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     main(args)
