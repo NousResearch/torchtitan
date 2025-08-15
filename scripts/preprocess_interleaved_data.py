@@ -1,16 +1,7 @@
 """
 
-Preprocessing script for interleaved data that contains both text-only and multimodal examples.
-This script can process datasets that have examples like:
-
-Text-only examples:
-[
-  {
-    "text": "Some text content here..."
-  }
-]
-
-Multimodal examples:
+post of data processing script for multimodal data 
+that looks like this:
 [
   {
     "messages": [
@@ -58,7 +49,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from datasets import load_dataset, Dataset as DatasetsDataset
-from transformers import AutoTokenizer, AutoProcessor
+from transformers import AutoTokenizer
 
 from datetime import datetime, timedelta
 import torch
@@ -112,7 +103,7 @@ DATASET_INFO = r"""{
         "_type": "Value"
       },
       "_type": "LargeList"
-    },
+    }
     "images": {
       "feature": {
         "dtype": "str",
@@ -127,13 +118,14 @@ DATASET_INFO = r"""{
 
 
 def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
-    packer = InterleavedPackedDataset(
+    packer = MultimodalPackedDataset(
         shard,
         max_seq_len=args.pack_to_sequence_length,
         padding_idx=tokenizer_pad_id,
         split_across_pack=not args.chat,
         show_pbar=rank == 0,
     )
+
 
     if args.save_to_disk:
         # create a schema that uses int64 for list sizes
@@ -181,7 +173,7 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
 
 
 # https://github.com/pytorch/torchtune/blob/9d91fe39f08661952da4180b9e7fb2eba5a7a5e7/torchtune/datasets/_packed.py
-class InterleavedPackedDataset(Dataset):
+class MultimodalPackedDataset(Dataset):
     """
     Performs greedy sample packing on a provided dataset. This is done as a single
     preprocessing step before training begins. Shuffling is done outside of this
@@ -276,6 +268,7 @@ class InterleavedPackedDataset(Dataset):
             self._pack_ffd()
 
     def _get_empty_pack(self):
+
         return {
             "inputs": np.empty(0, dtype=np.int32),
             "labels": np.empty(0, dtype=np.int32),
@@ -306,6 +299,7 @@ class InterleavedPackedDataset(Dataset):
                     sample = next(ds_iterator)
                     seq_len = len(sample["inputs"])
 
+
                     if seq_len > self.max_seq_len:
                         self.dropped += 1
                         continue
@@ -317,6 +311,7 @@ class InterleavedPackedDataset(Dataset):
             if not group:
                 break
 
+                
             # 2. Sort the group by length in descending order (the "Decreasing" part of FFD).
             group.sort(key=lambda x: x["seq_len"], reverse=True)
 
@@ -343,6 +338,7 @@ class InterleavedPackedDataset(Dataset):
                         }
                     )
 
+
             # 4. Convert the completed bins from this group into final, padded packs.
             for bin_info in bins:
                 if self._should_stop_packing():
@@ -352,8 +348,9 @@ class InterleavedPackedDataset(Dataset):
                 for sample in bin_info["samples"]:
                     tokens = np.array(sample["inputs"], dtype=np.int32)
                     labels = np.array(sample["labels"], dtype=np.int32)
-                    images = sample.get("images", [])
+                    images = sample["images"]
                     seq_len = len(tokens)
+
 
                     current_pack["inputs"] = np.concatenate(
                         (current_pack["inputs"], tokens)
@@ -370,7 +367,9 @@ class InterleavedPackedDataset(Dataset):
                     current_pack["sequence_lengths"].append(seq_len)
                     current_pack["images"].append(images)
 
+
                 self._add_pack(current_pack)
+
 
             if pbar:
                 pbar.update(len(group))
@@ -401,9 +400,7 @@ class InterleavedPackedDataset(Dataset):
         for sample in self.ds:
             tokens = np.array(sample["inputs"], dtype=np.int32)
             labels = np.array(sample["labels"], dtype=np.int32)
-            images = sample.get("images", [])
 
-            seq_len = len(tokens)
             if seq_len > self.max_seq_len and not self.split_across_pack:
                 # print(
                 #     f"Dropping sample that is too long ({seq_len} > {self.max_seq_len})"
@@ -420,7 +417,6 @@ class InterleavedPackedDataset(Dataset):
             )
 
             current_pack["sequence_lengths"] += [seq_len]
-            current_pack["images"].append(images)
 
             while (
                 len(current_pack["inputs"]) > self.max_seq_len
@@ -468,7 +464,6 @@ class InterleavedPackedDataset(Dataset):
             "labels": current_pack["labels"][:boundary],
             "position_ids": current_pack["position_ids"][:boundary],
             "sequence_lengths": current_pack["sequence_lengths"][:-1] + seq_len_padding,
-            "images": current_pack["images"][:-1],
         }
 
         self._add_pack(pack)
@@ -486,7 +481,6 @@ class InterleavedPackedDataset(Dataset):
             "labels": current_pack["labels"][boundary:],
             "position_ids": current_pack["position_ids"][boundary:],
             "sequence_lengths": [next_seq_len],
-            "images": [current_pack["images"][-1]] if current_pack["images"] else [],
         }
 
     def _add_pack(self, pack) -> None:
@@ -539,7 +533,10 @@ class InterleavedPackedDataset(Dataset):
 
 
 def main(args):
+
     from datasets import load_dataset
+
+    #dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(100))
 
     if 'json' in args.dataset:
         dataset = load_dataset('json', data_files=args.dataset)['train']
@@ -547,6 +544,7 @@ def main(args):
             dataset = dataset.select(range(args.limit))
     else:
         dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
+
 
     def remove_none_recursively(obj):
         if isinstance(obj, dict):
@@ -556,38 +554,22 @@ def main(args):
         else:
             return obj
 
-    # Initialize both tokenizer and processor
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
-    processor = AutoProcessor.from_pretrained(args.preprocessor, use_fast=True)
-
-    def _detect_sample_type(sample):
-        """Detect whether a sample is text-only or multimodal based on its structure."""
-        if "text" in sample:
-            return "text_only"
-        elif "messages" in sample:
-            return "multimodal"
-        else:
-            # Default to text-only if we can't determine
-            return "text_only"
-
-    def _tokenize_text_only(sample):
-        """Tokenize text-only samples."""
-        inputs = tokenizer.batch_encode_plus(sample["text"]).input_ids
-        for x in inputs:
-            x.append(tokenizer.eos_token_id)
-        return {"inputs": inputs, "labels": inputs, "images": []}
+    from transformers import AutoProcessor
+    tokenizer = AutoProcessor.from_pretrained(args.preprocessor, use_fast=True)
+ 
 
     def _tokenize_chat_multimodal(sample):
-        """Tokenize multimodal chat samples."""
         inputs = []
         labels = []
         images = []
 
         for conversation in sample["messages"]:
+
             image = None
             conversation = remove_none_recursively(conversation)
 
             for message in conversation:
+
                 keys = list(message.keys())
 
                 for item in message['content']:
@@ -612,7 +594,9 @@ def main(args):
                         item['type'] = 'image'
                         item['path'] = image_path
 
-                        image = image_path
+                        # NOTE: possible to have multiple images in one message
+                        images.append(image_path)
+
 
                 if "from" in keys and "value" in keys:
                     # sharegpt format
@@ -629,24 +613,28 @@ def main(args):
                     pass
                 else:
                     raise RuntimeError(f"Unknown chat format, keys are {keys}")
+                
 
-            tokenized = processor.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
+            tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
 
-            tokens = tokenized["input_ids"][0]
+            tokens = tokenized["input_ids"][0] #tokenizer.apply_chat_template(conversation, tokenize=True)
+
+            # NOTE: if image is None, we keep it as None
 
             current_len = 0
             label = []
             for i in range(len(conversation)):
                 if i + 1 == len(conversation):
-                    next_tokens = processor.apply_chat_template(conversation, 
+                    next_tokens = tokenizer.apply_chat_template(conversation, 
                     tokenize=True, return_dict=True, return_tensors="pt")["input_ids"][0][current_len:]
                 else:
                     if "assistant" == conversation[i + 1]["role"]:
-                        next_tokens = processor.apply_chat_template(conversation[: i + 1], 
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
                         add_generation_prompt=True, tokenize=True, return_dict=True)["input_ids"][0][current_len:]
                     else:
-                        next_tokens = processor.apply_chat_template(conversation[: i + 1], 
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
                         tokenize=True, return_dict=True)["input_ids"][0][current_len:]
+                        #next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation[: i + 1])).tokens[current_len:]
 
                 if conversation[i]["role"] == "assistant":
                     label.extend(next_tokens)
@@ -657,7 +645,7 @@ def main(args):
 
             inputs.append(tokens)
             labels.append(label)
-            images.append(image)
+
 
         return {
             "inputs": inputs,
@@ -665,105 +653,37 @@ def main(args):
             "images": images,
         }
 
-    def _tokenize_chat_text_only(sample):
-        """Tokenize text-only chat samples."""
-        inputs = []
-        labels = []
-
-        for conversation in sample["conversations"]:
-            for message in conversation:
-                keys = list(message.keys())
-
-                if "from" in keys and "value" in keys:
-                    # sharegpt format
-                    message_from = message.pop("from")
-                    if message_from == "gpt":
-                        message["role"] = "assistant"
-                    elif message_from == "human":
-                        message["role"] = "user"
-                    else:
-                        message["role"] = message_from
-
-                    message["content"] = message.pop("value")
-                elif "role" in keys and "content" in keys:
-                    pass
-                else:
-                    raise RuntimeError(f"Unknown chat format, keys are {keys}")
-
-            tokens = tokenizer.apply_chat_template(conversation, tokenize=True)
-            label = []
-
-            current_len = 0
-            for i in range(len(conversation)):
-                if i + 1 == len(conversation):
-                    next_tokens = tokenizer.apply_chat_template(conversation)[
-                        current_len:
-                    ]
-                else:
-                    if "assistant" == conversation[i + 1]["role"]:
-                        next_tokens = tokenizer.apply_chat_template(
-                            conversation[: i + 1], add_generation_prompt=True
-                        )[current_len:]
-                    else:
-                        next_tokens = tokenizer.apply_chat_template(
-                            conversation[: i + 1]
-                        )[current_len:]
-
-                if conversation[i]["role"] == "assistant":
-                    label.extend(next_tokens)
-                else:
-                    label.extend([-100] * len(next_tokens))
-
-                current_len += len(next_tokens)
-
-            inputs.append(tokens)
-            labels.append(label)
-
-        return {
-            "inputs": inputs,
-            "labels": labels,
-            "images": [],
-        }
-
-    def _tokenize_interleaved(sample):
-        """Main tokenization function that handles both text-only and multimodal samples."""
-        sample_type = _detect_sample_type(sample)
-        
-        if sample_type == "text_only":
-            if "text" in sample:
-                return _tokenize_text_only(sample)
-            elif "conversations" in sample:
-                return _tokenize_chat_text_only(sample)
-            else:
-                raise ValueError(f"Unknown text-only format: {list(sample.keys())}")
-        elif sample_type == "multimodal":
-            return _tokenize_chat_multimodal(sample)
-        else:
-            raise ValueError(f"Unknown sample type: {sample_type}")
+    def _tokenize_mistral_format(sample):
+        messages = sample["messages"]
+        cleaned_messages = remove_none_recursively(messages)
+        tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=cleaned_messages))
+        return tokenized.__dict__
 
     dataset = dataset.shuffle(args.seed)
 
     original_column_names = list(dataset.features.keys())
 
     dataset = dataset.map(
-        _tokenize_interleaved,
+        _tokenize_chat_multimodal,
         batched=True,
         #batch_size=args.batch_size,
     )
 
     dataset = dataset.remove_columns(original_column_names)
+    #print(dataset[0]['images'])
 
     efficiency = 1.0
     dropped = 0
     if args.pack_to_sequence_length:
-        num_shards = 32  # args.num_proc
+        num_shards = 32 # args.num_proc
         shards = [
             dataset.shard(num_shards=num_shards, index=i) for i in range(num_shards)
         ]
 
+
         with multiprocessing.Pool(processes=num_shards) as pool:
             process_args = [
-                (shard, args, tokenizer.pad_token_id, index, num_shards)
+                (shard, args, tokenizer.tokenizer.pad_token_id, index, num_shards)
                 for index, shard in enumerate(shards)
             ]
 
@@ -844,7 +764,6 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--subset", type=str)
     parser.add_argument("--split", type=str, default="train")
-    parser.add_argument("--tokenizer", type=str, required=True)
     parser.add_argument("--preprocessor", type=str, required=True)
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--num-proc", type=int)
@@ -856,6 +775,7 @@ if __name__ == "__main__":
     parser.add_argument("--drop-larger-than", type=int)
     parser.add_argument("--save-to-disk", type=str)
     parser.add_argument("--show-example", action="store_true")
+    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     main(args)

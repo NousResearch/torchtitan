@@ -178,7 +178,9 @@ python3 scripts/preprocess_multimodal_data.py --dataset /home/shared/datasets/ca
 ```
 
 Mistral Small 3.1 can be trained using this dataset:
+```
 CONFIG_FILE="./torchtitan/models/mistral3/train_configs/mistral24b_finetuning.toml" ./run_train.sh
+```
 
 ## Citation
 
