@@ -554,9 +554,6 @@ def main(args):
         else:
             return obj
 
-    #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
-    #tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
-    #tokenizer = MistralTokenizer.from_hf_hub(args.preprocessor)
     from transformers import AutoProcessor
     tokenizer = AutoProcessor.from_pretrained(args.preprocessor, use_fast=True)
  
@@ -770,14 +767,13 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--num-proc", type=int)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--limit", type=int)
+    parser.add_argument("--limit", type=int, required=False)
     parser.add_argument("--chat", action="store_true")
     parser.add_argument("--multiturn-only", action="store_true")
     parser.add_argument("--pack-to-sequence-length", type=int)
     parser.add_argument("--drop-larger-than", type=int)
     parser.add_argument("--save-to-disk", type=str)
     parser.add_argument("--show-example", action="store_true")
-    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     main(args)

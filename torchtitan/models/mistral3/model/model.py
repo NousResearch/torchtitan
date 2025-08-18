@@ -490,7 +490,7 @@ class Transformer(nn.Module):
         encoder_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
-        image_features: Optional[torch.Tensor] = None,
+        image_features: Optional[list] = None,
     ) -> torch.Tensor:
 
         # input tensor of shape [b, s]
@@ -502,15 +502,18 @@ class Transformer(nn.Module):
         else:
             h = inputs_embeds
         
+        
         if image_features is not None:
-
-            image_features = image_features.unsqueeze(0)
-
-            special_image_mask = self.get_placeholder_mask(
-                input_ids=tokens, inputs_embeds=h, image_features=image_features
-            )
-
-            h= h.masked_scatter(special_image_mask, image_features)
+            for i, i_image_features in enumerate(image_features):
+                if i_image_features is not None:
+                    image_features = i_image_features.unsqueeze(0)
+                    special_image_mask = self.get_placeholder_mask(
+                        input_ids=tokens[i].unsqueeze(0), inputs_embeds=h[i].unsqueeze(0), image_features=image_features
+                    )
+                    h[i] = h[i].masked_scatter(special_image_mask, image_features)
+        if image_features is None:
+            print("image features is None")
+        
 
         # Setup freqs_cis based on position_ids or sequence length
         if position_ids is not None:
@@ -638,46 +641,46 @@ class VLM(nn.Module, ModelProtocol):
     ):
 
         image_features = None
+        all_image_features = []
 
         if position_ids is not None:
 
             all_image_features = []
+
             for i, batch in enumerate(images):
-                image_features_batch = []
-                images = [load_image(im) if isinstance(im, str) else im for im in batch]
+                i_image_features = None
 
-                image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
+                if batch is not None:
+                    i_image_features = None
+                    image_features_batch = []
+                    images = [load_image(im) if isinstance(im, str) else im for im in batch]
 
-                image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.bfloat16), 2, image_inputs["image_sizes"])
+                    image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
 
-                # Collect image features from all images in the batch
-                all_image_features.append(image_encoder_outputs)
+                    image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.bfloat16), 2, image_inputs["image_sizes"])
 
-            # Concatenate all image features along the sequence dimension (dim=1)
-            if all_image_features:
-                image_features = torch.cat(all_image_features, dim=1)  # Shape: (1, sum_of_image_patches_of_all_images)
-            else:
-                image_features = None
+                    # Collect image features from all images in the batch
+                    i_image_features = image_encoder_outputs
 
-                #special_image_mask = self.get_placeholder_mask(input_ids, inputs_embeds, image_features)
+                    if i_image_features.shape[0] > 1:
+                        i_image_features = torch.cat(i_image_features, dim=0)  # Shape: (1, sum_of_image_patches_of_all_images)
+                        i_image_features = i_image_features.unsqueeze(0)
 
-                #input_ids[special_image_mask] = self.config.image_token_id
+                all_image_features.append(i_image_features)
 
-                #exit(0)
         else:
             return NotImplementedError("Position IDs are required for multimodal input.")
-
 
         if self.config.use_flex_attn:
             init_attention_mask(input_ids, eos_id=self.config.eos_id, sequence_lengths=sequence_lengths)
 
         if position_ids is not None:
-            if image_features is not None:
+            if all_image_features is not None:
                 logits = self.language_model(
                         tokens=input_ids,
                         encoder_mask=None,
                         position_ids=position_ids, 
-                        image_features=image_features,
+                        image_features=all_image_features,
                     )
             else:
                 logits = self.language_model(
@@ -686,11 +689,11 @@ class VLM(nn.Module, ModelProtocol):
                         position_ids=position_ids, 
                     )
         else:
-            if image_features is not None:
+            if all_image_features is not None:
                 logits = self.language_model(
                             tokens=input_ids,
                             encoder_mask=None,
-                            image_features=image_features,
+                            image_features=all_image_features,
                         )
             else:
                 logits = self.language_model(
