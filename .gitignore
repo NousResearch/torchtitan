@@ -42,3 +42,17 @@ Sessionx.vim
 
 # macOS dir files
 .DS_Store
+
+# Ignore everything inside scripts/
+scripts/*
+
+# Keep Python files in scripts/
+!scripts/*.py
+
+# Keep contents of these subdirectories
+!scripts/example/
+!scripts/example/**
+!scripts/generate/
+!scripts/generate/**
+!scripts/estimate/
+!scripts/estimate/**
