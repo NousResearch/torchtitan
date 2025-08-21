@@ -158,6 +158,29 @@ srun torchrun --nnodes 2
 
 If your gpu count per node is not 8, adjust `--nproc_per_node` in the torchrun command and `#SBATCH --gpus-per-task` in the SBATCH command section.
 
+## (NOUS) training with sample packing and multimodality
+
+### Training Qwen3-8B with sample packing
+To preprocess and pack a textonly chat dataset, run `scripts/preprocess_data.py`:
+```
+python3 scripts/preprocess_data.py --dataset NousResearch/Hermes-3-Dataset --tokenizer Qwen/Qwen3-8B --chat --pack-to-sequence-length 8000 --split "train[:1000]" --save-to-disk ./dataset
+```
+
+Qwen3-8B can be trained using this dataset:
+```
+CONFIG_FILE="./torchtitan/models/qwen3/train_configs/qwen3_8b_finetuning.toml" ./run_train.sh
+```
+
+## Training Mistral Small 3.1 with multimodal sample packing
+To preprocess and pack a multimodal chat dataset, run `scripts/preprocess_multimodal_data.py`:
+```
+python3 scripts/preprocess_multimodal_data.py --dataset /home/shared/datasets/cambrian_sample.json --preprocessor mistralai/Mistral-Small-3.1-24B-Instruct-2503  --chat --pack-to-sequence-length 8000 --split "train" --save-to-disk ./multimodal_dataset --limit 1000
+```
+
+Mistral Small 3.1 can be trained using this dataset:
+```
+CONFIG_FILE="./torchtitan/models/mistral3/train_configs/mistral24b_finetuning.toml" ./run_train.sh
+```
 
 ## Citation
 

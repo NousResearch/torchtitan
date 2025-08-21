@@ -1,3 +1,33 @@
+"""
+
+post of data processing script for multimodal data 
+that looks like this:
+[
+  {
+    "messages": [
+        {
+            "role": "system",
+            "content": [
+              {"type": "text", "text": "You are a helpful assistant."}
+              ]
+        },
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "url": "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"},
+                {"type": "text", "text": "Describe this image in detail."}
+            ]
+        },
+        {
+            "role": "assistant",
+            "content": [
+              {"type": "text", "text": "The image is a bee."}
+            ]
+        }
+    ]
+  }
+]
+"""
 import argparse
 import os
 import shutil
@@ -7,6 +37,8 @@ import pyarrow as pa
 import pyarrow.dataset as pa_ds
 import random
 import json
+from mistral_common.protocol.instruct.request import ChatCompletionRequest
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
 from typing import List, Optional, Tuple
 from torch.nn import functional as F
@@ -14,6 +46,15 @@ from torch.utils.data import Dataset
 from tqdm import tqdm
 from datasets import load_dataset, Dataset as DatasetsDataset
 from transformers import AutoTokenizer
+
+from datetime import datetime, timedelta
+import torch
+
+from mistral_common.protocol.instruct.request import ChatCompletionRequest
+from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
+from huggingface_hub import hf_hub_download
+from transformers import Mistral3ForConditionalGeneration
+
 
 SCHEMA = pa.schema(
     [
@@ -56,6 +97,20 @@ DATASET_INFO = r"""{
       },
       "_type": "LargeList"
     }
+    "pixel_values": {
+      "feature": {
+        "dtype": "bfloat16",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    }
+    "image_sizes": {
+      "feature": {
+        "dtype": "bfloat16",
+        "_type": "Value"
+      },
+      "_type": "LargeList"
+    }
   },
   "homepage": "",
   "license": ""
@@ -63,13 +118,14 @@ DATASET_INFO = r"""{
 
 
 def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
-    packer = PackedDataset(
+    packer = MultimodalPackedDataset(
         shard,
         max_seq_len=args.pack_to_sequence_length,
         padding_idx=tokenizer_pad_id,
         split_across_pack=not args.chat,
         show_pbar=rank == 0,
     )
+
 
     if args.save_to_disk:
         # create a schema that uses int64 for list sizes
@@ -80,6 +136,8 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
                 "labels": packer.packs[0]["labels"],
                 "position_ids": packer.packs[0]["position_ids"],
                 "sequence_lengths": packer.packs[0]["sequence_lengths"],
+                "pixel_values": packer.packs[0]["pixel_values"],
+                "image_sizes": packer.packs[0]["image_sizes"],
             }
             if len(packer.packs) > 0
             else None
@@ -90,6 +148,8 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
             "labels": [pack["labels"] for pack in packer.packs],
             "position_ids": [pack["position_ids"] for pack in packer.packs],
             "sequence_lengths": [pack["sequence_lengths"] for pack in packer.packs],
+            "pixel_values": [pack["pixel_values"] for pack in packer.packs],
+            "image_sizes": [pack["image_sizes"] for pack in packer.packs],
         }
         pa_table = pa.Table.from_pydict(oriented_data, schema=SCHEMA)
         del oriented_data
@@ -115,7 +175,7 @@ def process_packing_shard(shard, args, tokenizer_pad_id, rank, world_size):
 
 
 # https://github.com/pytorch/torchtune/blob/9d91fe39f08661952da4180b9e7fb2eba5a7a5e7/torchtune/datasets/_packed.py
-class PackedDataset(Dataset):
+class MultimodalPackedDataset(Dataset):
     """
     Performs greedy sample packing on a provided dataset. This is done as a single
     preprocessing step before training begins. Shuffling is done outside of this
@@ -195,7 +255,6 @@ class PackedDataset(Dataset):
         self.ds = ds
         self.max_seq_len = max_seq_len
         self.padding_idx = padding_idx
-        self.padding_idx = 0
         self.max_packs = max_packs
         self.split_across_pack = split_across_pack
         self.packs = []
@@ -217,6 +276,8 @@ class PackedDataset(Dataset):
             "labels": np.empty(0, dtype=np.int32),
             "position_ids": np.empty(0, dtype=np.int32),
             "sequence_lengths": [],
+            "pixel_values": [],
+            "image_sizes": [],
         }
 
     def _pack_ffd(self) -> None:
@@ -241,6 +302,7 @@ class PackedDataset(Dataset):
                     sample = next(ds_iterator)
                     seq_len = len(sample["inputs"])
 
+
                     if seq_len > self.max_seq_len:
                         self.dropped += 1
                         continue
@@ -252,8 +314,12 @@ class PackedDataset(Dataset):
             if not group:
                 break
 
+                
+            print("done")
+
             # 2. Sort the group by length in descending order (the "Decreasing" part of FFD).
             group.sort(key=lambda x: x["seq_len"], reverse=True)
+            print("sorted")
 
             # 3. Pack this group using the "First-Fit" heuristic.
             # Each bin holds the samples it contains and its remaining space.
@@ -278,6 +344,8 @@ class PackedDataset(Dataset):
                         }
                     )
 
+            print("bins")
+
             # 4. Convert the completed bins from this group into final, padded packs.
             for bin_info in bins:
                 if self._should_stop_packing():
@@ -287,7 +355,16 @@ class PackedDataset(Dataset):
                 for sample in bin_info["samples"]:
                     tokens = np.array(sample["inputs"], dtype=np.int32)
                     labels = np.array(sample["labels"], dtype=np.int32)
+                    images = sample["images"]
                     seq_len = len(tokens)
+
+
+
+                    pixel_values = torch.tensor(images).to(dtype=torch.bfloat16)
+
+
+                    image_sizes = torch.tensor([[pixel_values.shape[-2], pixel_values.shape[-1]]] * len(images))
+
 
                     current_pack["inputs"] = np.concatenate(
                         (current_pack["inputs"], tokens)
@@ -302,8 +379,12 @@ class PackedDataset(Dataset):
                         )
                     )
                     current_pack["sequence_lengths"].append(seq_len)
+                    current_pack["pixel_values"].extend(pixel_values)
+                    current_pack["image_sizes"].extend(image_sizes)
 
                 self._add_pack(current_pack)
+
+            print("done")
 
             if pbar:
                 pbar.update(len(group))
@@ -335,7 +416,6 @@ class PackedDataset(Dataset):
             tokens = np.array(sample["inputs"], dtype=np.int32)
             labels = np.array(sample["labels"], dtype=np.int32)
 
-            seq_len = len(tokens)
             if seq_len > self.max_seq_len and not self.split_across_pack:
                 # print(
                 #     f"Dropping sample that is too long ({seq_len} > {self.max_seq_len})"
@@ -457,6 +537,8 @@ class PackedDataset(Dataset):
             "labels": padded_labels,
             "position_ids": padded_position_ids,
             "sequence_lengths": padded_seq_lens,
+            "pixel_values": pack["pixel_values"],
+            "image_sizes": pack["image_sizes"],
         }
 
     def __len__(self) -> int:
@@ -467,24 +549,71 @@ class PackedDataset(Dataset):
 
 
 def main(args):
-    dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
-    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
 
-    def _tokenize(sample):
-        # assumes "text" is the column
-        inputs = tokenizer.batch_encode_plus(sample["text"]).input_ids
-        for x in inputs:
-            x.append(tokenizer.eos_token_id)
-        return {"inputs": inputs}
+    from datasets import load_dataset
+    """
 
-    def _tokenize_chat(sample):
+    SYSTEM_PROMPT = "You are a helpful assistant."
+    image_url = "https://huggingface.co/datasets/huggingface/documentation-images/resolve/main/bee.jpg"
+
+    ds = [{"messages": [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "What action do you think I should take in this situation? List all the possible actions and explain why you think they are good or bad.",
+            },
+            {"type": "image_url", "image_url": {"url": image_url}},
+        ],
+    },
+]}]
+
+    ds = ds * 10 
+
+    with open('dataset.json', 'w') as f:
+        json.dump(ds, f)
+    """
+
+    dataset = load_dataset('json', data_files='/home/artem_nous/cambrian_set/output2.json')['train'].select(range(10))
+
+    #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
+
+    def remove_none_recursively(obj):
+        if isinstance(obj, dict):
+            return {k: remove_none_recursively(v) for k, v in obj.items() if v is not None}
+        elif isinstance(obj, list):
+            return [remove_none_recursively(item) for item in obj]
+        else:
+            return obj
+
+    #dataset = load_dataset(args.dataset, name=args.subset, split=args.split)
+    #tokenizer = AutoTokenizer.from_pretrained(args.tokenizer)
+    #tokenizer = MistralTokenizer.from_hf_hub(args.preprocessor)
+    from transformers import AutoProcessor
+    tokenizer = AutoProcessor.from_pretrained(args.preprocessor, use_fast=True)
+ 
+
+    def _tokenize_chat_multimodal(sample):
         inputs = []
         labels = []
+        images = []
 
-        for conversation in sample["conversations"]:
+        for conversation in sample["messages"]:
             for message in conversation:
 
                 keys = list(message.keys())
+
+                """
+                for content in message['content']:
+                    if content.get('base64'):
+                        content['type'] = 'image_url'
+                        content['image_url'] = content['base64']
+                        content['image_url'] = f"data:image/jpeg;base64,{content['base64']}" 
+                        #print(content['base64'][:100])
+                        # remove base64
+                        content.pop('base64')
+                """
 
                 if "from" in keys and "value" in keys:
                     # sharegpt format
@@ -501,25 +630,31 @@ def main(args):
                     pass
                 else:
                     raise RuntimeError(f"Unknown chat format, keys are {keys}")
+                
 
-            tokens = tokenizer.apply_chat_template(conversation, tokenize=True)
-            label = []
+            conversation = remove_none_recursively(conversation)
+
+            #print(conversation)
+
+            #tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation))
+            tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
+            tokens = tokenized["input_ids"][0] #tokenizer.apply_chat_template(conversation, tokenize=True)
+            image = tokenized["pixel_values"]
 
             current_len = 0
+            label = []
             for i in range(len(conversation)):
                 if i + 1 == len(conversation):
-                    next_tokens = tokenizer.apply_chat_template(conversation)[
-                        current_len:
-                    ]
+                    next_tokens = tokenizer.apply_chat_template(conversation, 
+                    tokenize=True, return_dict=True, return_tensors="pt")["input_ids"][0][current_len:]
                 else:
                     if "assistant" == conversation[i + 1]["role"]:
-                        next_tokens = tokenizer.apply_chat_template(
-                            conversation[: i + 1], add_generation_prompt=True
-                        )[current_len:]
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
+                        add_generation_prompt=True, tokenize=True, return_dict=True)["input_ids"][0][current_len:]
                     else:
-                        next_tokens = tokenizer.apply_chat_template(
-                            conversation[: i + 1]
-                        )[current_len:]
+                        next_tokens = tokenizer.apply_chat_template(conversation[: i + 1], 
+                        tokenize=True, return_dict=True)["input_ids"][0][current_len:]
+                        #next_tokens = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=conversation[: i + 1])).tokens[current_len:]
 
                 if conversation[i]["role"] == "assistant":
                     label.extend(next_tokens)
@@ -530,37 +665,45 @@ def main(args):
 
             inputs.append(tokens)
             labels.append(label)
+            images.append(image)
 
         return {
             "inputs": inputs,
             "labels": labels,
+            "images": images,
         }
 
+    def _tokenize_mistral_format(sample):
+        messages = sample["messages"]
+        cleaned_messages = remove_none_recursively(messages)
+        tokenized = tokenizer.encode_chat_completion(ChatCompletionRequest(messages=cleaned_messages))
+        return tokenized.__dict__
+
     dataset = dataset.shuffle(args.seed)
-    if args.limit:
-        dataset = dataset.select(range(args.limit))
-    if args.chat and args.multiturn_only:
-        dataset = dataset.filter(lambda x: len(x["conversations"]) > 3)
 
     original_column_names = list(dataset.features.keys())
+
     dataset = dataset.map(
-        _tokenize_chat if args.chat else _tokenize,
+        _tokenize_chat_multimodal,
         batched=True,
-        batch_size=args.batch_size,
-        num_proc=args.num_proc,
+        #batch_size=args.batch_size,
     )
+
     dataset = dataset.remove_columns(original_column_names)
+    print(dataset[0]['images'])
 
     efficiency = 1.0
     dropped = 0
     if args.pack_to_sequence_length:
-        num_shards = 64  # args.num_proc
+        num_shards = 1 # args.num_proc
         shards = [
             dataset.shard(num_shards=num_shards, index=i) for i in range(num_shards)
         ]
+
+
         with multiprocessing.Pool(processes=num_shards) as pool:
             process_args = [
-                (shard, args, tokenizer.pad_token_id, index, num_shards)
+                (shard, args, tokenizer.tokenizer.pad_token_id, index, num_shards)
                 for index, shard in enumerate(shards)
             ]
 
@@ -641,7 +784,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--subset", type=str)
     parser.add_argument("--split", type=str, default="train")
-    parser.add_argument("--tokenizer", type=str, required=True)
+    parser.add_argument("--preprocessor", type=str, required=True)
     parser.add_argument("--batch-size", type=int, default=1000)
     parser.add_argument("--num-proc", type=int)
     parser.add_argument("--seed", type=int, default=42)
