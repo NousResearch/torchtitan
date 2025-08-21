@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed.tensor import DTensor, Replicate, Shard, distribute_tensor
 from transformers.image_utils import load_image
 
 from torchtitan.protocols.train_spec import ModelProtocol
@@ -24,7 +25,7 @@ from torchtitan.config_manager import JobConfig
 from .args import VLMArgs
 
 
-def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
+def build_norm(norm_type: str, dim: int, eps: float = 1e-6, device: torch.device = None):
     """
     Builds the specified normalization layer based on the norm_type.
 
@@ -47,7 +48,7 @@ def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
     elif norm_type == "np_layernorm":
         return nn.LayerNorm(dim, eps=eps, elementwise_affine=False, bias=False)
     elif norm_type == "rmsnorm":
-        return RMSNorm(dim, eps=eps)
+        return RMSNorm(dim, eps=eps, device=device)
     else:
         raise NotImplementedError(f"Unknown norm_type: '{norm_type}'")
 
@@ -239,7 +240,7 @@ class Mistral3PatchMerger(nn.Module):
 class Mistral3MultiModalProjector(nn.Module):
     def __init__(self, config: VLMArgs):
         super().__init__()
-        self.norm = nn.RMSNorm(config.vision_embed_dim, eps=config.norm_eps)
+        self.norm = nn.RMSNorm(config.vision_embed_dim, eps=config.norm_eps, device=torch.cuda.current_device())
         self.patch_merger = Mistral3PatchMerger(config)
         # We have hidden_size * the number of vision feature layers
         num_feature_layers = 1 if isinstance(config.vision_feature_layer, int) else len(config.vision_feature_layer)
@@ -401,16 +402,16 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.attn = Attention(config, is_vision=False)
-        self.ln_attn = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
-        #self.ln_attn = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
+        #self.ln_attn = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
+        self.ln_attn = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps, device=torch.cuda.current_device())
         self.mlp = FeedForward(
             dim=config.decoder_embed_dim,
             hidden_dim=4 * config.decoder_embed_dim,
             multiple_of=config.multiple_of,
             ffn_dim_multiplier=config.ffn_dim_multiplier,
         )
-        self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
-        #self.ln_mlp = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
+        #self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
+        self.ln_mlp = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps, device=torch.cuda.current_device())
 
         self.image_token_id = config.image_token_id
 
@@ -469,11 +470,7 @@ class Transformer(nn.Module):
             self.layers[str(idx)] = decoder_layer
 
         self.tok_embeddings = nn.Embedding(131072, config.decoder_embed_dim)
-        self.norm = build_norm(
-            config.norm_type, dim=config.decoder_embed_dim, eps=config.norm_eps
-        )
-        #self.norm=nn.LayerNorm(config.decoder_embed_dim, eps=config.norm_eps)
-        #self.norm = nn.RMSNorm(config.decoder_embed_dim, eps=config.norm_eps)
+        self.norm = nn.RMSNorm(config.decoder_embed_dim, eps=config.norm_eps, device=torch.cuda.current_device())
         self.output = nn.Linear(
             config.decoder_embed_dim, 131072, bias=False
         )
@@ -561,19 +558,40 @@ class Transformer(nn.Module):
             h = self.tok_embeddings(tokens)
         else:
             h = inputs_embeds
-        
-        
+
         if image_features is not None:
-            for i, i_image_features in enumerate(image_features):
 
-                if i_image_features is not None:
+            if isinstance(h, DTensor):
+                h_full = h.redistribute(h.device_mesh, [Replicate()]).to_local()
+                new_h_full = h_full.clone()  # Create a copy to modify
 
-                    #image_features = i_image_features
-                    image_features = i_image_features.unsqueeze(0)
-                    special_image_mask = self.get_placeholder_mask(
-                        input_ids=tokens[i].unsqueeze(0), inputs_embeds=h[i].unsqueeze(0), image_features=image_features
-                    )
-                    h[i] = h[i].masked_scatter(special_image_mask, image_features)
+                for i, i_image_features in enumerate(image_features):
+                    if i_image_features is not None:
+                        #image_feat = i_image_features
+                        image_feat = i_image_features.unsqueeze(0)
+                        special_image_mask = self.get_placeholder_mask(
+                            tokens[i].unsqueeze(0), h_full[i].unsqueeze(0), image_feat
+                        )
+                        # Use torch.where instead of masked_scatter
+                        new_h_full[i] = h_full[i].masked_scatter(special_image_mask, image_feat)
+             
+                
+                # Convert back to DTensor
+                new_h_full = new_h_full.to(h.device)
+                #h_replicated = distribute_tensor(new_h_full, h.device_mesh, [Replicate()])
+                h_replicated = DTensor.from_local(new_h_full, h.device_mesh, placements=[Replicate()])
+
+                h = h_replicated.redistribute(h.device_mesh, [Shard(1)])
+            else:
+                for i, i_image_features in enumerate(image_features):
+                    if i_image_features is not None:
+
+                        #image_features = i_image_features
+                        image_features = i_image_features.unsqueeze(0)
+                        special_image_mask = self.get_placeholder_mask(
+                            input_ids=tokens[i].unsqueeze(0), inputs_embeds=h[i].unsqueeze(0), image_features=image_features
+                        )
+                        h[i] = h[i].masked_scatter(special_image_mask, image_features)
 
         if image_features is None:
             print("image features is None")
@@ -636,7 +654,7 @@ class VLM(nn.Module, ModelProtocol):
             num_channels=config.in_channels,
             image_size=config.image_size,
             patch_size=config.patch_size,
-            hidden_act="gelu",  # Standard activation
+            hidden_act="silu",  # Standard activation
             attention_dropout=0.0,  # No dropout by default
             rope_theta=config.rope_theta,
             initializer_range=0.02  # Standard initialization
@@ -709,6 +727,9 @@ class VLM(nn.Module, ModelProtocol):
         image_features = None
         all_image_features = []
 
+        if images is None:
+            images= []
+
         for i, batch in enumerate(images):
             i_image_features = None
 
@@ -729,6 +750,7 @@ class VLM(nn.Module, ModelProtocol):
                 if i_image_features.shape[0] > 1:
                     i_image_features = torch.cat(i_image_features, dim=0)  # Shape: (1, sum_of_image_patches_of_all_images)
                     i_image_features = i_image_features.unsqueeze(0)
+                
 
             all_image_features.append(i_image_features)
 
@@ -739,7 +761,7 @@ class VLM(nn.Module, ModelProtocol):
             init_attention_mask(input_ids, eos_id=self.config.eos_id, sequence_lengths=sequence_lengths)
 
         if position_ids is not None:
-            if all_image_features is not None:
+            if all_image_features:
                 logits = self.language_model(
                         tokens=input_ids,
                         encoder_mask=None,
@@ -753,7 +775,7 @@ class VLM(nn.Module, ModelProtocol):
                         position_ids=position_ids, 
                     )
         else:
-            if all_image_features is not None:
+            if all_image_features:
                 logits = self.language_model(
                             tokens=input_ids,
                             encoder_mask=None,
