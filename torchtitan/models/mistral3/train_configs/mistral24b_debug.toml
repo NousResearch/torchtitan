@@ -19,12 +19,12 @@ save_tb_folder = "tb"
 
 [model]
 name = "mistral3"
-flavor = "24B_samplepacked"
+flavor = "debug_samplepacked"
 tokenizer_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct/tokenizer"
 
 [optimizer]
 name = "AdamW"
-lr = 2e-6
+lr = 2e-4
 eps = 1e-8
 
 [lr_scheduler]
@@ -34,7 +34,7 @@ warmup_steps = 0 # lr scheduler warm up
 local_batch_size = 1
 seq_len = 8000
 max_norm = 1.0  # grad norm clipping
-steps = 100
+steps = 1000
 compile = false
 dataset = "hermes4"
 dataset_path = "./multimodal_dataset"
@@ -49,7 +49,7 @@ context_parallel_degree = 1
 
 [checkpoint]
 enable_checkpoint = true
-initial_load_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct"
+#initial_load_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct"
 folder = "checkpoint"
 interval = 500
 last_save_model_weights_only = false

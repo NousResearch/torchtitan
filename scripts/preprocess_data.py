@@ -195,6 +195,7 @@ class PackedDataset(Dataset):
         self.ds = ds
         self.max_seq_len = max_seq_len
         self.padding_idx = padding_idx
+        self.padding_idx = 0
         self.max_packs = max_packs
         self.split_across_pack = split_across_pack
         self.packs = []

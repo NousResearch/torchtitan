@@ -12,19 +12,19 @@ save_traces_folder = "profile_trace"
 profile_freq = 100
 
 [metrics]
-log_freq = 1
+log_freq = 10
 enable_tensorboard = false
 enable_wandb = true
 save_tb_folder = "tb"
 
 [model]
 name = "mistral3"
-flavor = "24B_samplepacked"
+flavor = "24B"
 tokenizer_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct/tokenizer"
 
 [optimizer]
 name = "AdamW"
-lr = 2e-6
+lr = 2e-4
 eps = 1e-8
 
 [lr_scheduler]
@@ -32,7 +32,7 @@ warmup_steps = 0 # lr scheduler warm up
 
 [training]
 local_batch_size = 1
-seq_len = 8000
+seq_len = 16384
 max_norm = 1.0  # grad norm clipping
 steps = 100
 compile = false

@@ -23,6 +23,64 @@ from torchtitan.config_manager import JobConfig
 
 from .args import VLMArgs
 
+
+def build_norm(norm_type: str, dim: int, eps: float = 1e-6):
+    """
+    Builds the specified normalization layer based on the norm_type.
+
+    Args:
+        norm_type (str): The type of normalization layer to build.
+            Supported types: layernorm, np_layernorm, rmsnorm
+        dim (int): The dimension of the normalization layer.
+        eps (float, optional): The epsilon value for numerical stability. Defaults to 1e-6.
+
+    Returns:
+        The built normalization layer.
+
+    Raises:
+        NotImplementedError: If an unknown norm_type is provided.
+    """
+    norm_type = norm_type.lower()  # Normalize to lowercase
+
+    if norm_type == "layernorm":
+        return nn.LayerNorm(dim, eps=eps, bias=False)
+    elif norm_type == "np_layernorm":
+        return nn.LayerNorm(dim, eps=eps, elementwise_affine=False, bias=False)
+    elif norm_type == "rmsnorm":
+        return RMSNorm(dim, eps=eps)
+    else:
+        raise NotImplementedError(f"Unknown norm_type: '{norm_type}'")
+
+
+class RMSNorm(nn.Module):
+    """
+    Initialize the RMSNorm normalization layer.
+
+    Args:
+        dim (int): The dimension of the input tensor.
+        eps (float, optional): A small value added to the denominator for numerical stability. Default is 1e-6.
+
+    Attributes:
+        eps (float): A small value added to the denominator for numerical stability.
+        weight (nn.Parameter): Learnable scaling parameter.
+
+    """
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(dim))
+
+    def _norm(self, x: torch.Tensor):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+    def forward(self, x: torch.Tensor):
+        output = self._norm(x.float()).type_as(x)
+        return output * self.weight
+
+    def reset_parameters(self):
+        torch.nn.init.ones_(self.weight)  # type: ignore
+
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> torch.Tensor:
     """
     Precompute the frequency tensor for complex exponentials (cis) with given dimensions.
@@ -295,7 +353,8 @@ class Attention(nn.Module):
         xv = values.transpose(1, 2)  # (bs, n_local_heads, seqlen, head_dim)
 
         #output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv)
-        output = self.sdpa(xq, xk, xv)
+        #output = self.sdpa(xq, xk, xv)
+        output = torch.nn.functional.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
 
         output = output.transpose(1, 2).contiguous()  # (bs, seqlen, n_local_heads, head_dim)
         output = output.view(bs, seqlen, -1)
@@ -334,7 +393,7 @@ class FeedForward(nn.Module):
         nn.init.trunc_normal_(self.w1.weight, mean=0.0, std=0.02)
         for linear in (self.w2, self.w3):
             nn.init.trunc_normal_(linear.weight, mean=0.0, std=init_std)
-
+    
 class TransformerBlock(nn.Module):
     def __init__(
         self,
@@ -342,16 +401,16 @@ class TransformerBlock(nn.Module):
     ):
         super().__init__()
         self.attn = Attention(config, is_vision=False)
-        #self.ln_attn = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
-        self.ln_attn = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
+        self.ln_attn = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
+        #self.ln_attn = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
         self.mlp = FeedForward(
             dim=config.decoder_embed_dim,
             hidden_dim=4 * config.decoder_embed_dim,
             multiple_of=config.multiple_of,
             ffn_dim_multiplier=config.ffn_dim_multiplier,
         )
-        #self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
-        self.ln_mlp = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
+        self.ln_mlp = build_norm("rmsnorm", config.decoder_embed_dim, config.norm_eps)
+        #self.ln_mlp = nn.RMSNorm(config.decoder_embed_dim, config.norm_eps)
 
         self.image_token_id = config.image_token_id
 
@@ -400,7 +459,7 @@ class Transformer(nn.Module):
         super().__init__()
 
         self.register_buffer(
-            "freqs_cis", self._precompute_freqs_cis(config), persistent=False
+            "freqs_cis", self._precompute_freqs_cis(config), persistent=True
         )
 
         self.layers = nn.ModuleDict()
@@ -410,10 +469,11 @@ class Transformer(nn.Module):
             self.layers[str(idx)] = decoder_layer
 
         self.tok_embeddings = nn.Embedding(131072, config.decoder_embed_dim)
-        #self.norm = build_norm(
-        #    config.norm_type, dim=config.decoder_embed_dim, eps=config.norm_eps
+        self.norm = build_norm(
+            config.norm_type, dim=config.decoder_embed_dim, eps=config.norm_eps
+        )
         #self.norm=nn.LayerNorm(config.decoder_embed_dim, eps=config.norm_eps)
-        self.norm = nn.RMSNorm(config.decoder_embed_dim, eps=config.norm_eps)
+        #self.norm = nn.RMSNorm(config.decoder_embed_dim, eps=config.norm_eps)
         self.output = nn.Linear(
             config.decoder_embed_dim, 131072, bias=False
         )
@@ -505,12 +565,16 @@ class Transformer(nn.Module):
         
         if image_features is not None:
             for i, i_image_features in enumerate(image_features):
+
                 if i_image_features is not None:
+
+                    #image_features = i_image_features
                     image_features = i_image_features.unsqueeze(0)
                     special_image_mask = self.get_placeholder_mask(
                         input_ids=tokens[i].unsqueeze(0), inputs_embeds=h[i].unsqueeze(0), image_features=image_features
                     )
                     h[i] = h[i].masked_scatter(special_image_mask, image_features)
+
         if image_features is None:
             print("image features is None")
         
@@ -594,6 +658,7 @@ class VLM(nn.Module, ModelProtocol):
         buffer_device = buffer_device or self.language_model.freqs_cis.device
         with torch.device(buffer_device):
             self.language_model._precompute_freqs_cis(self.config)
+        """
         
         # Initialize language model components
         if hasattr(self.language_model, 'init_weights'):
@@ -608,6 +673,7 @@ class VLM(nn.Module, ModelProtocol):
         if hasattr(self, 'multi_modal_projector') and self.multi_modal_projector is not None:
             if hasattr(self.multi_modal_projector, 'init_weights'):
                 self.multi_modal_projector.init_weights()
+        """
         
     def get_image_features(
         self,
@@ -643,33 +709,31 @@ class VLM(nn.Module, ModelProtocol):
         image_features = None
         all_image_features = []
 
-        if position_ids is not None:
+        for i, batch in enumerate(images):
+            i_image_features = None
 
-            all_image_features = []
-
-            for i, batch in enumerate(images):
+            if batch is not None:
                 i_image_features = None
+                image_features_batch = []
+                images = [load_image(im) if isinstance(im, str) else im for im in batch]
 
-                if batch is not None:
-                    i_image_features = None
-                    image_features_batch = []
-                    images = [load_image(im) if isinstance(im, str) else im for im in batch]
+                image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
 
-                    image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
+                #image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.float16), 2, image_inputs["image_sizes"])
+                image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=self.vision_tower.dtype), 2, image_inputs["image_sizes"]) 
 
-                    image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.bfloat16), 2, image_inputs["image_sizes"])
+                # Collect image features from all images in the batch
+                i_image_features = image_encoder_outputs
 
-                    # Collect image features from all images in the batch
-                    i_image_features = image_encoder_outputs
 
-                    if i_image_features.shape[0] > 1:
-                        i_image_features = torch.cat(i_image_features, dim=0)  # Shape: (1, sum_of_image_patches_of_all_images)
-                        i_image_features = i_image_features.unsqueeze(0)
+                if i_image_features.shape[0] > 1:
+                    i_image_features = torch.cat(i_image_features, dim=0)  # Shape: (1, sum_of_image_patches_of_all_images)
+                    i_image_features = i_image_features.unsqueeze(0)
 
-                all_image_features.append(i_image_features)
+            all_image_features.append(i_image_features)
 
-        else:
-            return NotImplementedError("Position IDs are required for multimodal input.")
+        #else:
+        #    return NotImplementedError("Position IDs are required for multimodal input.")
 
         if self.config.use_flex_attn:
             init_attention_mask(input_ids, eos_id=self.config.eos_id, sequence_lengths=sequence_lengths)

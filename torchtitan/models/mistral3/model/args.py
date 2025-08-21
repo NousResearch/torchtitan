@@ -57,8 +57,9 @@ class VLMArgs(BaseModelArgs):
     norm_eps: float = 1e-5
     rope_theta: float = 1000000000.0
     max_seq_len: int = 131072
-    activation: nn.Module = nn.GELU()
+    activation: nn.Module = nn.SiLU()
     depth_init: bool = True
+    norm_type: str = "rmsnorm"
 
     n_layers: int = 40
     n_heads: int = 32
