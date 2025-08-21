@@ -17,34 +17,40 @@ import torch
 import torch.distributed.checkpoint as dcp
 import torch.nn as nn
 from torch.distributed import DeviceMesh
+from torch.distributed._tensor import Replicate
 from torch.distributed.elastic.multiprocessing.errors import record
-from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torchtitan.components.checkpoint import (
-    CheckpointManager,
-    excluded_parameters_for_model_only,
-)
+
+from torchtitan.tools import utils
+
+
+
+from torchtitan.components.checkpoint import excluded_parameters_for_model_only
 from torchtitan.components.metrics import build_device_memory_monitor
 from torchtitan.config_manager import ConfigManager
 from torchtitan.distributed import ParallelDims, utils as dist_utils
-from torch.distributed.checkpoint import HuggingFaceStorageReader
 from torchtitan.protocols.train_spec import get_train_spec
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
 from torchtitan.tools.utils import device_module, device_type
 
+from transformers import AutoProcessor
+
+from PIL import Image
+import requests
+
 # support running w/o installing as package
 wd = Path(__file__).parent.parent.resolve()
 sys.path.append(str(wd))
 
-from generate._generation import generate
+from generate._vision_generation import generate
 
 
-def apply_tp_minus_sp_llama(model: nn.Module, tp_mesh: DeviceMesh):
+def apply_tp_minus_sp(model: nn.Module, tp_mesh: DeviceMesh):
     parallelize_module(
         model,
         tp_mesh,
@@ -54,15 +60,16 @@ def apply_tp_minus_sp_llama(model: nn.Module, tp_mesh: DeviceMesh):
         },
     )
 
-    for _, transformer_block in model.layers.items():
+
+    for _, transformer_block in model.language_model.layers.items():
         layer_plan = {
-            "attention.wq": ColwiseParallel(),
-            "attention.wk": ColwiseParallel(),
-            "attention.wv": ColwiseParallel(),
-            "attention.wo": RowwiseParallel(),
-            "feed_forward.w1": ColwiseParallel(),
-            "feed_forward.w2": RowwiseParallel(),
-            "feed_forward.w3": ColwiseParallel(),
+            "attn.wq": ColwiseParallel(),
+            "attn.wk": ColwiseParallel(),
+            "attn.wv": ColwiseParallel(),
+            "attn.wo": RowwiseParallel(),
+            "mlp.w1": ColwiseParallel(),
+            "mlp.w2": RowwiseParallel(),
+            "mlp.w3": ColwiseParallel(),
         }
 
         parallelize_module(
@@ -92,6 +99,7 @@ def test_generate(
     config_manager = ConfigManager()
     config = config_manager.parse_args([f"--job.config_file={config_path}"])
 
+
     if len(args.prompt) == 0:
         logger.warning(
             "The input prompt is empty, model will respond from a empty sequence."
@@ -108,6 +116,9 @@ def test_generate(
     logger.info(f"World Size: {world_size}, Local Rank: {local_rank} on {device}")
 
     # Tokenizer setup
+
+    
+    #tokenizer = train_spec.tokenizer_cls(config.model.tokenizer_path)
     tokenizer = train_spec.build_tokenizer_fn(config)
 
     model_args = train_spec.model_args[config.model.flavor]
@@ -129,18 +140,14 @@ def test_generate(
             tp=world_size,
             pp=1,
             ep=1,
-            world_size=world_size,
+            world_size=world_size
         )
+        # Build world mesh for parallelism
         world_mesh = parallel_dims.world_mesh
 
         # apply_tp (with Sequence Parallel) on unevenly sharded
         # sequences would require https://github.com/pytorch/torchtitan/pull/686
-        if config.model.name == "llama3":
-            apply_tp_minus_sp_llama(model, parallel_dims.world_mesh["tp"])
-        else:
-            raise ValueError(
-                f"Unknown model type `${config.model.name}` to apply parallelism to"
-            )
+        apply_tp_minus_sp(model, world_mesh["tp"])
 
     dist_utils.set_determinism(world_mesh, device, seed, deterministic)
 
@@ -150,23 +157,16 @@ def test_generate(
         model.init_weights()
     model.eval()
 
-    state_dict = model.state_dict()
-    for k in excluded_parameters_for_model_only:
-        state_dict.pop(k, None)
+    #state_dict = model.state_dict()
+
+    state_dict = {"model": model.state_dict()}
 
     # Checkpoint Loading
-    config.checkpoint.enable_checkpoint = True
-    config.checkpoint.initial_load_model_weights_only = True
-    config.checkpoint.initial_load_path = checkpoint_path
-    checkpoint_manager = CheckpointManager(
-        dataloader=None,
-        model_parts=[model],
-        optimizers=[],
-        lr_schedulers=[],
-        states=dict(),
-        job_config=config,
-    )
-    checkpoint_manager.load()
+    begin = time.monotonic()
+    logger.info(f"Loading chkpt at: {checkpoint_path}")
+
+    dcp.load(state_dict, checkpoint_id=checkpoint_path)
+    logger.info(f"Finished loading chkpt in {time.monotonic() - begin:.2f} seconds.")
 
     device_mem_stats = device_memory_monitor.get_peak_stats()
     logger.info(
@@ -175,16 +175,36 @@ def test_generate(
         f"({device_mem_stats.max_reserved_pct:.2f}%)"
     )
 
-    # Tokenize prompt and repeat batch_size times
-    input_ids = (
-        (
-            torch.tensor(
-                tokenizer.encode(prompt, add_bos=True, add_eos=False), dtype=torch.long
-            )
-            .view(1, -1)
-            .repeat(batch_size, 1)
-        )
-    ).to(device_type)
+    processor = AutoProcessor.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", use_fast=True)
+
+    url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                #{"type": "image", "url": "http://images.cocodataset.org/val2017/000000039769.jpg"},
+                {"type": "text", "text": prompt},
+                
+            ],
+        }
+    ]
+
+    image = Image.open(requests.get(url, stream=True).raw)
+
+    inputs = processor.apply_chat_template(messages, tokenize=True, return_dict=True, return_tensors="pt").to(device_type, dtype=torch.float32)
+                #tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
+
+    #pixel_values = inputs["pixel_values"].to(device_type)
+    #image_sizes = inputs["image_sizes"]
+    input_ids = inputs['input_ids'].to(device_type)
+
+    #print(f"original image sizes: {image_sizes}")
+    #print(f"original pixel values: {pixel_values.shape}")
+
+    #images = ([image],)
+    images = set()
+
 
     device_memory_monitor.reset_peak_stats()
 
@@ -193,6 +213,7 @@ def test_generate(
     responses = generate(
         model,
         input_ids,
+        images=images,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
         top_k=top_k,
@@ -220,8 +241,10 @@ def test_generate(
             inp_tok = tokens[:input_n_tokens].tolist()
             out_tok = tokens[input_n_tokens:].tolist()
 
-            input_text = tokenizer.decode(inp_tok)
-            output_text = tokenizer.decode(out_tok)
+            #input_text = tokenizer.decode(inp_tok)
+            #output_text = tokenizer.decode(out_tok)
+            input_text = processor.tokenizer.decode(inp_tok)
+            output_text = processor.tokenizer.decode(out_tok)
 
             _data = {
                 "response_idx": i,

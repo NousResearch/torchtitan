@@ -36,11 +36,12 @@ def generate_next_token(
     model,
     x: torch.Tensor,
     *,
+    images: Optional[torch.Tensor] = None,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
     rng: Optional[torch.Generator] = None,
 ) -> torch.Tensor:
-    logits = model(x)  # (B, T, vocab_size)
+    logits = model(x, images=images)  # (B, T, vocab_size)
     probs = logits_to_probs(logits[:, -1, :], temperature, top_k)
     next_token = multinomial_sample_one(probs, rng=rng)
     return next_token
@@ -51,6 +52,7 @@ def generate(
     model,
     input_ids: torch.Tensor,
     *,
+    images: Optional[torch.Tensor] = None,
     max_new_tokens: int,
     temperature: float = 1.0,
     top_k: Optional[int] = None,
@@ -69,6 +71,7 @@ def generate(
     for _ in range(max_new_tokens):
         next_token = generate_next_token(
             model,
+            images=images,
             x=generated_tokens,
             temperature=temperature,
             top_k=top_k,
