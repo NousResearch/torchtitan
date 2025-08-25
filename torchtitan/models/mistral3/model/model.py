@@ -203,14 +203,6 @@ class Mistral3PatchMerger(nn.Module):
         self.patch_size = config.patch_size
         self.merging_layer = nn.Linear(hidden_size * self.spatial_merge_size**2, hidden_size, bias=False)
         
-
-    def init_weights(self):
-        """
-        Initialize weights following the Llama3 pattern.
-        """
-        # Initialize merging layer with truncated normal
-        nn.init.trunc_normal_(self.merging_layer.weight, mean=0.0, std=0.02)
-
     def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor) -> torch.Tensor:
         image_sizes = [
             (image_size[0] // self.patch_size, image_size[1] // self.patch_size) for image_size in image_sizes
@@ -249,28 +241,10 @@ class Mistral3MultiModalProjector(nn.Module):
             config.decoder_embed_dim,
             bias=config.multimodal_projector_bias,
         )
-        self.act = config.activation
+        self.act = nn.GELU()#config.projector_hidden_act #activation
         self.linear_2 = nn.Linear(
             config.decoder_embed_dim, config.decoder_embed_dim, bias=config.multimodal_projector_bias
         )
-
-    def init_weights(self):
-        """
-        Initialize weights following the Llama3 pattern.
-        """
-        # Initialize norm layer
-        if hasattr(self.norm, 'reset_parameters'):
-            self.norm.reset_parameters()
-        
-        # Initialize patch merger
-        if hasattr(self.patch_merger, 'init_weights'):
-            self.patch_merger.init_weights()
-        
-        # Initialize linear layers with truncated normal
-        for linear in (self.linear_1, self.linear_2):
-            nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
-            if linear.bias is not None:
-                nn.init.zeros_(linear.bias)
 
     def forward(self, image_features: torch.Tensor, image_sizes: torch.Tensor):
         image_features = self.norm(image_features)
@@ -558,6 +532,10 @@ class Transformer(nn.Module):
             h = self.tok_embeddings(tokens)
         else:
             h = inputs_embeds
+        
+
+        #print(h)
+
 
         if image_features is not None:
 
@@ -567,8 +545,14 @@ class Transformer(nn.Module):
 
                 for i, i_image_features in enumerate(image_features):
                     if i_image_features is not None:
-                        #image_feat = i_image_features
-                        image_feat = i_image_features.unsqueeze(0)
+
+                        image_feat = i_image_features
+                        #image_feat = i_image_features.unsqueeze(0)
+                        print(tokens.shape)
+                        print(h_full[i].shape)
+                        print(image_feat.shape)
+
+ 
                         special_image_mask = self.get_placeholder_mask(
                             tokens[i].unsqueeze(0), h_full[i].unsqueeze(0), image_feat
                         )
@@ -591,7 +575,11 @@ class Transformer(nn.Module):
                         special_image_mask = self.get_placeholder_mask(
                             input_ids=tokens[i].unsqueeze(0), inputs_embeds=h[i].unsqueeze(0), image_features=image_features
                         )
-                        h[i] = h[i].masked_scatter(special_image_mask, image_features)
+
+                        h[i] = h[i].masked_scatter(special_image_mask, image_features.to(h[i].device, dtype=h[i].dtype))
+
+
+            #print(h)
 
         if image_features is None:
             print("image features is None")
@@ -651,12 +639,12 @@ class VLM(nn.Module, ModelProtocol):
             intermediate_size=4 * config.vision_embed_dim,  # Standard multiplier
             num_hidden_layers=config.vision_num_layers,
             num_attention_heads=config.vision_num_heads,
-            num_channels=config.in_channels,
-            image_size=config.image_size,
-            patch_size=config.patch_size,
+            num_channels=3,
+            image_size=1540,
+            patch_size=14,
             hidden_act="silu",  # Standard activation
             attention_dropout=0.0,  # No dropout by default
-            rope_theta=config.rope_theta,
+            rope_theta=10000.0,
             initializer_range=0.02  # Standard initialization
         )
 
@@ -668,6 +656,8 @@ class VLM(nn.Module, ModelProtocol):
         from transformers import AutoProcessor
         self.preprocessor = AutoProcessor.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", use_fast=True)
 
+        self.initialized_vision=False
+
     def init_weights(
         self,
         buffer_device: Optional[torch.device] = None,
@@ -676,43 +666,74 @@ class VLM(nn.Module, ModelProtocol):
         buffer_device = buffer_device or self.language_model.freqs_cis.device
         with torch.device(buffer_device):
             self.language_model._precompute_freqs_cis(self.config)
-        """
-        
-        # Initialize language model components
-        if hasattr(self.language_model, 'init_weights'):
-            self.language_model.init_weights()
-        
-        ## Initialize vision tower if it exists
-        if hasattr(self, 'vision_tower') and self.vision_tower is not None:
-            if hasattr(self.vision_tower, 'init_weights'):
-                self.vision_tower.init_weights()
-        
-        ## Initialize multimodal projector if it exists
-        if hasattr(self, 'multi_modal_projector') and self.multi_modal_projector is not None:
-            if hasattr(self.multi_modal_projector, 'init_weights'):
-                self.multi_modal_projector.init_weights()
-        """
-        
+
+
+
     def get_image_features(
         self,
         pixel_values: torch.FloatTensor,
-        vision_feature_layer: Union[int, List[int]],
         image_sizes: torch.Tensor,
+        vision_feature_layer: Optional[Union[int, list[int]]] = None,
         **kwargs,
     ):
-        kwargs = {k: v for k, v in kwargs.items() if v is not None}
-        with torch.no_grad():
-            image_outputs = self.vision_tower(pixel_values, image_sizes=image_sizes, output_hidden_states=False)
-            # If we have one vision feature layer, return the corresponding hidden states,
-            # otherwise, select the hidden states of each feature layer and concatenate them
-            if isinstance(vision_feature_layer, int):
-                selected_image_feature = image_outputs.last_hidden_state #[vision_feature_layer]
-            else:
-                hs_pool = [image_outputs.hidden_states[layer_idx] for layer_idx in vision_feature_layer]
-                selected_image_feature = torch.cat(hs_pool, dim=-1)
+        """
+        Obtains image last hidden states from the vision tower and apply multimodal projection.
 
-            image_features = self.multi_modal_projector(selected_image_feature.squeeze(0), image_sizes)
-            return image_features
+        Args:
+            pixel_values (`torch.FloatTensor]` of shape `(batch_size, channels, height, width)`):
+               The tensors corresponding to the input images.
+            vision_feature_layer (`Union[int, list[int]]`, *optional*):
+                The index of the layer to select the vision feature. If multiple indices are provided,
+                the vision feature of the corresponding indices will be concatenated to form the
+                vision features.
+            image_sizes (`torch.Tensor`, *optional*):
+                Tensor containing the image sizes as returned by the processor.
+        Returns:
+            image_features (`torch.Tensor`): Image feature tensor of shape `(num_images, image_length, embed_dim)`).
+        """
+        # Debug prints for inputs
+
+        
+        # Debug print for config var before assignment
+        #print("Config - self.config.vision_feature_layer:", self.config.vision_feature_layer)
+        
+        vision_feature_layer = (
+            vision_feature_layer if vision_feature_layer is not None else self.config.vision_feature_layer
+        )
+        
+        # Debug print for vision_feature_layer after assignment
+        #print("Assigned - vision_feature_layer:", vision_feature_layer)
+        
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
+        # this is not memory efficient at all (output_hidden_states=True) will save all the hidden states.
+        image_outputs = self.vision_tower(pixel_values, image_sizes=image_sizes, output_hidden_states=True, **kwargs)
+        # If we have one vision feature layer, return the corresponding hidden states,
+        # otherwise, select the hidden states of each feature layer and concatenate them
+        if isinstance(vision_feature_layer, int):
+            selected_image_feature = image_outputs.hidden_states[vision_feature_layer]
+        else:
+            hs_pool = [image_outputs.hidden_states[layer_idx] for layer_idx in vision_feature_layer]
+            selected_image_feature = torch.cat(hs_pool, dim=-1)
+        
+        #print("selected_image_feature", selected_image_feature.shape)
+        #print("image_outputs.hidden_states", selected_image_feature)
+
+
+
+        image_features = self.multi_modal_projector(selected_image_feature.squeeze(0), image_sizes)
+
+        #print("image_features", image_features.shape)
+        #print("image_features", image_features)
+        # Debug print for config var
+        #print("Config - self.config.spatial_merge_size:", self.config.spatial_merge_size)
+        #print("Config - self.vision_tower.patch_size:", self.vision_tower.patch_size)
+
+        
+        #downsample_ratio = self.vision_tower.patch_size * self.config.spatial_merge_size
+        #split_sizes = [(height // downsample_ratio) * (width // downsample_ratio) for height, width in image_sizes]
+        #image_features = torch.split(image_features.squeeze(0), split_sizes)
+        return image_features
+
     
     def forward(
         self,
@@ -721,38 +742,61 @@ class VLM(nn.Module, ModelProtocol):
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
         sequence_lengths: list[torch.Tensor] | None = None,
+        image_features: Optional[torch.FloatTensor] = None,
         images: Optional[list] = None
     ):
 
-        image_features = None
+        if not self.initialized_vision:
+            from transformers import AutoModelForImageTextToText
+            hf_model = AutoModelForImageTextToText.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", device_map='cpu', torch_dtype=torch.bfloat16)
+
+            vision_tower_device = self.vision_tower.device
+
+
+            hf_model.vision_tower = self.vision_tower.to(vision_tower_device, dtype=torch.bfloat16)
+            hf_model.multi_modal_projector = self.multi_modal_projector.to(vision_tower_device, dtype=torch.bfloat16)
+
+            self.vision_tower = hf_model.vision_tower
+            self.multi_modal_projector = hf_model.multi_modal_projector
+
+            print("did the thing")
+            self.initialized_vision=True
+
+
+        #image_features = None
         all_image_features = []
+        #image_features = None
 
-        if images is None:
-            images= []
+        if image_features is not None:
+            all_image_features = image_features
+        else:
 
-        for i, batch in enumerate(images):
-            i_image_features = None
-
-            if batch is not None:
+            for i, batch in enumerate(images):
                 i_image_features = None
-                image_features_batch = []
-                images = [load_image(im) if isinstance(im, str) else im for im in batch]
 
-                image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
+                if batch is not None:
+                    i_image_features = None
+                    image_features_batch = []
+                    images = [load_image(im) if isinstance(im, str) else im for im in batch]
 
-                #image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.float16), 2, image_inputs["image_sizes"])
-                image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=self.vision_tower.dtype), 2, image_inputs["image_sizes"]) 
+                    image_inputs = self.preprocessor.image_processor(images, patch_size=self.config.patch_size * 2)
 
-                # Collect image features from all images in the batch
-                i_image_features = image_encoder_outputs
+                    #print("my model")
+                    #print(self.vision_tower.config)
+                    #print(self.vision_tower.patch_conv.weight)
+                    #print(self.multi_modal_projector.linear_1.weight)
+                    #exit(0)
 
 
-                if i_image_features.shape[0] > 1:
-                    i_image_features = torch.cat(i_image_features, dim=0)  # Shape: (1, sum_of_image_patches_of_all_images)
-                    i_image_features = i_image_features.unsqueeze(0)
-                
+                    #image_encoder_outputs = self.get_image_features(image_inputs["pixel_values"].to(self.vision_tower.device, dtype=torch.float16), 2, image_inputs["image_sizes"])
+                    image_encoder_outputs = self.get_image_features(pixel_values=image_inputs["pixel_values"].to(self.vision_tower.device, dtype=self.vision_tower.dtype), image_sizes=image_inputs["image_sizes"], vision_feature_layer=-1)[0].unsqueeze(0)
 
-            all_image_features.append(i_image_features)
+                    # Collect image features from all images in the batch
+                    i_image_features = image_encoder_outputs
+
+
+                    all_image_features.append(i_image_features)
+        
 
         #else:
         #    return NotImplementedError("Position IDs are required for multimodal input.")

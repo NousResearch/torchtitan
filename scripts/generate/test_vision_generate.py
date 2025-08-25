@@ -24,6 +24,7 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from transformers import AutoProcessor, AutoModelForImageTextToText
 
 from torchtitan.tools import utils
 
@@ -153,13 +154,14 @@ def test_generate(
 
     # materalize model
     model.to_empty(device=device_type)
-    with torch.no_grad():
-        model.init_weights()
-    model.eval()
+    #with torch.no_grad():
+    #    model.init_weights()
+    #model.eval()
 
-    #state_dict = model.state_dict()
 
-    state_dict = {"model": model.state_dict()}
+    state_dict = model.state_dict()
+
+    #state_dict = {"model": model.state_dict()}
 
     # Checkpoint Loading
     begin = time.monotonic()
@@ -175,7 +177,7 @@ def test_generate(
         f"({device_mem_stats.max_reserved_pct:.2f}%)"
     )
 
-    processor = AutoProcessor.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", use_fast=True)
+    processor = AutoProcessor.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503")
 
     url = "http://images.cocodataset.org/val2017/000000039769.jpg"
 
@@ -183,7 +185,7 @@ def test_generate(
         {
             "role": "user",
             "content": [
-                #{"type": "image", "url": "http://images.cocodataset.org/val2017/000000039769.jpg"},
+                {"type": "image", "url": "http://images.cocodataset.org/val2017/000000039769.jpg"},
                 {"type": "text", "text": prompt},
                 
             ],
@@ -192,19 +194,41 @@ def test_generate(
 
     image = Image.open(requests.get(url, stream=True).raw)
 
-    inputs = processor.apply_chat_template(messages, tokenize=True, return_dict=True, return_tensors="pt").to(device_type, dtype=torch.float32)
+    inputs = processor.apply_chat_template(messages, tokenize=True, return_dict=True, return_tensors="pt").to(device_type, dtype=torch.bfloat16)
                 #tokenized = tokenizer.apply_chat_template(conversation, tokenize=True, return_dict=True, return_tensors="pt")
 
-    #pixel_values = inputs["pixel_values"].to(device_type)
-    #image_sizes = inputs["image_sizes"]
+    torch_device='cuda:0'
+    hf_model = AutoModelForImageTextToText.from_pretrained("mistralai/Mistral-Small-3.1-24B-Instruct-2503", device_map=torch_device, torch_dtype=torch.bfloat16)
+
+    #print(hf_model.vision_tower.config)
+    #print(hf_model.vision_tower.patch_conv.weight)
+    #print(hf_model.multi_modal_projector.linear_1.weight)
+
+    pixel_values = inputs["pixel_values"].to(device_type)
+    image_sizes = inputs["image_sizes"]
     input_ids = inputs['input_ids'].to(device_type)
+
+    #import copy
+
+    #model.vision_tower = copy.deepcopy(model.vision_tower).to('cuda:0', dtype=torch.bfloat16)
+    #model.multi_modal_projector = copy.deepcopy(model.multi_modal_projector).to('cuda:0', dtype=torch.bfloat16)
+
+    #hf_model.vision_tower = model.vision_tower.to('cuda:0', dtype=torch.bfloat16)
+    #hf_model.multi_modal_projector = model.multi_modal_projector.to('cuda:0', dtype=torch.bfloat16)
+
+    #model.vision_tower = hf_model.vision_tower
+    #model.multi_modal_projector = hf_model.multi_modal_projector
+
+    #image_features = [model.get_image_features(pixel_values=pixel_values, vision_feature_layer=-1, image_sizes=image_sizes)[0].to('cuda:0', dtype=torch.float32)]
+
+    #print(image_features[0].dtype)
+    #exit(0)
 
     #print(f"original image sizes: {image_sizes}")
     #print(f"original pixel values: {pixel_values.shape}")
 
-    #images = ([image],)
-    images = set()
-
+    images = ([image],)
+    #images = set()
 
     device_memory_monitor.reset_peak_stats()
 
@@ -213,9 +237,11 @@ def test_generate(
     responses = generate(
         model,
         input_ids,
-        images=images,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
+        #image_features=image_features,
+        #images=(pixel_values, image_sizes),
+        images=images,
         top_k=top_k,
         seed=seed,
     )
