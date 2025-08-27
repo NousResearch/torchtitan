@@ -31,19 +31,19 @@ eps = 1e-8
 warmup_steps = 0 # lr scheduler warm up
 
 [training]
-local_batch_size = 4
-seq_len = 16384
+local_batch_size = 1
+seq_len = 8000
 max_norm = 1.0  # grad norm clipping
-steps = 500
+steps = 100
 compile = false
-dataset = "hermes4"
-dataset_path = "./multimodal_dataset"
-dataset_type = "preprocessed_multimodal"
+dataset = "hermes4text"
+dataset_path = "./dataset"
+dataset_type = "preprocessed"
 
 [parallelism]
 data_parallel_replicate_degree = 1
-data_parallel_shard_degree = 1
-tensor_parallel_degree = 8
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
 pipeline_parallel_degree = 1
 context_parallel_degree = 1
 
@@ -51,13 +51,13 @@ context_parallel_degree = 1
 enable_checkpoint = true
 initial_load_path = "/home/shared/torchtitan-conversions/mistral_small_3.1_instruct"
 folder = "checkpoint"
-interval = 100 
+interval = 500
 last_save_model_weights_only = false
 export_dtype = "float32"
 async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
 
 [activation_checkpoint]
-mode = "full"  # ["none", "selective", "full"]
+mode = "none"  # ["none", "selective", "full"]
 selective_ac_option = "op"  # "int" = ac every positive int layer or 'op', ac based on ops policy
 
 [float8]
