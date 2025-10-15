@@ -11,9 +11,7 @@ from typing import Any
 logger = logging.getLogger()
 
 from torchtitan.protocols.state_dict_adapter import StateDictAdapter
-
-from .args import TransformerModelArgs
-
+from torchtitan.models.llama3.model.args import TransformerModelArgs
 
 class Llama3StateDictAdapter(StateDictAdapter):
     def __init__(

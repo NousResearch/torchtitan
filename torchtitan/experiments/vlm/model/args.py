@@ -26,11 +26,19 @@ class SpecialTokens:
     @classmethod
     def from_tokenizer(cls, tokenizer: HuggingFaceTokenizer):
         SPECIAL_TOKENS_MAP = {
-            "img": "<|image|>",
-            "boi": "<|begin_of_image|>",
-            "eoi": "<|end_of_image|>",
+            "img": "<|pad|>",
+            "boi": "<|pad|>",
+            "eoi": "<|pad|>",
             "pad": "<|pad|>",
         }
+        """
+
+        SPECIAL_TOKENS_MAP = {
+            "img": "<image>",
+            "boi": "<unk>",
+            "eoi": "<unk>",
+            "pad": "<|pad|>" }
+        """
         added_tokens = tokenizer.tokenizer.get_added_tokens_decoder()
         token_to_id = {tok.content: tok_id for tok_id, tok in added_tokens.items()}
         special_tokens_dict = {}
@@ -55,6 +63,27 @@ class Siglip2ModelArgs:
     layer_norm_eps: float = 1e-6
     use_flex_attn: bool = True
     attn_mask_type: str = "causal"
+
+
+
+
+@dataclass
+class Qwen2_5VLEncoderArgs:
+    dim: int = 768
+    ffn_dim: int = 3072
+    n_layers: int = 32
+    n_heads: int = 16
+
+    n_pos_embs: int = 16  # Number of positional embeddings per h&w
+    n_channels: int = 3  # RGB channels
+    patch_size: int = 14
+    spatial_merge_size: int = 1
+
+    layer_norm_eps: float = 1e-6
+    use_flex_attn: bool = True
+    attn_mask_type: str = "causal"
+    window_size: int = 112 
+    fullatt_block_indices: list[int] = [7,15,23,31]
 
 
 @dataclass

@@ -208,7 +208,10 @@ class VisionTransformer(nn.Module):
 
         h = self.embeddings(pixel_values_NLD, grid_hw)
 
-        for layer in self.layers.values():
+        for i, layer in enumerate(self.layers.values()):
+            # in llava, -2 layer
+            if i == len(self.layers) - 2:
+                break
             h = layer(h)
         h = self.post_layernorm(h)
 

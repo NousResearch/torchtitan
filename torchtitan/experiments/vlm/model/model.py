@@ -36,8 +36,8 @@ class Projector(nn.Module):
 
     def __init__(self, in_dim: int, out_dim: int) -> None:
         super().__init__()
-        self.w1 = nn.Linear(in_dim, in_dim)
-        self.w2 = nn.Linear(in_dim, out_dim)
+        self.w1 = nn.Linear(in_dim, out_dim)
+        self.w2 = nn.Linear(out_dim, out_dim)
         self.init_weights()
 
     def forward(self, x_NLD: torch.Tensor):
@@ -53,7 +53,6 @@ class Projector(nn.Module):
         nn.init.xavier_uniform_(self.w2.weight)
         if self.w2.bias is not None:
             nn.init.zeros_(self.w2.bias)
-
 
 class Llama3Siglip2Transformer(Llama3):
     def __init__(self, model_args: Llama3Siglip2ModelArgs):
@@ -79,10 +78,11 @@ class Llama3Siglip2Transformer(Llama3):
         special_tokens: SpecialTokens,
         input_batch: torch.Tensor | None = None,
     ):
+
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h_BSD = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
-        if self.encoder is not None:
+        if self.encoder is not None and True is False:
             grid_hw = grid_thw[:, :, 1:]  # Siglip2 only support image hw
             pixel_masks = E.reduce(grid_hw != -1, "n l hw -> n l", reduction="all")
             i_NLD = self.encoder(pixel_values, pixel_masks, grid_hw)

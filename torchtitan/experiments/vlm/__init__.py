@@ -18,6 +18,7 @@ from .datasets.mm_datasets import build_mm_dataloader
 from .infra.parallelize import parallelize_vlm
 from .model.args import Llama3Siglip2ModelArgs, Siglip2ModelArgs
 from .model.model import Llama3Siglip2Transformer
+from .model.state_dict_adapter import Llama3Siglip2StateDictAdapter
 
 __all__ = [
     "parallelize_vlm",
@@ -37,12 +38,24 @@ llama3_siglip2_configs = {
             n_heads=2,
         ),
     ),
+    "llava_siglip_llama3_8b": Llama3Siglip2ModelArgs(
+        **asdict(replace(llama3_configs["8B"], vocab_size=128258)),
+        encoder=Siglip2ModelArgs(
+            dim=1152,
+            ffn_dim=4304,
+            n_layers=27,
+            n_heads=16,
+            patch_size=14,
+            spatial_merge_size=2,
+            n_pos_embs=27
+        ),
+    ),
 }
 
 
 def get_train_spec() -> TrainSpec:
     return TrainSpec(
-        name="llama3-siglip2",
+        name="vlm",
         model_cls=Llama3Siglip2Transformer,
         model_args=llama3_siglip2_configs,
         parallelize_fn=parallelize_vlm,
@@ -53,4 +66,5 @@ def get_train_spec() -> TrainSpec:
         build_tokenizer_fn=build_hf_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         build_validator_fn=build_validator,
+        state_dict_adapter=Llama3Siglip2StateDictAdapter,
     )

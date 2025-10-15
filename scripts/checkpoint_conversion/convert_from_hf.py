@@ -12,7 +12,7 @@ import torch.distributed.checkpoint as dcp
 import torchtitan.protocols.train_spec as train_spec_module
 from torch.distributed.checkpoint import HuggingFaceStorageReader
 from torchtitan.components.checkpoint import ModelWrapper
-
+from transformers import LlavaForConditionalGeneration
 
 @torch.inference_mode()
 def convert_from_hf(input_dir, output_dir, model_name, model_flavor):
@@ -34,9 +34,17 @@ def convert_from_hf(input_dir, output_dir, model_name, model_flavor):
     state_dict = model._get_state_dict()
     # convert empty state dict to hf format so that hf weights can be loaded into it
     hf_state_dict = sd_adapter.to_hf(state_dict)
+
+    #exit(0)
+
+    #hf_state_dict['language_model.lm_head.weight'] = hf_state_dict['model.language_model.embed_tokens.weight']
+    for key, value in hf_state_dict.items():
+        print(key, value.shape)
+
     dcp.load(
         hf_state_dict,
         storage_reader=HuggingFaceStorageReader(path=input_dir),
+        planner=dcp.default_planner.DefaultLoadPlanner(allow_partial_load=True)
     )
     # convert state dict format back hf->tt and save
     state_dict = sd_adapter.from_hf(hf_state_dict)
