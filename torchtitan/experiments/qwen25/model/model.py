@@ -15,8 +15,7 @@ from torchtitan.models.attention import build_attention
 from torchtitan.models.moe import MoE
 from torchtitan.protocols.train_spec import ModelProtocol
 
-from .args import Qwen3ModelArgs
-from typing import Optional
+from .args import Qwen25ModelArgs
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
 def precompute_rope_cache(
@@ -123,7 +122,7 @@ class Attention(nn.Module):
 
     """
 
-    def __init__(self, model_args: Qwen3ModelArgs):
+    def __init__(self, model_args: Qwen25ModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
@@ -149,10 +148,10 @@ class Attention(nn.Module):
             self.k_norm = None
 
         self.wq = nn.Linear(
-            model_args.dim, model_args.n_heads * self.head_dim, bias=False
+            model_args.dim, model_args.n_heads * self.head_dim, bias=True
         )
-        self.wk = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
-        self.wv = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=False)
+        self.wk = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=True)
+        self.wv = nn.Linear(model_args.dim, self.n_kv_heads * self.head_dim, bias=True)
         self.wo = nn.Linear(
             model_args.n_heads * self.head_dim, model_args.dim, bias=False
         )
@@ -279,7 +278,7 @@ class TransformerBlock(nn.Module):
 
     """
 
-    def __init__(self, layer_id: int, model_args: Qwen3ModelArgs):
+    def __init__(self, layer_id: int, model_args: Qwen25ModelArgs):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
@@ -339,7 +338,7 @@ class TransformerBlock(nn.Module):
             self.feed_forward.init_weights(self.weight_init_std)
 
 
-class Qwen3Model(nn.Module, ModelProtocol):
+class Qwen25Model(nn.Module, ModelProtocol):
     """
     Qwen3Model Module
 
@@ -358,7 +357,7 @@ class Qwen3Model(nn.Module, ModelProtocol):
 
     """
 
-    def __init__(self, model_args: Qwen3ModelArgs):
+    def __init__(self, model_args: Qwen25ModelArgs):
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size
@@ -428,8 +427,6 @@ class Qwen3Model(nn.Module, ModelProtocol):
         self,
         tokens: torch.Tensor,
         input_batch: torch.Tensor | None = None,
-        visual_pos_masks: Optional[torch.Tensor] = None,
-        deepstack_visual_embeds: Optional[list[torch.Tensor]] = None,
     ):
         """
         Perform a forward pass through the Transformer model.
@@ -451,27 +448,9 @@ class Qwen3Model(nn.Module, ModelProtocol):
         # passthrough for nonexistent layers, allows easy configuration of pipeline parallel stages
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
-        for layer_idx, layer in enumerate(self.layers.values()):
+        for layer in self.layers.values():
             h = layer(h, self.rope_cache)
-
-            if deepstack_visual_embeds is not None and layer_idx in range(len(deepstack_visual_embeds)):
-                h = self._deepstack_process(
-                    h,
-                    visual_pos_masks,
-                    deepstack_visual_embeds[layer_idx],
-                )
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h
         return output
-
-    
-    def _deepstack_process(
-        self, hidden_states: torch.Tensor, visual_pos_masks: torch.Tensor, visual_embeds: torch.Tensor
-    ):
-        visual_pos_masks = visual_pos_masks.to(hidden_states.device)
-        visual_embeds = visual_embeds.to(hidden_states.device, hidden_states.dtype)
-        hidden_states = hidden_states.clone()
-        local_this = hidden_states[visual_pos_masks[:, :, 0]] + visual_embeds
-        hidden_states[visual_pos_masks[:, :, 0]] = local_this
-        return hidden_states

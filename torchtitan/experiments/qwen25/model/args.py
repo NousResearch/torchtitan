@@ -13,14 +13,15 @@ from torch import nn
 
 from torchtitan.config import JobConfig
 from torchtitan.models.moe import MoEArgs
-from torchtitan.models.utils import get_moe_model_nparams_and_flops, get_dense_model_nparams_and_flops
+from torchtitan.models.utils import get_moe_model_nparams_and_flops
 from torchtitan.protocols.train_spec import BaseModelArgs
+from torchtitan.models.utils import get_dense_model_nparams_and_flops
 
 from torchtitan.tools.logging import logger
 
 
 @dataclass
-class Qwen3ModelArgs(BaseModelArgs):
+class Qwen25ModelArgs(BaseModelArgs):
 
     dim: int = 1024
     n_layers: int = 28
@@ -55,24 +56,6 @@ class Qwen3ModelArgs(BaseModelArgs):
             )
         self.max_seq_len = seq_len
 
-        #self.moe_args._debug_force_load_balance = (
-        #    job_config.training.debug_moe_force_load_balance
-        #)
-
-    # why is this stuff broken?
-    """
-    dict' object has no attribute '_debug_force_load_balance'
-  File "/home/artem_nous/torchtitan/torchtitan/experiments/qwen3/model/args.py", line 58, in update_from_config
-    self.moe_args._debug_force_load_balance = (
-  File "/home/artem_nous/torchtitan/torchtitan/train.py", line 151, in __init__
-    model_args.update_from_config(job_config)
-  File "/home/artem_nous/torchtitan/.venv/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 357, in wrapper
-    return f(*args, **kwargs)
-  File "/home/artem_nous/torchtitan/torchtitan/train.py", line 656, in <module>
-    trainer = Trainer(config)
-AttributeError: 'dict' object has no attribute '_debug_force_load_balance'
-
-    """
 
     def get_nparams_and_flops(
         self, model: nn.Module, seq_len: int
