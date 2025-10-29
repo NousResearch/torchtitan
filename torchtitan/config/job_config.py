@@ -918,6 +918,26 @@ class GRPO:
         If None, veto mechanism is disabled.
     """
 
+@dataclass
+class Simko:
+    """
+    Simko configuration for entropy-based training.
+    """
+    
+    use_simko: bool = False
+    """Enable simko entropy-based training"""
+    
+    simko_tau_percentile: int = 80
+    """Entropy threshold percentile"""
+    
+    simko_topk: int = 3
+    """Number of top candidates to consider"""
+    
+    simko_alpha: float = 0.01
+    """Label smoothing strength"""
+    
+    simko_lambda_top1: float = 1.1
+    """Penalty multiplier for top-1 negative samples"""
 
 @dataclass
 class JobConfig:
@@ -945,6 +965,7 @@ class JobConfig:
     experimental: Experimental = field(default_factory=Experimental)
     validation: Validation = field(default_factory=Validation)
     grpo: GRPO = field(default_factory=GRPO)
+    simko: Simko = field(default_factory=Simko)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

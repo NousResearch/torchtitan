@@ -175,6 +175,91 @@ def compose_grpo_loss(
 
     return loss
 
+def compute_token_entropy(pred, mask):
+    """
+    Compute entropy at each token position for identifying forking tokens.
+    
+    Args:
+        pred: Model predictions [batch_size, seq_len, vocab_size]
+        mask: Attention mask [batch_size, seq_len]
+    
+    Returns:
+        entropy: Entropy at each position [batch_size, seq_len]
+    """
+    log_probs = torch.nn.functional.log_softmax(pred, dim=-1)
+    probs = torch.exp(log_probs)
+    entropy = -(probs * log_probs).sum(dim=-1)
+    return entropy * mask
+
+
+def apply_simko_adjustment(
+    ratio, pred, labels, reward, mask,
+    alpha=0.01, K=3, lambda_top1=1.1, tau_percentile=80
+):
+    """
+    Apply SimKO adjustments to policy ratio.
+    
+    Args:
+        ratio: Original policy ratio [batch_size, seq_len]
+        pred: Model predictions [batch_size, seq_len, vocab_size]
+        labels: Target labels [batch_size, seq_len]
+        reward: Advantages [batch_size, seq_len]
+        mask: Attention mask [batch_size, seq_len]
+        alpha: Label smoothing strength
+        K: Number of top candidates
+        lambda_top1: Penalty multiplier for top-1 negatives
+        tau_percentile: Entropy threshold percentile
+    
+    Returns:
+        adjusted_ratio: Ratio with SimKO adjustments
+    """
+    # 1. Identify forking tokens (high-entropy)
+    entropy = compute_token_entropy(pred, mask)
+    valid_entropy = entropy[mask.bool()]
+    if len(valid_entropy) > 0:
+        tau = torch.quantile(valid_entropy, tau_percentile / 100.0)
+        w = (entropy > tau).float()
+    else:
+        w = torch.zeros_like(mask)
+    
+    # 2. Get top-K tokens and compute their ratios
+    _, topk_indices = torch.topk(pred, k=K, dim=-1)
+    new_log_probs_full = torch.nn.functional.log_softmax(pred, dim=-1)
+    topk_new_log_probs = torch.gather(new_log_probs_full, dim=-1, index=topk_indices)
+    
+    with torch.no_grad():
+        pred_detached = pred.detach()
+        topk_old_log_probs_full = torch.nn.functional.log_softmax(pred_detached, dim=-1)
+        topk_old_log_probs = torch.gather(topk_old_log_probs_full, dim=-1, index=topk_indices)
+    
+    topk_ratios = torch.exp(topk_new_log_probs - topk_old_log_probs)
+    
+    # 3. Compute combined top-K ratio with stop-gradient trick
+    ratio_expanded = ratio.unsqueeze(-1)
+    ratio_correction = ratio_expanded.detach() / topk_ratios.detach()
+    corrected_topk_ratios = ratio_correction * topk_ratios
+    topk_ratio_combined = corrected_topk_ratios.sum(dim=-1)
+    
+    # 4. For positive advantages we blend with top-K ratio
+    adjusted_ratio = ratio.clone()
+    pos_mask = (reward > 0).float() * w * mask
+    adjusted_ratio = torch.where(
+        pos_mask.bool(),
+        (1 - alpha * w) * ratio + (alpha * w / K) * topk_ratio_combined,
+        adjusted_ratio
+    )
+    
+    # 5. For negative advantages: apply stronger penalty to top-1
+    pred_argmax = torch.argmax(pred, dim=-1)
+    is_top1 = (labels == pred_argmax).float()
+    neg_top1_mask = (reward < 0).float() * is_top1 * w * mask
+    adjusted_ratio = torch.where(
+        neg_top1_mask.bool(),
+        adjusted_ratio * lambda_top1,
+        adjusted_ratio
+    )
+    
+    return adjusted_ratio
 
 def compute_grpo_loss_from_predictions(
     pred,
@@ -250,7 +335,25 @@ def compute_grpo_loss_from_predictions(
         logp, old_logp, mask, job_config.grpo.policy_ratio_type
     )
 
-    # For off-policy, apply clipping to ratio
+    enable_simko = getattr(job_config.simko, 'use_simko', False)
+    if enable_simko:
+        simko_alpha = getattr(job_config.simko, 'simko_alpha', 0.01)
+        simko_K = getattr(job_config.simko, 'simko_topk', 3)
+        simko_lambda = getattr(job_config.simko, 'simko_lambda_top1', 1.1)
+        simko_tau = getattr(job_config.simko, 'simko_tau_percentile', 80)
+        
+        ratio = apply_simko_adjustment(
+            ratio=ratio,
+            pred=pred,
+            labels=labels,
+            reward=reward,
+            mask=mask,
+            alpha=simko_alpha,
+            K=simko_K,
+            lambda_top1=simko_lambda,
+            tau_percentile=simko_tau,
+        )
+
     if old_logp is not None:
         logger.debug("Applying ratio clipping to off-policy loss")
         coef_1 = torch.clamp(ratio, None, 1 + job_config.grpo.clip_ratio_upper_bound)

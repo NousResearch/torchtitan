@@ -2,7 +2,7 @@
 # NOTE: this toml config is a preset for 64 A100 GPUs.
 
 [job]
-dump_folder = "/home/dakota/7b_qwen_base_debug"
+dump_folder = "/home/nous/7b_qwen_base_debug"
 description = "qwen_7b_grpo"
 
 [profiling]
@@ -79,8 +79,15 @@ rollout_is_level = "sequence"
 rollout_is_mode = "truncate"
 rollout_is_threshold = 4.0
 
+[simko]
+use_simko = false
+simko_tau_percentile = 80 # Entropy threshold percentile
+simko_topk = 3 # Number of top candidates to consider
+simko_alpha = 0.01 # Label smoothing strength
+simko_lambda_top1 = 1.05  # Penalty multiplier for top-1 negative samples
+
 [checkpoint]
-enable = true
+enable = false
 folder = "checkpoints"
 initial_load_path = "/home/shared/torchtitan-conversions/qwen_2-5_7b"
 initial_load_legacy = true
