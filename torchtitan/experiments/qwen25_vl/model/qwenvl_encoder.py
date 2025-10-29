@@ -13,7 +13,7 @@ from typing import Optional, Tuple, Union, List, Dict, Any
 
 from torchtitan.models.attention import build_attention, init_attention_mask
 
-from .args import Qwen2_5VLEncoderArgs
+from .args import Qwen25VLEncoderArgs
 
 VISION_ACT_FN = nn.SiLU 
 
@@ -61,7 +61,7 @@ class Qwen2RMSNorm(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, args: Qwen2_5VLEncoderArgs, bias: bool = False):
+    def __init__(self, args: Qwen25VLEncoderArgs, bias: bool = False):
         super().__init__()
         self.hidden_size = args.dim
         self.intermediate_size = args.ffn_dim
@@ -79,7 +79,7 @@ class VisionEmbeddings(nn.Module):
     Qwen2.5-VL uses Conv3D(T, P, P) with stride (T, P, P). Here we implement an equivalent Linear on flattened 3D patches.
     No positional embeddings are used, we will use RoPE layer.
     """
-    def __init__(self, args: Qwen2_5VLEncoderArgs):
+    def __init__(self, args: Qwen25VLEncoderArgs):
         super().__init__()
         self.patch_embedding = nn.Linear(
             in_features=args.n_channels * args.patch_size * args.patch_size,
@@ -110,7 +110,7 @@ class RotaryEmbedding(nn.Module):
 
 
 class PatchMerger(nn.Module):
-    def __init__(self, args: Qwen2_5VLEncoderArgs) -> None:
+    def __init__(self, args: Qwen25VLEncoderArgs) -> None:
         super().__init__()
         self.out_dim = args.out_dim
         self.hidden_size = args.dim * (args.spatial_merge_size**2)
@@ -130,7 +130,7 @@ class VisionPatchEmbed(nn.Module):
     """
     Qwen2.5-VL uses Conv3D(T, P, P) with stride (T, P, P). Here we implement an equivalent Linear on flattened 3D patches.
     """
-    def __init__(self, args: Qwen2_5VLEncoderArgs):
+    def __init__(self, args: Qwen25VLEncoderArgs):
         super().__init__()
         self.in_channels = args.n_channels
         self.temporal_patch_size = args.temporal_patch_size
@@ -149,7 +149,7 @@ class VisionAttention(nn.Module):
     Shapes follow HF reference:
       - We flatten batch and run attention over each contiguous segment.
     """
-    def __init__(self, args: Qwen2_5VLEncoderArgs, attn_impl: str = "eager"):
+    def __init__(self, args: Qwen25VLEncoderArgs, attn_impl: str = "eager"):
         super().__init__()
         self.dim = args.dim
         self.num_heads = args.n_heads
@@ -220,7 +220,7 @@ class VisionAttention(nn.Module):
         return self.proj(out)    # [S, D]
 
 class VisionBlock(nn.Module):
-    def __init__(self, args: Qwen2_5VLEncoderArgs, attn_implementation: str = "sdpa") -> None:
+    def __init__(self, args: Qwen25VLEncoderArgs, attn_implementation: str = "sdpa") -> None:
         super().__init__()
         self.norm1 = Qwen2RMSNorm(args.dim, eps=1e-6)
         self.norm2 = Qwen2RMSNorm(args.dim, eps=1e-6)
@@ -253,7 +253,7 @@ class VisionBlock(nn.Module):
         return hidden_states
 
 class QwenVisionTransformer(nn.Module):
-    def __init__(self, args: Qwen2_5VLEncoderArgs) -> None:
+    def __init__(self, args: Qwen25VLEncoderArgs) -> None:
         super().__init__()
 
         self.patch_embed = VisionPatchEmbed(args)

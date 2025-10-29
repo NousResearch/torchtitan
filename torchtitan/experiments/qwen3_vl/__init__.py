@@ -18,7 +18,7 @@ from .datasets.mm_datasets import build_mm_dataloader
 from .infra.parallelize import parallelize_vlm
 from .model.args import Qwen3VLModelArgs, Qwen3VLEncoderArgs
 from .model.model import Qwen3VLTransformer
-#from .model.state_dict_adapter import Llama3Siglip2StateDictAdapter
+from .model.state_dict_adapter import Qwen3VLStateDictAdapter
 # import qwen25_configs
 from ..qwen3 import qwen3_configs
 
@@ -27,14 +27,16 @@ qwen3_vl_configs = {
     "8B": Qwen3VLModelArgs(
         **asdict(replace(qwen3_configs["8B"])),
         encoder=Qwen3VLEncoderArgs(
-            dim=1280,
+            dim=1152,
+            hidden_size=1152,
             out_dim=4096,
-            ffn_dim=3420,
-            n_layers=32,
+            ffn_dim=4304,
+            n_layers=27,
             n_heads=16,
-            patch_size=14,
+            patch_size=16,
             spatial_merge_size=2,
             n_pos_embs=27
+
         ),
     ),
 }
@@ -52,5 +54,5 @@ def get_train_spec() -> TrainSpec:
         build_tokenizer_fn=build_hf_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         build_validator_fn=build_validator,
-        #state_dict_adapter=Llama3Siglip2StateDictAdapter,
+        state_dict_adapter=Qwen3VLStateDictAdapter,
     )

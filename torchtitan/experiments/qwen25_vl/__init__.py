@@ -16,8 +16,9 @@ from torchtitan.protocols.train_spec import TrainSpec
 
 from .datasets.mm_datasets import build_mm_dataloader
 from .infra.parallelize import parallelize_vlm
-from .model.args import Qwen25VLModelArgs, Qwen2_5VLEncoderArgs
+from .model.args import Qwen25VLModelArgs, Qwen25VLEncoderArgs
 from .model.model import Qwen25VLTransformer
+from .model.state_dict_adapter import Qwen25VLStateDictAdapter
 #from .model.state_dict_adapter import Llama3Siglip2StateDictAdapter
 # import qwen25_configs
 from ..qwen25 import qwen25_configs
@@ -26,7 +27,7 @@ from ..qwen25 import qwen25_configs
 qwen25_vl_configs = {
     "7B": Qwen25VLModelArgs(
         **asdict(replace(qwen25_configs["7B"])),
-        encoder=Qwen2_5VLEncoderArgs(
+        encoder=Qwen25VLEncoderArgs(
             dim=1280,
             out_dim=3584,
             ffn_dim=3420,
@@ -52,5 +53,5 @@ def get_train_spec() -> TrainSpec:
         build_tokenizer_fn=build_hf_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         build_validator_fn=build_validator,
-        #state_dict_adapter=Llama3Siglip2StateDictAdapter,
+        state_dict_adapter=Qwen25VLStateDictAdapter,
     )

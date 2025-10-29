@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from torchtitan.components.tokenizer import HuggingFaceTokenizer
 
 #from torchtitan.models.llama3 import TransformerModelArgs as Llama3Args
-from torchtitan.experiments.qwen3.model.args import Qwen3ModelArgs
+from torchtitan.experiments.qwen25.model.args import Qwen25ModelArgs
 
 
 @dataclass
@@ -55,12 +55,13 @@ class SpecialTokens:
         return cls(**special_tokens_dict)
 
 @dataclass
-class Qwen3VLEncoderArgs:
+class Qwen25VLEncoderArgs:
     dim: int = 768
     ffn_dim: int = 3072
     n_layers: int = 32
     n_heads: int = 16
-    hidden_size: int = 1280 
+    hidden_size: int = 1152
+    num_position_embeddings: int = 2304
     out_dim: int = 3584
     deepstack_visual_indexes: list[int] = field(default_factory=lambda: [8,16,24])
 
@@ -77,5 +78,5 @@ class Qwen3VLEncoderArgs:
     fullatt_block_indexes: list[int] = field(default_factory=lambda: [7,15,23,31])
 
 @dataclass
-class Qwen3VLModelArgs(Qwen3ModelArgs):
-    encoder: Qwen3VLEncoderArgs = field(default_factory=Qwen3VLEncoderArgs)
+class Qwen25VLModelArgs(Qwen25ModelArgs):
+    encoder: Qwen25VLEncoderArgs = field(default_factory=Qwen25VLEncoderArgs)

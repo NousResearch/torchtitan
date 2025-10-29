@@ -16,60 +16,22 @@ from .args import Qwen25VLModelArgs
 from .qwenvl_encoder import QwenVisionTransformer
 from ...qwen25.model.model import Qwen25Model
 
-def _scatter_img_tokens(h_BSD, tokens_BS, i_NLD, i_mask_NL, img_id):
-    B, S, D = h_BSD.shape
-    # Where are the image tokens in LLM input, make broadcastable with h_BSD
-    img_mask_h_BSD = E.repeat(tokens_BS == img_id, "b s -> b s 1")
-    # Only get valid (non-padded) tokens, result are flatten
-    i_flatten = torch.masked_select(i_NLD, mask=i_mask_NL.unsqueeze(-1))
-
-    assert i_flatten.numel() // D == img_mask_h_BSD.sum(), (
-        f"Different number of visual embeddings {i_flatten.numel() // D} "
-        f"with placeholder in input token embeddings {img_mask_h_BSD.sum()}"
-    )
-    h_BSD.masked_scatter_(mask=img_mask_h_BSD, source=i_flatten)
-    return h_BSD
-
-
-class Projector(nn.Module):
-    """Project the Encoder embedding to the LLM embedding."""
-
-    def __init__(self, in_dim: int, out_dim: int) -> None:
-        super().__init__()
-        self.w1 = nn.Linear(in_dim, out_dim)
-        self.w2 = nn.Linear(out_dim, out_dim)
-        self.init_weights()
-
-    def forward(self, x_NLD: torch.Tensor):
-        x_NLD = self.w1(x_NLD)
-        x_NLD = nn.functional.silu(x_NLD)
-        x_NLD = self.w2(x_NLD)
-        return x_NLD
-
-    def init_weights(self):
-        nn.init.xavier_uniform_(self.w1.weight)
-        if self.w1.bias is not None:
-            nn.init.zeros_(self.w1.bias)
-        nn.init.xavier_uniform_(self.w2.weight)
-        if self.w2.bias is not None:
-            nn.init.zeros_(self.w2.bias)
-
 class Qwen25VLTransformer(Qwen25Model):
 
     def __init__(self, model_args: Qwen25VLModelArgs):
         super().__init__(model_args)
         self.model_args = model_args
         self.encoder = QwenVisionTransformer(model_args.encoder)
-        self.projector = Projector(
-            in_dim=model_args.encoder.dim, out_dim=model_args.dim
-        )
+        #self.projector = Projector(
+        #    in_dim=model_args.encoder.dim, out_dim=model_args.dim
+        #)
 
     def init_weights(self, buffer_device=None):
         super().init_weights(buffer_device=buffer_device)
         if self.encoder is not None:
             self.encoder.init_weights()
-        if self.projector is not None:
-            self.projector.init_weights()
+        #if self.projector is not None:
+        #    self.projector.init_weights()
 
     def forward(
         self,
