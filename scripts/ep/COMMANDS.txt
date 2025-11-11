@@ -1,0 +1,53 @@
+# Quick Commands for EP Performance Analysis
+
+# 1. 🌐 Launch Interactive Web Dashboard (RECOMMENDED!)
+./scripts/ep/START_DASHBOARD.sh
+# Creates a public Gradio link you can access from your local browser
+# Features:
+#   - Real-time interactive Plotly graphs (zoom, pan, hover for details)
+#   - Global performance overview with 4 key metrics
+#   - Detailed contribution analysis with % breakdown
+#   - Box plots showing variance across ranks and iterations
+#   - Rank-level comparison to identify load imbalance
+#   - Comprehensive data table with all operation statistics
+#   - Adjustable sliders to control number of operations shown
+
+# 2. See the comparison table (recommended - start here!)
+./scripts/ep/compare_profiles.sh
+
+# 3. Run advanced analysis with interactive plots
+env/bin/python scripts/ep/advanced_analysis.py
+# Generates: boxplot.html, waterfall.html, rank_comparison.html in scripts/ep/
+
+# 4. View quick start guide
+cat scripts/ep/QUICK_START.txt
+
+# 5. Re-run profiling (takes ~2 min each)
+./scripts/ep/run_profiling.sh ep1
+./scripts/ep/run_profiling.sh ep2
+./scripts/ep/run_profiling.sh both   # Run both
+
+# 6. Read comprehensive analysis
+cat scripts/ep/EP_PERFORMANCE_ANALYSIS.md
+# Or: less scripts/ep/EP_PERFORMANCE_ANALYSIS.md
+
+# 7. Read advanced analysis documentation
+cat scripts/ep/ADVANCED_ANALYSIS.md
+
+# 8. Read detailed documentation
+cat scripts/ep/README.md
+
+# 9. Direct Python analysis (advanced)
+env/bin/python scripts/ep/detailed_trace_analysis.py
+
+# 10. Check profiling logs
+tail -100 ep1_profile_run.log
+tail -100 ep2_profile_run.log
+
+# 11. List all generated files
+ls -lah scripts/ep/
+ls -lah outputs_profile_ep*/
+
+# 12. View trace files (JSON format)
+ls outputs_profile_ep1/profile_trace/iteration_5/
+ls outputs_profile_ep2/profile_trace/iteration_5/

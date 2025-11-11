@@ -76,6 +76,18 @@ def maybe_enable_profiling(
             schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active),
             on_trace_ready=trace_handler,
             record_shapes=True,
+            profile_memory=True,  # Track memory allocations and deallocations
+            with_stack=True,  # Record source information (file names and line numbers)
+            with_flops=True,  # Estimate FLOPs for operations
+            with_modules=True,  # Record module hierarchy information
+            experimental_config=torch._C._profiler._ExperimentalConfig(
+                verbose=True,  # Enable verbose logging
+                profiler_measure_per_kernel=True,  # Measure per-kernel performance
+                enable_cuda_sync_events=True,  # Enable CUDA synchronization events for better accuracy
+                profile_all_threads=True,  # Profile all threads, not just main thread
+                capture_overload_names=True,  # Capture overload names for better op identification
+                record_python_gc_info=True,  # Record Python GC info for memory analysis
+            ),
         ) as torch_profiler:
             torch_profiler.step_num = global_step
             yield torch_profiler

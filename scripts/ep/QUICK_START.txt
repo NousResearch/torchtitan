@@ -1,0 +1,84 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                  EP PERFORMANCE ANALYSIS - QUICK START                    ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ 1. VIEW EXISTING COMPARISON TABLE                                        │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    ./scripts/ep/compare_profiles.sh
+
+    This shows the top 30 operations that differ between EP=2 and EP=1.
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ 2. RE-RUN PROFILING (OPTIONAL)                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    # Run both EP=1 and EP=2
+    ./scripts/ep/run_profiling.sh both
+
+    # Or run individually
+    ./scripts/ep/run_profiling.sh ep1
+    ./scripts/ep/run_profiling.sh ep2
+
+    Note: Each run takes ~1-2 minutes
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ 3. READ THE FULL ANALYSIS                                                │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    cat scripts/ep/EP_PERFORMANCE_ANALYSIS.md
+
+    Or in your IDE: scripts/ep/EP_PERFORMANCE_ANALYSIS.md
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ KEY FINDINGS                                                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    ✗ EP=2 is 35% SLOWER than EP=1 (5,900 vs 7,961 TPS)
+
+    Root Cause: Synchronous device-to-host memory transfers
+    Location: torchtitan/distributed/expert_parallel.py:104
+
+    Top Bottlenecks:
+    • aten::_to_copy:      +2,314ms (+837%)  ← Main culprit
+    • cudaMemcpyAsync:      +781ms (+1,350%)
+    • nccl:all_to_all:    +1,115ms (new)
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ PROPOSED FIX                                                              │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    File: torchtitan/distributed/expert_parallel.py
+    Line: 104
+
+    Change from:
+        .to(torch.device("cpu"), non_blocking=False)
+
+    To:
+        .to(torch.device("cpu"), non_blocking=True)
+
+    Expected improvement: 20-30% throughput increase
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ FILES IN scripts/ep/                                                      │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    compare_profiles.sh          ← Run this to see the table
+    run_profiling.sh             ← Re-run profiling
+    EP_PERFORMANCE_ANALYSIS.md   ← Full technical report
+    README.md                    ← Detailed documentation
+
+    detailed_trace_analysis.py   ← Python analysis script
+    analyze_traces.py            ← Basic analysis script
+
+    profile_ep1_config.toml      ← EP=1 profiling config
+    profile_ep2_config.toml      ← EP=2 profiling config
+
+┌───────────────────────────────────────────────────────────────────────────┐
+│ NEED HELP?                                                                │
+└───────────────────────────────────────────────────────────────────────────┘
+
+    cat scripts/ep/README.md     ← Comprehensive guide
+
+╚═══════════════════════════════════════════════════════════════════════════╝
