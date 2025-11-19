@@ -105,6 +105,15 @@ DATASETS = {
             "/home/shared/datasets/OmniEditFiltered1-2M_hermes4_14b/",
         ],
     },
+    "multimodal_only": {
+        "pretrain_mixin_paths": [],
+        "chat_data_paths": [
+            "/home/shared/datasets/HoneyData15M_hermes4_14b/",
+            "/home/shared/datasets/text-to-image-2M_hermes4_14b/",
+            "/home/shared/datasets/OpenGPT-4o-Image_hermes4_14b/",
+            "/home/shared/datasets/OmniEditFiltered1-2M_hermes4_14b/",
+        ],
+    },
 }
 
 
