@@ -18,12 +18,12 @@ enable_wandb = true
 [model]
 name = "qwen3"
 flavor = "4B_vq_flex"
-hf_assets_path = "/home/dakota/github/torchtitan/assets/hf/Hermes-4-14B-vq-expanded"
+hf_assets_path = "/home/dakota/github/torchtitan/assets/hf/qwen3-4b-img-vq-expanded/"
 # converters = ["float8"]
 
 [optimizer]
 name = "AdamW"
-lr = 8e-4
+lr = 4e-4
 eps = 1e-8
 
 [lr_scheduler]
@@ -50,7 +50,7 @@ context_parallel_degree = 1
 enable = true
 folder = "checkpoint"
 interval = 500
-initial_load_in_hf = false
+initial_load_in_hf = true
 last_save_model_only = true
 last_save_in_hf = true
 export_dtype = "bfloat16"
