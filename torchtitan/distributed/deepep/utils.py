@@ -172,6 +172,99 @@ class PrimusTurboDeepepManager:
         async_finish: bool = False,
         allocate_on_comm_stream: bool = False,
     ) -> torch.Tensor:
+        import os
+
+        DEBUG_TOKEN_DIST = os.environ.get("DEBUG_GRAD_NORM", "0") == "1"
+        DEBUG_EP_PROB = os.environ.get("DEBUG_EP_PROB", "0") == "1"
+
+        # =====================================================================
+        # DEBUG LOGGING: Check token_indices BEFORE dispatch
+        # =====================================================================
+        # PURPOSE: Verify router expert selection distribution. If all tokens
+        # are routed to experts 0-15 (rank 0), this is the source of imbalance.
+        #
+        # With EP=8 and 128 experts:
+        #   - Rank 0: experts 0-15
+        #   - Rank 1: experts 16-31
+        #   - etc.
+        #
+        # Expected: roughly uniform distribution across all 128 experts
+        # Bug: if only experts 0-15 selected, all tokens go to rank 0
+        #
+        # ENABLE: Set DEBUG_EP_PROB=1 environment variable
+        # =====================================================================
+        if DEBUG_EP_PROB:
+            import torch.distributed as dist
+            from torchtitan.tools.logging import logger
+
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+
+            # Analyze expert indices BEFORE dispatch
+            # token_indices: [num_tokens, top_k] - which experts each token is routed to
+            indices_flat = self.token_indices.view(-1)
+
+            # Count tokens per rank destination
+            num_experts_per_rank = self.num_experts // world_size
+            tokens_per_dest_rank = []
+            for r in range(world_size):
+                start_exp = r * num_experts_per_rank
+                end_exp = (r + 1) * num_experts_per_rank
+                count = (
+                    ((indices_flat >= start_exp) & (indices_flat < end_exp))
+                    .sum()
+                    .item()
+                )
+                tokens_per_dest_rank.append(count)
+
+            # Compute statistics
+            min_idx = self.token_indices.min().item()
+            max_idx = self.token_indices.max().item()
+            mean_idx = self.token_indices.float().mean().item()
+
+            # Gather stats from all ranks
+            local_stats = torch.tensor(
+                [min_idx, max_idx, mean_idx] + tokens_per_dest_rank,
+                device=hidden_states.device,
+            )
+            all_stats = [torch.zeros_like(local_stats) for _ in range(world_size)]
+            dist.all_gather(all_stats, local_stats)
+
+            if rank == 0:
+                logger.info(
+                    f"[TOKEN_INDICES] === BEFORE dispatch (expert selection analysis) ==="
+                )
+                logger.info(
+                    f"[TOKEN_INDICES] num_experts={self.num_experts}, experts_per_rank={num_experts_per_rank}"
+                )
+                for r, stats in enumerate(all_stats):
+                    min_i, max_i, mean_i = (
+                        stats[0].item(),
+                        stats[1].item(),
+                        stats[2].item(),
+                    )
+                    dest_counts = [int(stats[3 + i].item()) for i in range(world_size)]
+                    logger.info(
+                        f"[TOKEN_INDICES] rank {r}: expert_idx min={min_i:.0f}, max={max_i:.0f}, mean={mean_i:.1f}"
+                    )
+                    logger.info(
+                        f"[TOKEN_INDICES] rank {r}: tokens_per_dest_rank={dest_counts}"
+                    )
+
+                # Total tokens going to each rank (summed across all source ranks)
+                total_per_dest = [
+                    sum(all_stats[r][3 + d].item() for r in range(world_size))
+                    for d in range(world_size)
+                ]
+                logger.info(
+                    f"[TOKEN_INDICES] TOTAL tokens per dest rank: {total_per_dest}"
+                )
+                max_dest = max(total_per_dest)
+                min_dest = min(total_per_dest) + 1e-10
+                logger.info(
+                    f"[TOKEN_INDICES] Dest rank imbalance ratio: {max_dest/min_dest:.2f}x"
+                )
+
         # DeepEP only supports float32 probs
         self.num_local_experts = self.num_experts // torch.distributed.get_world_size(
             group
@@ -233,6 +326,19 @@ class PrimusTurboDeepepManager:
                     self.num_recv_tokens.copy_(num_recv_tokens, non_blocking=True)
             else:
                 self.num_recv_tokens = num_recv_tokens
+
+        # Debug logging for token distribution
+        if DEBUG_TOKEN_DIST and torch.distributed.get_rank() == 0:
+            from torchtitan.tools.logging import logger
+
+            total_tokens = self.tokens_per_expert.sum().item()
+            logger.info(
+                f"[TOKEN_DIST] Rank 0 received {total_tokens:.0f} tokens for {self.num_local_experts} local experts"
+            )
+            logger.info(
+                f"[TOKEN_DIST] tokens_per_expert (first 8): {self.tokens_per_expert[:8].tolist()}"
+            )
+
         return hidden_states
 
     def combine(
@@ -333,6 +439,53 @@ class PrimusTurboDeepepManager:
     def get_permuted_hidden_states_by_experts(
         self, hidden_states: torch.Tensor
     ) -> torch.Tensor:
+        # =====================================================================
+        # DEBUG LOGGING: Track dispatched_probs before/after permutation
+        # =====================================================================
+        # PURPOSE: Investigate gradient imbalance - trace routing probabilities
+        # through the dispatch pipeline to find where asymmetry is introduced.
+        #
+        # FLOW:
+        #   1. Router produces top_scores, selected_indices
+        #   2. dispatch_preprocess() sets self.token_probs, self.token_indices
+        #   3. dispatch() calls fused_dispatch → returns dispatched_indices, dispatched_probs
+        #   4. get_permuted_hidden_states_by_experts() → permutes hidden_states and probs
+        #   5. GroupedExperts.forward() receives permuted_probs as routed_prob
+        #
+        # ENABLE: Set DEBUG_EP_PROB=1 environment variable
+        # =====================================================================
+        import os
+
+        DEBUG_EP_PROB = os.environ.get("DEBUG_EP_PROB", "0") == "1"
+
+        if DEBUG_EP_PROB:
+            import torch.distributed as dist
+            from torchtitan.tools.logging import logger
+
+            rank = dist.get_rank()
+            world_size = dist.get_world_size()
+
+            # Log dispatched_probs BEFORE fused_indices_to_multihot
+            if self.dispatched_probs is not None:
+                dp_mean = self.dispatched_probs.mean().item()
+                dp_sum = self.dispatched_probs.sum().item()
+                dp_numel = self.dispatched_probs.numel()
+
+                local_stats = torch.tensor(
+                    [dp_mean, dp_sum, dp_numel], device=self.dispatched_probs.device
+                )
+                all_stats = [torch.zeros_like(local_stats) for _ in range(world_size)]
+                dist.all_gather(all_stats, local_stats)
+
+                if rank == 0:
+                    logger.info(
+                        f"[DISPATCH_PROBS] === BEFORE fused_indices_to_multihot ==="
+                    )
+                    for r, stats in enumerate(all_stats):
+                        logger.info(
+                            f"[DISPATCH_PROBS] rank {r}: mean={stats[0].item():.6f}, sum={stats[1].item():.2f}, numel={int(stats[2].item())}"
+                        )
+
         if True:
             (
                 self.dispatched_routing_map,
@@ -380,6 +533,52 @@ class PrimusTurboDeepepManager:
             self.dispatched_routing_map,
             probs=self.dispatched_probs,
         )
+
+        # =====================================================================
+        # DEBUG LOGGING: Track permuted_probs AFTER permutation
+        # =====================================================================
+        # This is the final routed_prob that will be passed to GroupedExperts.forward()
+        # If this is asymmetric across ranks, it explains the gradient imbalance.
+        # =====================================================================
+        if DEBUG_EP_PROB:
+            if permuted_probs is not None:
+                pp_mean = permuted_probs.mean().item()
+                pp_sum = permuted_probs.sum().item()
+                pp_numel = permuted_probs.numel()
+                pp_min = permuted_probs.min().item()
+                pp_max = permuted_probs.max().item()
+
+                local_stats = torch.tensor(
+                    [pp_mean, pp_sum, pp_numel, pp_min, pp_max],
+                    device=permuted_probs.device,
+                )
+                all_stats = [torch.zeros_like(local_stats) for _ in range(world_size)]
+                dist.all_gather(all_stats, local_stats)
+
+                if rank == 0:
+                    logger.info(
+                        f"[PERMUTED_PROBS] === AFTER permute() - FINAL routed_prob ==="
+                    )
+                    for r, stats in enumerate(all_stats):
+                        logger.info(
+                            f"[PERMUTED_PROBS] rank {r}: mean={stats[0].item():.6f}, sum={stats[1].item():.2f}, numel={int(stats[2].item())}, min={stats[3].item():.6f}, max={stats[4].item():.6f}"
+                        )
+
+                    # Compute ratio
+                    means = [s[0].item() for s in all_stats]
+                    max_mean = max(means)
+                    min_mean = min(means) + 1e-10
+                    logger.info(
+                        f"[PERMUTED_PROBS] Ratio (max/min mean): {max_mean/min_mean:.2f}x"
+                    )
+
+                    # Also check sum ratio (total probability mass per rank)
+                    sums = [s[1].item() for s in all_stats]
+                    max_sum = max(sums)
+                    min_sum = min(sums) + 1e-10
+                    logger.info(
+                        f"[PERMUTED_PROBS] Sum ratio (max/min): {max_sum/min_sum:.2f}x (total probability mass)"
+                    )
 
         # ============================================================================
         # MEMORY OPTIMIZATION: Release dispatched_routing_map early

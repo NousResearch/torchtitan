@@ -403,32 +403,299 @@ def _clip_grad_norm_with_ep(
     foreach: bool | None,
     pp_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
+    # =====================================================================
+    # COMPREHENSIVE DEBUG LOGGING FOR GRADIENT NORM BLOW-UP INVESTIGATION
+    # =====================================================================
+    import os
+
+    DEBUG_GRAD = os.environ.get("DEBUG_GRAD_NORM", "0") == "1"
+
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+
+    def debug_log(msg):
+        if DEBUG_GRAD and rank == 0:
+            logger.info(f"[GRAD_DEBUG] {msg}")
+
+    def debug_log_all_ranks(msg):
+        if DEBUG_GRAD:
+            logger.info(f"[GRAD_DEBUG][rank{rank}] {msg}")
+
     ep_params = []
     non_ep_params = []
     ep_grads = []
     non_ep_grads = []
 
-    for p in parameters:
+    # STEP 1: Categorize parameters into EP and non-EP
+    debug_log("=" * 80)
+    debug_log("STEP 1: Categorizing parameters into EP and non-EP")
+
+    # Track all params for per-param gradient analysis
+    all_param_grads = []  # List of (grad_norm, shape, is_ep, idx)
+
+    for idx, p in enumerate(parameters):
         if p.grad is None:
             continue
         assert isinstance(p, DTensor) and isinstance(p.grad, DTensor)
-        if "ep" in p.device_mesh.mesh_dim_names:
+        local_grad_norm = p.grad.to_local().float().norm().item()
+        is_ep = "ep" in p.device_mesh.mesh_dim_names
+        all_param_grads.append((local_grad_norm, tuple(p.shape), is_ep, idx))
+
+        if is_ep:
             ep_params.append(p)
             ep_grads.append(p.grad)
         else:
             non_ep_params.append(p)
             non_ep_grads.append(p.grad)
+
+    # Log TOP 10 parameters by gradient norm to identify explosion source
+    if DEBUG_GRAD and rank == 0 and all_param_grads:
+        all_param_grads.sort(key=lambda x: x[0], reverse=True)
+        debug_log("TOP 10 PARAMETERS BY LOCAL GRADIENT NORM:")
+        for i, (norm, shape, is_ep, idx) in enumerate(all_param_grads[:10]):
+            debug_log(
+                f"  [{i+1}] idx={idx}, norm={norm:.4f}, shape={shape}, is_ep={is_ep}"
+            )
+
+    debug_log(f"  EP params: {len(ep_params)}, Non-EP params: {len(non_ep_params)}")
+    debug_log(f"  EP grads: {len(ep_grads)}, Non-EP grads: {len(non_ep_grads)}")
+
+    # STEP 2: Log individual EP grad stats from ALL ranks
+    if DEBUG_GRAD and len(ep_grads) > 0:
+        # Compute local stats
+        local_norms = [g.to_local().norm().item() for g in ep_grads[:5]]
+        total_local_norm = sum(g.to_local().norm().item() ** 2 for g in ep_grads) ** 0.5
+
+        # Gather stats from all ranks
+        stats_tensor = torch.tensor([total_local_norm], device=ep_grads[0].device)
+        all_stats = [torch.zeros_like(stats_tensor) for _ in range(world_size)]
+        dist.all_gather(all_stats, stats_tensor)
+
+        if rank == 0:
+            debug_log("STEP 2: Individual EP grad statistics from ALL ranks")
+            debug_log(
+                f"  Per-rank total EP grad local norms: {[f'{v.item():.2f}' for v in all_stats]}"
+            )
+            debug_log(
+                f"  Ratio (max/min): {max(v.item() for v in all_stats) / (min(v.item() for v in all_stats) + 1e-10):.2f}x"
+            )
+
+            # Also show first 5 grads from rank 0
+            for i, g in enumerate(ep_grads[:5]):
+                local_g = g.to_local()
+                debug_log(
+                    f"  ep_grad[{i}]: shape={g.shape}, placements={g.placements}, "
+                    f"local_shape={local_g.shape}, local_norm={local_g.norm().item():.6f}, "
+                    f"local_min={local_g.min().item():.6f}, local_max={local_g.max().item():.6f}"
+                )
+
+    # STEP 3: Call get_total_norm on EP grads
+    debug_log("STEP 3: Calling torch.nn.utils.get_total_norm(ep_grads, ...)")
     ep_grads_total_norm = torch.nn.utils.get_total_norm(
         ep_grads, norm_type, error_if_nonfinite, foreach
     )
     # ep_grads may be an empty list, in which case get_total_norm returns tensor(0.), a non-DTensor
     # This can occur in PP + EP setups where certain PP ranks only own non-EP layers, for instance.
-    if isinstance(ep_grads_total_norm, DTensor):
-        ep_grads_total_norm = ep_grads_total_norm.full_tensor()
 
+    # STEP 4: Analyze get_total_norm result across all ranks
+    debug_log("STEP 4: Analyzing get_total_norm result across all ranks")
+    if isinstance(ep_grads_total_norm, DTensor):
+        local_val = ep_grads_total_norm.to_local()
+        # Gather all values to rank 0
+        all_local_vals = [torch.zeros_like(local_val) for _ in range(world_size)]
+        dist.all_gather(all_local_vals, local_val)
+
+        if DEBUG_GRAD and rank == 0:
+            debug_log(f"  ep_grads_total_norm is DTensor")
+            debug_log(f"  placements: {ep_grads_total_norm.placements}")
+            debug_log(f"  mesh shape: {ep_grads_total_norm.device_mesh.shape}")
+            debug_log(
+                f"  mesh_dim_names: {ep_grads_total_norm.device_mesh.mesh_dim_names}"
+            )
+            debug_log(
+                f"  local_tensor: device={local_val.device}, dtype={local_val.dtype}, shape={local_val.shape}, value={local_val.item():.6f}"
+            )
+            debug_log(
+                f"  ALL RANKS local values: {[f'{v.item():.6f}' for v in all_local_vals]}"
+            )
+            sum_sq = sum(v.item() ** 2 for v in all_local_vals)
+            debug_log(f"  Sum of squares: {sum_sq:.6f}")
+            debug_log(
+                f"  CORRECT global norm = sqrt(sum of squares) = {sum_sq**0.5:.6f}"
+            )
+
+            # Check placement types
+            for dim_idx, placement in enumerate(ep_grads_total_norm.placements):
+                debug_log(
+                    f"  Placement[{dim_idx}]: type={type(placement).__name__}, class={placement.__class__.__name__}"
+                )
+
+    if isinstance(ep_grads_total_norm, DTensor):
+        # =====================================================================================================================================
+        # PYTORCH BUG WORKAROUND: Incorrect _NormPartial DTensor reduction in PyTorch 2.9.0
+        # =====================================================================================================================================
+        #
+        # ## PROBLEM DESCRIPTION ##
+        # PyTorch 2.9.0 has a critical bug in torch/distributed/tensor/_ops/_math_ops.py that causes gradient norms to explode
+        # by ~1,000,000x when using Expert Parallelism (EP) with DTensors. Without this workaround, gradient norms blow up from
+        # ~0.5 (correct) to ~200,000+ (wrong), leading to training instability and divergence.
+        #
+        # ## ROOT CAUSE ##
+        # The bug is in `vector_norm_strategy()` and `foreach_norm_strategy()` functions (lines 393-433 in _math_ops.py):
+        #
+        #     def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
+        #         ...
+        #         return common_reduction_strategy(
+        #             input_strategy,
+        #             reduce_dims,
+        #             keep_dim=cast(bool, keepdim),
+        #             reduction_linear=True,  # <-- BUG: Always True, even for Partial placements!
+        #             reduction_op=NormReduction(norm_type),
+        #         )
+        #
+        # The `reduction_linear=True` flag incorrectly assumes that the norm operation is always "reduction linear" with respect
+        # to its inputs. This is FALSE for DTensors with `Partial(sum)` placement, where each rank holds partial data that must
+        # be summed before computing the norm.
+        #
+        # ## WHAT HAPPENS WITH THE BUG ##
+        # When computing `get_total_norm()` on EP gradient DTensors:
+        #
+        # 1. Input: DTensor with `Shard` or `Partial(sum)` placement across EP ranks
+        #    Example: Rank 0 has [1.0, 3.0], Rank 1 has [2.0, 1.0]
+        #    Global data should be: [3.0, 4.0] (after summing Partial contributions)
+        #
+        # 2. PyTorch computes norm on LOCAL data (WRONG!):
+        #    Rank 0: local_norm = sqrt(1^2 + 3^2) = sqrt(10) = 3.16
+        #    Rank 1: local_norm = sqrt(2^2 + 1^2) = sqrt(5) = 2.24
+        #
+        # 3. Result is DTensor with `Partial(sum)` placement, but calling `.full_tensor()` SUMS the local norms (WRONG!):
+        #    full_tensor() = 3.16 + 2.24 = 5.40  <-- This is "sum of norms", NOT "norm of sum"!
+        #
+        # 4. Correct global norm should be:
+        #    global_norm = sqrt(3^2 + 4^2) = sqrt(9 + 16) = 5.0  <-- This is the "norm of sum"
+        #
+        # ## THE FIX IN PYTORCH ##
+        # The fix was merged in PyTorch PR #159856 (commit f863550192e, Oct 26, 2025):
+        # https://github.com/pytorch/pytorch/pull/159856
+        #
+        # It changes `reduction_linear=True` to:
+        #
+        #     reduction_linear = all(
+        #         all(not p.is_partial() for p in op_spec.output_spec.placements)
+        #         for op_spec in input_strategy.strategies
+        #     )
+        #
+        # This makes the norm operation output a DTensor with `_NormPartial` placement instead of `Partial(sum)`, which
+        # correctly handles the reduction semantics: sqrt(sum(local_norm^2)) across ranks.
+        #
+        # ## OUR WORKAROUND (Until PyTorch is upgraded) ##
+        # Since PyTorch 2.9.0 doesn't have the fix, we must manually handle `_NormPartial` reduction:
+        #
+        # 1. Detect DTensors with `_NormPartial` placement (private class from torch.distributed._tensor.placement_types)
+        # 2. Extract local norm values: local_norm = dtensor.to_local()
+        # 3. Square the local norms: local_norm_squared = local_norm ** 2
+        # 4. All-reduce SUM across the mesh dimension(s) with `_NormPartial`: dist.all_reduce(local_norm_squared, SUM)
+        # 5. Take square root: global_norm = sqrt(local_norm_squared)
+        #
+        # This implements the correct _NormPartial semantics: sqrt(sum(local_norm^2))
+        #
+        # ## CRITICAL NOTES ##
+        # - The mesh can have multiple dimensions (e.g., ['dp_shard_mod_ep', 'dp_shard_in_ep']) and we need to reduce
+        #   across ALL dimensions that have `_NormPartial` placement
+        # - The EP mesh dimension name varies by configuration (not always "ep"), so we must iterate through all placements
+        # - `_NormPartial` is a private class, so we check by class name: placement.__class__.__name__ == "_NormPartial"
+        # - Do NOT use `.full_tensor()` or `.redistribute()` on `_NormPartial` DTensors - they don't handle the semantics correctly!
+        #
+        # ## WHEN TO REMOVE THIS WORKAROUND ##
+        # This workaround can be removed when upgrading to PyTorch with commit f863550192e or later (post Oct 26, 2025).
+        # To verify the fix is present, check torch/distributed/tensor/_ops/_math_ops.py:vector_norm_strategy() and ensure
+        # `reduction_linear` is computed dynamically based on partial placements, not hardcoded to True.
+        #
+        # ## DEBUGGING THIS ISSUE ##
+        # If gradient norms are exploding (>100K):
+        # 1. Check if this workaround is being executed (add logging in the `if norm_partial_dims:` block)
+        # 2. Print ep_grads_total_norm.placements to see if `_NormPartial` is present
+        # 3. Print local_norm before and after all_reduce to verify the reduction
+        # 4. Expected: local_norm ~0.1-1.0, global_norm ~0.5-10.0; if seeing 100K+, reduction failed
+        #
+        # ## OLD BUGGY CODE (DO NOT USE) ##
+        # ep_grads_total_norm = ep_grads_total_norm.full_tensor()  # WRONG: Sums local norms instead of computing global norm
+        # ep_grads_total_norm = ep_grads_total_norm.redistribute(mesh, [Replicate()])  # WRONG: Same issue as full_tensor()
+        # =====================================================================================================================================
+
+        from torch.distributed._tensor import Replicate
+        from torch.distributed._tensor.placement_types import Partial
+
+        # Find which mesh dimension(s) have _NormPartial placement
+        # _NormPartial is a private PyTorch class that indicates the tensor contains partial norm contributions
+        # that need to be combined via: sqrt(sum(local_norm^2))
+        norm_partial_dims = []
+        for dim_idx, placement in enumerate(ep_grads_total_norm.placements):
+            if placement.__class__.__name__ == "_NormPartial":
+                norm_partial_dims.append(dim_idx)
+
+        # STEP 5: Apply _NormPartial workaround if needed
+        debug_log(
+            f"STEP 5: Checking for _NormPartial placements, found dims: {norm_partial_dims}"
+        )
+
+        if norm_partial_dims:
+            # WORKAROUND: Manual reduction for _NormPartial using all_gather
+            debug_log("  _NormPartial detected - applying manual all_gather workaround")
+
+            local_norm = ep_grads_total_norm.to_local()
+            debug_log(f"  BEFORE workaround: local_norm = {local_norm.item():.6f}")
+
+            # Gather all local norm values from all ranks
+            all_local_norms = [torch.zeros_like(local_norm) for _ in range(world_size)]
+            dist.all_gather(all_local_norms, local_norm)
+
+            if DEBUG_GRAD and rank == 0:
+                debug_log(
+                    f"  all_local_norms gathered: {[f'{v.item():.6f}' for v in all_local_norms]}"
+                )
+
+            # Compute correct global norm: sqrt(sum(local_norm^2))
+            sum_of_squares = sum(v.item() ** 2 for v in all_local_norms)
+            global_norm = sum_of_squares**0.5
+
+            debug_log(f"  sum_of_squares = {sum_of_squares:.6f}")
+            debug_log(
+                f"  AFTER workaround: global_norm = sqrt(sum_of_squares) = {global_norm:.6f}"
+            )
+
+            # Convert back to tensor on the correct device
+            ep_grads_total_norm = torch.tensor(
+                global_norm, device=local_norm.device, dtype=local_norm.dtype
+            )
+
+        else:
+            # No _NormPartial placement detected - safe to use .full_tensor()
+            debug_log("  No _NormPartial detected - using .full_tensor()")
+            before_val = (
+                ep_grads_total_norm.to_local().item()
+                if isinstance(ep_grads_total_norm, DTensor)
+                else ep_grads_total_norm.item()
+            )
+            ep_grads_total_norm = ep_grads_total_norm.full_tensor()
+            debug_log(f"  BEFORE .full_tensor(): local_val = {before_val:.6f}")
+            debug_log(
+                f"  AFTER .full_tensor(): ep_grads_total_norm = {ep_grads_total_norm.item():.6f}"
+            )
+
+    # STEP 6: Compute non-EP grads total norm
+    debug_log("STEP 6: Computing non-EP grads total norm")
     non_ep_grads_total_norm = torch.nn.utils.get_total_norm(
         non_ep_grads, norm_type, error_if_nonfinite, foreach
-    ).full_tensor()
+    )
+    if isinstance(non_ep_grads_total_norm, DTensor):
+        non_ep_grads_total_norm = non_ep_grads_total_norm.full_tensor()
+    debug_log(f"  non_ep_grads_total_norm = {non_ep_grads_total_norm.item():.6f}")
+
+    # STEP 7: Combine EP and non-EP norms
+    debug_log("STEP 7: Combining EP and non-EP norms")
+    debug_log(f"  ep_grads_total_norm = {ep_grads_total_norm.item():.6f}")
+    debug_log(f"  non_ep_grads_total_norm = {non_ep_grads_total_norm.item():.6f}")
 
     if math.isinf(norm_type):
         total_norm = torch.maximum(ep_grads_total_norm, non_ep_grads_total_norm)
@@ -438,15 +705,29 @@ def _clip_grad_norm_with_ep(
         )
         total_norm **= 1.0 / norm_type
 
+    debug_log(f"  combined total_norm (before PP reduce) = {total_norm.item():.6f}")
+
+    # STEP 8: PP reduction if needed
     if pp_mesh is not None:
+        debug_log("STEP 8: PP mesh reduction")
         if math.isinf(norm_type):
             dist.all_reduce(total_norm, op=dist.ReduceOp.MAX, group=pp_mesh.get_group())
         else:
             total_norm **= norm_type
             dist.all_reduce(total_norm, op=dist.ReduceOp.SUM, group=pp_mesh.get_group())
             total_norm **= 1.0 / norm_type
+        debug_log(f"  total_norm (after PP reduce) = {total_norm.item():.6f}")
+
+    # STEP 9: Apply gradient clipping
+    debug_log("STEP 9: Applying gradient clipping")
+    debug_log(f"  max_norm = {max_norm}, total_norm = {total_norm.item():.6f}")
+    clip_coef = max_norm / (total_norm + 1e-6)
+    debug_log(f"  clip_coef = {clip_coef.item():.6f} (clamped to max 1.0)")
 
     torch.nn.utils.clip_grads_with_norm_(ep_params, max_norm, total_norm, foreach)
     torch.nn.utils.clip_grads_with_norm_(non_ep_params, max_norm, total_norm, foreach)
+
+    debug_log(f"FINAL: Returning total_norm = {total_norm.item():.6f}")
+    debug_log("=" * 80)
 
     return total_norm

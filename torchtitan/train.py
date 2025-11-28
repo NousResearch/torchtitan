@@ -556,6 +556,28 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             loss = self.forward_backward_step(input_dict, labels)
             accumulated_losses.append(loss.detach())
 
+        # Debug: Log top parameters by gradient norm with names to identify explosion source
+        if (
+            os.environ.get("DEBUG_GRAD_NORM", "0") == "1"
+            and torch.distributed.get_rank() == 0
+        ):
+            param_grad_norms = []
+            for m in self.model_parts:
+                for name, p in m.named_parameters():
+                    if p.grad is not None:
+                        from torch.distributed.tensor import DTensor
+
+                        if isinstance(p.grad, DTensor):
+                            local_grad = p.grad.to_local()
+                        else:
+                            local_grad = p.grad
+                        grad_norm_val = local_grad.float().norm().item()
+                        param_grad_norms.append((grad_norm_val, name, tuple(p.shape)))
+            param_grad_norms.sort(key=lambda x: x[0], reverse=True)
+            logger.info("[GRAD_DEBUG_NAMED] TOP 10 PARAMETERS BY GRADIENT NORM:")
+            for i, (norm, name, shape) in enumerate(param_grad_norms[:10]):
+                logger.info(f"  [{i+1}] norm={norm:.4f}, name={name}, shape={shape}")
+
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.job_config.training.max_norm,

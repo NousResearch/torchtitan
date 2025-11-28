@@ -38,6 +38,11 @@ class MoEArgs:
     use_grouped_mm: bool = True  # grouped mm or for-loop for the experts computation
     load_balance_coeff: float | None = 1e-3
 
+    # ===========================================================================
+    # [COMMENTED OUT] Router initialization scale factor to prevent expert collapse.
+    # ===========================================================================
+    # router_init_scale: float = 1.0
+
     _debug_force_load_balance: bool = False
 
     # use deepep and fused all-to-all communication
@@ -163,6 +168,18 @@ class GroupedExperts(nn.Module):
         num_tokens_per_expert: torch.Tensor,
         routed_prob: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        # =====================================================================
+        # [COMMENTED OUT] DEBUG LOGGING and routed_prob handling
+        # =====================================================================
+        # import os
+        # DEBUG_EP_PROB = os.environ.get("DEBUG_EP_PROB", "0") == "1"
+        # if DEBUG_EP_PROB and routed_prob is not None:
+        #     ... (debug logging code)
+        #
+        # if routed_prob is not None and self.score_before_experts:
+        #   x = (x.to(torch.float32) * routed_prob.reshape(-1, 1)).to(x.dtype)
+        # =====================================================================
+
         if isinstance(self.w1, DTensor):
             # Convert parameters from DTensors to plain Tensors, to work with
             # dynamic-shape inputs in EP which cannot be easily expressed as DTensors.
@@ -189,14 +206,29 @@ class GroupedExperts(nn.Module):
         else:
             out = _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
 
+        # =====================================================================
+        # [COMMENTED OUT] Post-expert routed_prob scaling
+        # =====================================================================
+        # if routed_prob is not None and not self.score_before_experts:
+        #   out = (out.to(torch.float32) * routed_prob.reshape(-1, 1)).to(out.dtype)
+        # =====================================================================
+
         return out
 
     def init_weights(self, init_std: float, n_layers: int):
+        # =============================================================================
+        # Reference repo version (has bug: shape[0] is num_experts, not input dim):
+        #   std_in = moe_init_std(self.w1.shape[-1], n_layers)
+        #   std_out = moe_init_std(self.w2.shape[0], n_layers)  # BUG!
+        #   nn.init.trunc_normal_(self.w1, mean=0.0, std=std_in)
+        #   nn.init.trunc_normal_(self.w2, mean=0.0, std=std_in)
+        #   nn.init.trunc_normal_(self.w3, mean=0.0, std=std_out)
+        # =============================================================================
+        # Depth-scaled init using input dimension for each weight
         std_in = moe_init_std(self.w1.shape[-1], n_layers)
-        std_out = moe_init_std(self.w2.shape[0], n_layers)
         nn.init.trunc_normal_(self.w1, mean=0.0, std=std_in)
         nn.init.trunc_normal_(self.w2, mean=0.0, std=std_in)
-        nn.init.trunc_normal_(self.w3, mean=0.0, std=std_out)
+        nn.init.trunc_normal_(self.w3, mean=0.0, std=std_in)
 
 
 class TokenChoiceTopKRouter(nn.Module):
@@ -221,6 +253,7 @@ class TokenChoiceTopKRouter(nn.Module):
         route_norm: bool,
         route_scale: float,
         _debug_force_load_balance: bool = False,
+        # router_init_scale: float = 1.0,  # [COMMENTED OUT]
     ):
         super().__init__()
         self.gate = nn.Linear(dim, num_experts, bias=False)
@@ -230,6 +263,7 @@ class TokenChoiceTopKRouter(nn.Module):
         self.route_norm = route_norm
         self.route_scale = route_scale
         self._debug_force_load_balance = _debug_force_load_balance
+        # self.router_init_scale = router_init_scale  # [COMMENTED OUT]
 
     def _debug_force_load_balance_routing(
         self, scores: torch.Tensor
@@ -266,6 +300,10 @@ class TokenChoiceTopKRouter(nn.Module):
                 - num_tokens_per_expert (torch.Tensor):
                     Number of tokens assigned to each expert with shape ``(num_experts,)``.
         """
+        # =====================================================================
+        # [COMMENTED OUT] DEBUG LOGGING - Enable via DEBUG_EP_PROB=1 or DEBUG_ROUTER_EVOLUTION=1
+        # =====================================================================
+
         # scores shape (bs*slen, num_experts)
         scores = self.gate(x)
 
@@ -313,16 +351,24 @@ class TokenChoiceTopKRouter(nn.Module):
         return top_scores, selected_experts_indices, num_tokens_per_expert
 
     def init_weights(self, init_std: float, n_layers: int):
-        temp_weight = torch.empty_like(self.gate.weight)
-        nn.init.normal_(temp_weight, mean=0.0, std=1.0)
-
-        # TODO(phuc): change to torch.linalg.norm
-        # due to TOR101 Use of deprecated function torch.norm
-        row_norms = torch.norm(temp_weight, dim=1, keepdim=True)
-        temp_weight = temp_weight / row_norms.clamp(min=1e-6)  # avoid divide by 0
-
+        # Depth-scaled init, no row normalization
         std = moe_init_std(self.gate.weight.shape[1], n_layers)
-        self.gate.weight.data = temp_weight * std
+        nn.init.trunc_normal_(self.gate.weight, mean=0.0, std=std)
+
+    # =============================================================================
+    # [COMMENTED OUT] Old complex init_weights with debug logging and router_init_scale
+    # =============================================================================
+    # def init_weights_old(self, init_std: float, n_layers: int):
+    #     import os
+    #     DEBUG_INIT = os.environ.get("DEBUG_EP_PROB", "0") == "1"
+    #     def _get_local_tensor(t):
+    #         return t._local_tensor if hasattr(t, "_local_tensor") else t
+    #     temp_weight = torch.empty_like(self.gate.weight)
+    #     base_std = moe_init_std(self.gate.weight.shape[1], n_layers)
+    #     std = base_std * self.router_init_scale
+    #     nn.init.trunc_normal_(temp_weight, mean=0.0, std=std, a=-2*std, b=2*std)
+    #     self.gate.weight.copy_(temp_weight)
+    # =============================================================================
 
 
 # NOTE: the reason we make this a stateless module is to support
@@ -420,6 +466,7 @@ class MoE(nn.Module):
             route_norm=moe_args.route_norm,
             route_scale=moe_args.route_scale,
             _debug_force_load_balance=moe_args._debug_force_load_balance,
+            # router_init_scale=moe_args.router_init_scale,  # [COMMENTED OUT]
         )
         self.reorderer = TokenReorderer(num_experts=num_experts, top_k=moe_args.top_k)
         self.shared_experts = (

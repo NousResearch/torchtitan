@@ -1,26 +1,26 @@
 # DeepEP Expert Parallelism for TorchTitan
 
-Achieve **near-linear scaling** from single node to 16 nodes (128 GPUs), **33% faster** than TorchTitan's default expert parallelism (14,796 vs 9,930 tok/s/GPU at EP=8). And Almost no throughput degradation when scaling expert parallel degree from 1 → 8, and all numbers below are reported for Qwen3-30B-A3B.
+Achieve **near-linear scaling** from single node to 16 nodes (128 GPUs), **33% faster** than TorchTitan's default expert parallelism (14,796 vs 9,930 tok/s/GPU at EP=8). And almost no throughput degradation when scaling expert parallel degree from 1 → 8, and all numbers below are reported for Qwen3-30B-A3B.
 
 ## 🚀 Performance Highlights
 
 ### Scaling Results: Qwen3-30B (128 experts, top-k=8)
 
-**Strong Scaling** (fixed batch size, increasing nodes):
+**Strong Scaling** (fixed batch size and everything, but increasing nodes):
 
-| Configuration | Nodes | GPUs | Tokens/sec | TFLOPS | Memory/GPU |
-|---------------|-------|------|------------|--------|------------|
+| Configuration | Nodes | GPUs | Tokens/sec/GPU | TFLOPS | Memory/GPU |
+|---------------|-------|------|----------------|--------|------------|
 | 1 node | 1 | 8 | 14,796 | 341 | 167.93 GiB (94.15%) |
 | 2 nodes | 2 | 16 | 14,380 | 331 | 138.75 GiB (77.78%) |
 | 4 nodes | 4 | 32 | 14,276 | 329 | 124.58 GiB (69.84%) |
 | 8 nodes | 8 | 64 | 14,107 | 325 | 117.50 GiB (65.88%) |
 | 16 nodes | 16 | 128 | 13,856 | 319 | 114.78 GiB (64.35%) |
 
-**Weak Scaling** (optimized batch size for 16 nodes):
+**Weak Scaling** (tuning batch size for 16 nodes):
 
 
-| LBS | Nodes | GPUs | Tokens/sec | TFLOPS | Memory/GPU | Failure Reason |
-|-----|-------|------|------------|--------|------------|----------------|
+| LBS | Nodes | GPUs | Tokens/sec/GPU | TFLOPS | Memory/GPU | Failure Reason |
+|-----|-------|------|----------------|--------|------------|----------------|
 | 8 | 16 | 128 | 13,856 | 319 | 114.78 GiB (64.35%) | - |
 | 10 | 16 | 128 | 14,123 | 326 | 142.21 GiB (79.73%) | - |
 | 12 | 16 | 128 | - | - | - | RendezvousConnectionError (C10d store connection lost) |
@@ -100,7 +100,6 @@ Configure parallelism degrees in the `[parallelism]` section:
 
 ```toml
 [parallelism]
-...
 expert_parallel_degree = 8       # Number of GPUs for expert parallelism
 ```
 
