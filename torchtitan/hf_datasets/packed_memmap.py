@@ -114,6 +114,10 @@ DATASETS = {
             "/home/shared/datasets/OmniEditFiltered1-2M_hermes4_14b/",
         ],
     },
+    "chat_only": {
+        "pretrain_mixin_paths": [],
+        "chat_data_paths": ["/home/dakota/github/torchtitan/tokenized/"],
+    },
 }
 
 
@@ -619,7 +623,7 @@ class PackedMemmapDataset(IterableDataset, Stateful):
         """Iterate over sequences assigned to this rank."""
         chat_buffer = []  # Buffer for packing chat sequences
         pretrain_buffer = []  # Buffer for accumulating pretrain tokens
-
+        total_toks_to_grab = self.seq_len + 1
         while True:
             # Get the shuffled global index for this rank
             shuffled_idx = self.rank_start_seq + self._current_iteration_seq
@@ -640,8 +644,8 @@ class PackedMemmapDataset(IterableDataset, Stateful):
                 # But keep whatever masks are in the file
                 if len(pretrain_buffer) >= self.seq_len:
                     # We have enough tokens, yield a sequence
-                    tokens_to_yield = pretrain_buffer[: self.seq_len]
-                    pretrain_buffer = pretrain_buffer[self.seq_len :]
+                    tokens_to_yield = pretrain_buffer[:total_toks_to_grab]
+                    pretrain_buffer = pretrain_buffer[total_toks_to_grab:]
 
                     # Convert to tensor
                     tokens_tensor = torch.tensor(tokens_to_yield, dtype=torch.long)
@@ -661,7 +665,7 @@ class PackedMemmapDataset(IterableDataset, Stateful):
                 tokens, masks = self._ensure_eos(tokens, masks)
 
                 # Skip sequences that are too long (can't pack them without splitting)
-                if len(tokens) > self.seq_len:
+                if len(tokens) > total_toks_to_grab:
                     logger.warning(
                         f"Skipping chat sequence of length {len(tokens)} > seq_len {self.seq_len}"
                     )
