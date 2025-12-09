@@ -43,6 +43,21 @@ qwen3_args = {
         rope_theta=1000000,
         enable_weight_tying=True,
     ),
+    # ~1B params debug model with test tokenizer (vocab_size=2048)
+    # dim=2048, n_layers=24, hidden_dim=5632 => ~1.1B params
+    "debugmodel_1b": Qwen3ModelArgs(
+        vocab_size=2048,
+        max_seq_len=4096,
+        head_dim=128,
+        dim=2048,
+        n_layers=24,
+        n_heads=16,
+        n_kv_heads=8,
+        qk_norm=True,
+        hidden_dim=5632,
+        rope_theta=1000000,
+        enable_weight_tying=True,
+    ),
     "0.6B": Qwen3ModelArgs(
         vocab_size=151936,
         max_seq_len=4096,
