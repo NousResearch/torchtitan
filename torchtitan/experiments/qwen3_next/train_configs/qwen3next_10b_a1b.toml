@@ -1,0 +1,100 @@
+[job]
+dump_folder = "./outputs"
+description = "Qwen 3 Next 10B A1B"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = true
+save_tb_folder = "tb"
+disable_color_printing = true
+
+[model]
+name = "qwen3_next"
+flavor = "10B_A1B"
+
+[optimizer]
+name = "Muon"
+algorithm = "muon"
+lr = 3e-4
+eps = 1e-8
+beta1 = 0.9
+beta2 = 0.95
+mu = 0.95
+weight_decay = 0.1
+nesterov = false
+power_iters = 1
+adjust_lr = "rms_norm"
+flatten = true
+use_triton = true
+implementation = "fused"
+qr_method = "rcqr"
+rcqr_oversample = 1.25
+embedding_lr_factor = 1
+embedding_optimizer = "adamw"
+head_lr_factor = 1
+head_optimizer = "adamw"
+scalar_lr_factor = 1
+scalar_optimizer = "adamw"
+expert_lr_factor = 1
+
+[lr_scheduler]
+warmup_steps = 2000
+decay_type = "cosine"
+min_lr_factor = 0
+
+[training]
+global_batch_size = 1024
+local_batch_size = 16
+seq_len = 8192
+max_norm = 1.0
+steps = 125000
+#dataset = "c4_test"
+#dataset_type = "nanoset"
+dataset_type = "nanoset"
+dataset_folders = ["/home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3", "/home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3"]
+dataset_weights = [1, 1]
+gc_freq = 50
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+expert_parallel_degree = 1
+expert_tensor_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 5000
+keep_latest_k = 10
+last_save_model_only = true
+export_dtype = "bfloat16"
+async_mode = "disabled"
+initial_load_model_only = true
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+per_op_sac_force_recompute_mm_shapes_by_fqns = ["moe.router.gate"]
+
+[compile]
+enable = true
+fullgraph = false
+components = ["model", "loss"]
+
+[quantize]
+[quantize.linear.mx]
+recipe_name = "mxfp8_cublas"
+filter_fqns = ["output", "router.gate"]
+
+[quantize.grouped_mm.mx]
+recipe_name = "mxfp8"
+fqns = ["experts"]

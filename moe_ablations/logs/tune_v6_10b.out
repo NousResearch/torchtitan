@@ -1,0 +1,505 @@
+[titan] 2025-12-17 15:50:08,638 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,638 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,638 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,757 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,855 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,925 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,927 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:08,931 - root - INFO - Starting job: Tune v6: ~10B total, 56 layers
+[titan] 2025-12-17 15:50:10,920 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:10,927 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:10,927 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:10,929 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:10,936 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:10,951 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:10,979 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:10,981 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:10,989 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:10,992 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:11,007 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:11,019 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:11,113 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:11,115 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:11,143 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:11,467 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:11,469 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:11,476 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:11,483 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:11,485 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:11,486 - root - WARNING - ENV[TORCH_NCCL_ASYNC_ERROR_HANDLING] = 1 will be overridden to 3 based on job config
+[titan] 2025-12-17 15:50:11,487 - root - INFO - Building 1-D device mesh with ['dp_shard'], [8]
+[titan] 2025-12-17 15:50:11,494 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:11,514 - root - INFO - [GC] Initial GC collection took 0.00 seconds
+[titan] 2025-12-17 15:50:16,590 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,591 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,591 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,591 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,591 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,591 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,601 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:16,606 - fla.utils - WARNING - Current Python version 3.10 is below the recommended 3.11 version. It is recommended to upgrade to Python 3.11 or higher for the best experience.
+[titan] 2025-12-17 15:50:17,500 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,500 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,500 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,502 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,504 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,504 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,536 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:50:17,537 - root - INFO - Loading tokenizer from tokenizer.json
+[titan] 2025-12-17 15:53:55,869 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:53:55,869 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:53:57,713 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:53:57,713 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:53:57,864 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:53:57,865 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:53:58,965 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:53:58,966 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:53:59,558 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:53:59,558 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:54:00,124 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:54:00,124 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:54:03,265 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:03,265 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:03,266 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:03,368 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:03,429 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:03,429 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:03,429 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:03,436 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:03,522 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:03,522 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:03,524 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:03,629 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:03,687 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:03,688 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:03,688 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:03,692 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:04,154 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:04,329 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,329 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,330 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:04,374 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:04,430 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:04,459 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:04,487 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:04,487 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:04,487 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:04,492 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:04,548 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,548 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,549 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:04,650 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:04,683 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:04,710 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:04,710 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:04,710 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:04,715 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:04,724 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,724 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:04,725 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:04,823 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:04,878 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:04,879 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:04,879 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:04,883 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:05,177 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:05,297 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:05,297 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:05,303 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:05,304 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:05,402 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:05,403 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:05,403 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:05,403 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:05,476 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:05,540 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:05,540 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:05,546 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:05,546 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:05,588 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:05,644 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:05,644 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:05,644 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:05,646 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:05,646 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:05,647 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:05,704 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:05,745 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:05,800 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:05,800 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:05,800 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:05,805 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:05,881 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:06,316 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:06,316 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:06,321 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:06,322 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:06,421 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:06,421 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:06,422 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:06,487 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:06,552 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:06,553 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:06,558 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:06,558 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:06,658 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:06,658 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:06,658 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:06,711 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:06,711 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:06,716 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:06,716 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:06,781 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:06,815 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:06,815 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:06,815 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:07,602 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:07,603 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:07,608 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:07,608 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:07,706 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:07,706 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:07,706 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:12,619 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:54:12,620 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:54:19,578 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:19,579 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:19,582 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:19,693 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:19,754 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:19,754 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:19,754 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:19,761 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:20,448 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:20,758 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:21,680 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:21,680 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:21,685 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:21,686 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:21,784 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:21,784 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:21,785 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:54:26,182 - root - INFO - > Total number of samples: 1296747242
+[titan] 2025-12-17 15:54:26,183 - root - INFO - > Total number of tokens: 10622953406464
+[titan] 2025-12-17 15:54:30,409 - root - INFO - >   Total number of samples from the /home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:30,409 - root - INFO - >   Total number of samples from the /home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3 dataset: 648373621 (0.5)
+[titan] 2025-12-17 15:54:30,412 - root - INFO - Building qwen3_next tune_v6_10b with Qwen3NextModelArgs(_enforced='This field is used to enforce all fields have defaults.', dim=1024, n_layers=56, n_heads=8, n_kv_heads=4, vocab_size=151936, head_dim=128, hidden_dim=1536, hidden_act='silu', norm_eps=1e-06, rope_theta=50000, partial_rotary_factor=0.25, max_seq_len=8192, depth_init=True, use_flex_attn=True, attn_mask_type='block_causal', enable_weight_tying=False, moe_enabled=True, moe_inter_dim=192, moe_args=MoEArgs(num_experts=256, num_shared_experts=1, shared_gate=True, score_func='softmax', route_norm=True, route_scale=1.0, score_before_experts=False, top_k=8, use_grouped_mm=True, load_balance_coeff=0.001, _debug_force_load_balance=False, log_expert_routing=False), decoder_sparse_step=1, full_attention_interval=4, layer_types=['linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention', 'linear_attention', 'linear_attention', 'linear_attention', 'full_attention'], linear_num_key_heads=16, linear_num_value_heads=32, linear_key_head_dim=128, linear_value_head_dim=128, linear_conv_kernel_dim=4)
+[titan] 2025-12-17 15:54:30,524 - root - INFO - CUDA capacity: NVIDIA B200 with 178.36GiB memory
+[titan] 2025-12-17 15:54:30,582 - root - INFO - Total parameter count: dense 1,078,841,728, sparse 8,503,427,072, active 1,390,793,088
+[titan] 2025-12-17 15:54:30,582 - root - INFO - Model qwen3_next tune_v6_10b size: 9,582,268,800 total parameters
+[titan] 2025-12-17 15:54:30,582 - root - INFO - Compiling the loss function with torch.compile
+[titan] 2025-12-17 15:54:30,589 - root - INFO - Applied full activation checkpointing to the model
+[titan] 2025-12-17 15:54:31,272 - root - INFO - Compiling each TransformerBlock with torch.compile
+[titan] 2025-12-17 15:54:31,586 - root - INFO - Applied FSDP to the model
+[titan] 2025-12-17 15:54:32,426 - root - INFO - Peak FLOPS used for computing MFU: 2.250e+15
+[titan] 2025-12-17 15:54:32,427 - root - INFO - CUDA memory usage for model: 4.51GiB(2.53%)
+[titan] 2025-12-17 15:54:32,432 - root - WARNING - Warmup steps (2000) exceed total training steps (35). Adjusting warmup steps to 35.
+[titan] 2025-12-17 15:54:32,433 - root - WARNING - model.safetensors.index.json not found at hf_assets_path: ./tests/assets/tokenizer/model.safetensors.index.json.                     Defaulting to saving a single safetensors file if checkpoint is saved in HF format
+[titan] 2025-12-17 15:54:32,532 - root - INFO - Mixed precision training is handled by fully_shard
+[titan] 2025-12-17 15:54:32,532 - root - INFO - Trainer is initialized with local batch size 16, global batch size 1024, gradient accumulation steps 8, sequence length 8192, total steps 35 (warmup 2000)
+[titan] 2025-12-17 15:54:32,532 - root - INFO - Training starts at step 1
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 12,786  tflops: 166.84  mfu: 7.42%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,606  tflops: 125.34  mfu: 5.57%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,720  tflops: 126.83  mfu: 5.64%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 11,295  tflops: 147.38  mfu: 6.55%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,700  tflops: 126.57  mfu: 5.63%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,735  tflops: 127.03  mfu: 5.65%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,819  tflops: 128.12  mfu: 5.69%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - step:  1  loss: 13.2778  grad_norm: 190.0860  memory: 100.16GiB(56.16%)  tps: 9,629  tflops: 125.64  mfu: 5.58%
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:55:52,588 - root - INFO - Synchronizing and adjusting timeout for all ProcessGroups to 0:01:40
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:56:58,728 - root - INFO - step:  2  loss:  9.5530  grad_norm: 236.0388  memory: 109.00GiB(61.11%)  tps: 15,854  tflops: 206.87  mfu: 9.19%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:58:04,818 - root - INFO - step:  3  loss:  7.4620  grad_norm: 184.4081  memory: 109.00GiB(61.11%)  tps: 15,866  tflops: 207.03  mfu: 9.20%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 15:59:11,054 - root - INFO - step:  4  loss: 10.9935  grad_norm: 253.8002  memory: 109.00GiB(61.11%)  tps: 15,831  tflops: 206.57  mfu: 9.18%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:00:17,237 - root - INFO - step:  5  loss:  6.7574  grad_norm: 56.4564  memory: 109.00GiB(61.11%)  tps: 15,844  tflops: 206.74  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,435 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:01:23,436 - root - INFO - step:  6  loss:  8.1272  grad_norm: 77.3003  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,790 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:02:29,791 - root - INFO - step:  7  loss:  6.5172  grad_norm: 44.4412  memory: 109.00GiB(61.11%)  tps: 15,803  tflops: 206.20  mfu: 9.16%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,749  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,748  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,748  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,748  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,749  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,749  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,748  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:03:36,374 - root - INFO - step:  8  loss:  7.5089  grad_norm: 68.2252  memory: 109.00GiB(61.11%)  tps: 15,749  tflops: 205.49  mfu: 9.13%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:04:42,605 - root - INFO - step:  9  loss:  6.7775  grad_norm: 46.3597  memory: 109.00GiB(61.11%)  tps: 15,832  tflops: 206.59  mfu: 9.18%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,840  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,841  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:05:48,802 - root - INFO - step: 10  loss:  5.7434  grad_norm:  3.9901  memory: 109.00GiB(61.11%)  tps: 15,841  tflops: 206.69  mfu: 9.19%
+[titan] 2025-12-17 16:06:55,165 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:06:55,166 - root - INFO - step: 11  loss:  5.5596  grad_norm:  5.0737  memory: 109.00GiB(61.11%)  tps: 15,801  tflops: 206.18  mfu: 9.16%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,774  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:08:01,644 - root - INFO - step: 12  loss:  5.3798  grad_norm:  8.4392  memory: 109.00GiB(61.11%)  tps: 15,773  tflops: 205.82  mfu: 9.15%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:09:07,931 - root - INFO - step: 13  loss:  5.3086  grad_norm:  6.7083  memory: 109.00GiB(61.11%)  tps: 15,819  tflops: 206.41  mfu: 9.17%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,315 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:10:14,316 - root - INFO - step: 14  loss:  5.2311  grad_norm:  3.0729  memory: 109.00GiB(61.11%)  tps: 15,796  tflops: 206.11  mfu: 9.16%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,429 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,430 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:11:20,430 - root - INFO - step: 15  loss:  5.0909  grad_norm:  1.7979  memory: 109.00GiB(61.11%)  tps: 15,860  tflops: 206.95  mfu: 9.20%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:12:26,631 - root - INFO - step: 16  loss:  5.0338  grad_norm:  6.7710  memory: 109.00GiB(61.11%)  tps: 15,839  tflops: 206.68  mfu: 9.19%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:13:32,752 - root - INFO - step: 17  loss:  4.9926  grad_norm:  5.3516  memory: 109.00GiB(61.11%)  tps: 15,859  tflops: 206.93  mfu: 9.20%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:14:38,792 - root - INFO - step: 18  loss:  4.8844  grad_norm:  1.4933  memory: 109.00GiB(61.11%)  tps: 15,878  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:15:44,904 - root - INFO - step: 19  loss:  4.8110  grad_norm:  1.7587  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.96  mfu: 9.20%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,222 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:16:51,223 - root - INFO - step: 20  loss:  4.7344  grad_norm:  1.5360  memory: 109.00GiB(61.11%)  tps: 15,812  tflops: 206.32  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,554 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,554 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,555 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,554 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,555 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.28  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,555 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,555 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:17:57,555 - root - INFO - step: 21  loss:  4.6391  grad_norm:  0.9783  memory: 109.00GiB(61.11%)  tps: 15,808  tflops: 206.27  mfu: 9.17%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:19:03,724 - root - INFO - step: 22  loss:  4.5440  grad_norm:  0.8802  memory: 109.00GiB(61.11%)  tps: 15,847  tflops: 206.78  mfu: 9.19%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,748 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,749 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:20:09,749 - root - INFO - step: 23  loss:  4.4701  grad_norm:  1.3942  memory: 109.00GiB(61.11%)  tps: 15,882  tflops: 207.23  mfu: 9.21%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:21:15,698 - root - INFO - step: 24  loss:  4.3787  grad_norm:  0.7928  memory: 109.00GiB(61.11%)  tps: 15,900  tflops: 207.47  mfu: 9.22%
+[titan] 2025-12-17 16:22:21,692 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,692 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:22:21,693 - root - INFO - step: 25  loss:  4.3126  grad_norm:  0.8178  memory: 109.00GiB(61.11%)  tps: 15,889  tflops: 207.33  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.29  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.29  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.29  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.29  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:23:27,698 - root - INFO - step: 26  loss:  4.2324  grad_norm:  0.5856  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:24:33,550 - root - INFO - step: 27  loss:  4.1647  grad_norm:  0.7579  memory: 109.00GiB(61.11%)  tps: 15,924  tflops: 207.78  mfu: 9.23%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:25:39,552 - root - INFO - step: 28  loss:  4.1088  grad_norm:  0.8948  memory: 109.00GiB(61.11%)  tps: 15,887  tflops: 207.30  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,590 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,590 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,590 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,590 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,591 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,591 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,591 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:26:45,591 - root - INFO - step: 29  loss:  4.0519  grad_norm:  0.6033  memory: 109.00GiB(61.11%)  tps: 15,879  tflops: 207.19  mfu: 9.21%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:27:51,701 - root - INFO - step: 30  loss:  4.0124  grad_norm:  0.6715  memory: 109.00GiB(61.11%)  tps: 15,861  tflops: 206.97  mfu: 9.20%
+[titan] 2025-12-17 16:28:57,677 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,677 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:28:57,678 - root - INFO - step: 31  loss:  3.9768  grad_norm:  0.6042  memory: 109.00GiB(61.11%)  tps: 15,893  tflops: 207.38  mfu: 9.22%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:30:03,691 - root - INFO - step: 32  loss:  3.9463  grad_norm:  0.3703  memory: 109.00GiB(61.11%)  tps: 15,885  tflops: 207.27  mfu: 9.21%
+[titan] 2025-12-17 16:31:09,652 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,653 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,652 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,653 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,653 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,652 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,652 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:31:09,653 - root - INFO - step: 33  loss:  3.9333  grad_norm:  0.7822  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.43  mfu: 9.22%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:32:15,551 - root - INFO - step: 34  loss:  3.9161  grad_norm:  0.5097  memory: 109.00GiB(61.11%)  tps: 15,912  tflops: 207.63  mfu: 9.23%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,511 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - step: 35  loss:  3.9030  grad_norm:  0.4738  memory: 109.00GiB(61.11%)  tps: 15,897  tflops: 207.44  mfu: 9.22%
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Sleeping 2 seconds for other ranks to complete
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,512 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:21,921 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:21,921 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:21,921 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:21,922 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:21,924 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:23,514 - root - INFO - Training completed
+[titan] 2025-12-17 16:33:23,564 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:23,565 - root - INFO - Process group destroyed
+[titan] 2025-12-17 16:33:23,632 - root - INFO - Process group destroyed

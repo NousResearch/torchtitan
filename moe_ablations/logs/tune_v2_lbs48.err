@@ -1,0 +1,246 @@
+W1217 17:14:27.156000 1866307 site-packages/torch/distributed/run.py:853] 
+W1217 17:14:27.156000 1866307 site-packages/torch/distributed/run.py:853] *****************************************
+W1217 17:14:27.156000 1866307 site-packages/torch/distributed/run.py:853] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1217 17:14:27.156000 1866307 site-packages/torch/distributed/run.py:853] *****************************************
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank2]:     return _run_code(code, main_globals, None,
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank2]:     exec(code, run_globals)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank2]:     main(Trainer)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank2]:     trainer.train()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank2]:     return f(*args, **kwargs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank2]:     self.train_step(data_iterator)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank2]:     loss = self.forward_backward_step(input_dict, labels)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank2]:     loss.backward()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank2]:     torch.autograd.backward(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank2]:     _engine_run_backward(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank2]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank2]:     return user_fn(self, *args)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2338, in backward
+[rank2]:     return impl_fn()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2324, in impl_fn
+[rank2]:     out = CompiledFunction._backward_impl(ctx, all_args)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2494, in _backward_impl
+[rank2]:     out = call_func_at_runtime_with_args(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 134, in call_func_at_runtime_with_args
+[rank2]:     out = normalize_as_list(f(args))
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 1191, in _fn
+[rank2]:     return fn(*args, **kwargs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_inductor/output_code.py", line 638, in __call__
+[rank2]:     return self.current_callable(inputs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_inductor/utils.py", line 3247, in run
+[rank2]:     out = model(new_inputs)
+[rank2]:   File "/tmp/torchinductor_id_ed25519_nous_work/re/crejbynxjzeg7r75nbjhehodfghti5ile5ds6ee7wnpavevti3dm.py", line 205, in call
+[rank2]:     buf1 = empty_strided_cuda((393216, 151936), (151936, 1), torch.bfloat16)
+[rank2]: torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 111.28 GiB. GPU 2 has a total capacity of 178.36 GiB of which 37.73 GiB is free. Including non-PyTorch memory, this process has 140.62 GiB memory in use. Of the allocated memory 138.77 GiB is allocated by PyTorch, and 75.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+W1217 17:19:38.064000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866399 closing signal SIGTERM
+W1217 17:19:38.066000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866400 closing signal SIGTERM
+W1217 17:19:38.067000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866402 closing signal SIGTERM
+W1217 17:19:38.069000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866403 closing signal SIGTERM
+W1217 17:19:38.072000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866404 closing signal SIGTERM
+W1217 17:19:38.072000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866405 closing signal SIGTERM
+W1217 17:19:38.089000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1866406 closing signal SIGTERM
+E1217 17:19:44.346000 1866307 site-packages/torch/distributed/elastic/multiprocessing/api.py:984] failed (exitcode: 1) local_rank: 2 (pid: 1866401) of binary: /home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/python3.10
+E1217 17:19:44.348000 1866307 site-packages/torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_xhrswrrv/none_mhzo2d7m/attempt_0/2/error.json)
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/torchrun", line 7, in <module>
+    sys.exit(main())
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 992, in main
+    run(args)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 983, in run
+    elastic_launch(
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.train FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 0 (local_rank: 0)
+  exitcode  : -15 (pid: 1866399)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866399
+[2]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 1 (local_rank: 1)
+  exitcode  : -15 (pid: 1866400)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866400
+[3]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 3 (local_rank: 3)
+  exitcode  : -15 (pid: 1866402)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866402
+[4]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 4 (local_rank: 4)
+  exitcode  : -15 (pid: 1866403)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866403
+[5]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 5 (local_rank: 5)
+  exitcode  : -15 (pid: 1866404)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866404
+[6]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 6 (local_rank: 6)
+  exitcode  : -15 (pid: 1866405)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866405
+[7]:
+  time      : 2025-12-17_17:19:44
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 7 (local_rank: 7)
+  exitcode  : -15 (pid: 1866406)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1866406
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-12-17_17:19:35
+  host      : d2dfac12-022.cloud.together.ai
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 1866401)
+  error_file: /tmp/torchelastic_xhrswrrv/none_mhzo2d7m/attempt_0/2/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2338, in backward
+      return impl_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2324, in impl_fn
+      out = CompiledFunction._backward_impl(ctx, all_args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/runtime_wrappers.py", line 2494, in _backward_impl
+      out = call_func_at_runtime_with_args(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_functorch/_aot_autograd/utils.py", line 134, in call_func_at_runtime_with_args
+      out = normalize_as_list(f(args))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/eval_frame.py", line 1191, in _fn
+      return fn(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_inductor/output_code.py", line 638, in __call__
+      return self.current_callable(inputs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_inductor/utils.py", line 3247, in run
+      out = model(new_inputs)
+    File "/tmp/torchinductor_id_ed25519_nous_work/re/crejbynxjzeg7r75nbjhehodfghti5ile5ds6ee7wnpavevti3dm.py", line 205, in call
+      buf1 = empty_strided_cuda((393216, 151936), (151936, 1), torch.bfloat16)
+  torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 111.28 GiB. GPU 2 has a total capacity of 178.36 GiB of which 37.73 GiB is free. Including non-PyTorch memory, this process has 140.62 GiB memory in use. Of the allocated memory 138.77 GiB is allocated by PyTorch, and 75.48 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  
+============================================================

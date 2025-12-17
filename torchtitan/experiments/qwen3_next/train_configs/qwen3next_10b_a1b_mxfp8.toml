@@ -1,6 +1,6 @@
 [job]
 dump_folder = "./outputs"
-description = "Qwen 3 Next 80B A3B"
+description = "Qwen 3 Next 10B A1B (MXFP8)"
 
 [profiling]
 enable_profiling = false
@@ -10,35 +10,37 @@ profile_freq = 100
 [metrics]
 log_freq = 1
 enable_tensorboard = false
+enable_wandb = false
 save_tb_folder = "tb"
 disable_color_printing = true
 
 [model]
 name = "qwen3_next"
-flavor = "80B_A3B"
-hf_assets_path = "./assets/hf/Qwen3-235B-A22B"
-# converters = ["quantize.linear.mx"]
-# converters = ["quantize.linear.mx", "quantize.grouped_mm.mx"]
+flavor = "10B_A1B"
 
 [optimizer]
 name = "AdamW"
-lr = 8e-4
+lr = 3e-4
 eps = 1e-8
 
 [lr_scheduler]
-warmup_steps = 600
+warmup_steps = 2000
+decay_type = "cosine"
+min_lr_factor = 0
 
 [training]
-local_batch_size = 1
-seq_len = 4096
-max_norm = 1.0  # grad norm clipping
-steps = 3000
+global_batch_size = 1024
+local_batch_size = 16
+seq_len = 8192
+max_norm = 1.0
+steps = 30
 dataset = "c4"
+gc_freq = 50
 
 [parallelism]
 data_parallel_replicate_degree = 1
 data_parallel_shard_degree = -1
-fsdp_reshard_after_forward = "default" # default / never / always
+fsdp_reshard_after_forward = "default"
 tensor_parallel_degree = 1
 enable_async_tensor_parallel = false
 expert_parallel_degree = 1
@@ -47,22 +49,27 @@ expert_tensor_parallel_degree = 1
 [checkpoint]
 enable = false
 folder = "checkpoint"
-interval = 10
-last_save_model_only = false
+interval = 5000
+keep_latest_k = 10
+last_save_model_only = true
 export_dtype = "bfloat16"
-async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
+async_mode = "disabled"
 
 [activation_checkpoint]
-mode = "full"  # ["none", "selective", "full"]
-selective_ac_option = "op"  # "int" = ac every positive int layer or 'op', ac based on ops policy
+mode = "full"
+selective_ac_option = "op"
+per_op_sac_force_recompute_mm_shapes_by_fqns = ["moe.router.gate"]
 
 [compile]
-enable=true
+enable = true
 fullgraph = false
 components = ["model", "loss"]
 
+[quantize]
 [quantize.linear.mx]
+recipe_name = "mxfp8_cublas"
 filter_fqns = ["output", "router.gate"]
 
 [quantize.grouped_mm.mx]
+recipe_name = "mxfp8"
 fqns = ["experts"]

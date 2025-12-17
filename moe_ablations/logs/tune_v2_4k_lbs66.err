@@ -1,0 +1,970 @@
+W1217 18:23:45.288000 1371239 site-packages/torch/distributed/run.py:853] 
+W1217 18:23:45.288000 1371239 site-packages/torch/distributed/run.py:853] *****************************************
+W1217 18:23:45.288000 1371239 site-packages/torch/distributed/run.py:853] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1217 18:23:45.288000 1371239 site-packages/torch/distributed/run.py:853] *****************************************
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+[rank4]: Traceback (most recent call last):
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank4]:     return _run_code(code, main_globals, None,
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank4]:     exec(code, run_globals)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank4]:     main(Trainer)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank4]:     trainer.train()
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank4]:     return f(*args, **kwargs)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank4]:     self.train_step(data_iterator)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank4]:     loss = self.forward_backward_step(input_dict, labels)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank4]:     loss.backward()
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank4]:     torch.autograd.backward(
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank4]:     _engine_run_backward(
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank4]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank4]:     return user_fn(self, *args)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank4]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank4]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank4]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank4]:     l2norm_bwd_kernel[grid](
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank4]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank4]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank4]:     bench_fn()
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank4]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank4]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank4]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank4]:     fn()
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank4]:     self.fn.run(
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank4]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank4]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank4]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank4]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank1]: Traceback (most recent call last):
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank1]:     return _run_code(code, main_globals, None,
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank1]:     exec(code, run_globals)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank1]:     main(Trainer)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank1]:     trainer.train()
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank1]:     return f(*args, **kwargs)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank1]:     self.train_step(data_iterator)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank1]:     loss = self.forward_backward_step(input_dict, labels)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank1]:     loss.backward()
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank1]:     torch.autograd.backward(
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank1]:     _engine_run_backward(
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank1]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank1]:     return user_fn(self, *args)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank1]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank1]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank1]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank1]:     l2norm_bwd_kernel[grid](
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank1]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank1]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank1]:     bench_fn()
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank1]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank1]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank1]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank1]:     fn()
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank1]:     self.fn.run(
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank1]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank1]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank1]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank1]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank3]: Traceback (most recent call last):
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank3]:     return _run_code(code, main_globals, None,
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank3]:     exec(code, run_globals)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank3]:     main(Trainer)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank3]:     trainer.train()
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank3]:     return f(*args, **kwargs)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank3]:     self.train_step(data_iterator)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank3]:     loss = self.forward_backward_step(input_dict, labels)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank3]:     loss.backward()
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank3]:     torch.autograd.backward(
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank3]:     _engine_run_backward(
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank3]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank3]:     return user_fn(self, *args)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank3]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank3]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank3]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank3]:     l2norm_bwd_kernel[grid](
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank3]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank3]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank3]:     bench_fn()
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank3]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank3]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank3]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank3]:     fn()
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank3]:     self.fn.run(
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank3]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank3]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank3]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank3]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank0]: Traceback (most recent call last):
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank0]:     return _run_code(code, main_globals, None,
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank0]:     exec(code, run_globals)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank0]:     main(Trainer)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank0]:     trainer.train()
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank0]:     return f(*args, **kwargs)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank0]:     self.train_step(data_iterator)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank0]:     loss = self.forward_backward_step(input_dict, labels)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank0]:     loss.backward()
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank0]:     torch.autograd.backward(
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank0]:     _engine_run_backward(
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank0]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank0]:     return user_fn(self, *args)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank0]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank0]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank0]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank0]:     l2norm_bwd_kernel[grid](
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank0]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank0]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank0]:     bench_fn()
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank0]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank0]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank0]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank0]:     fn()
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank0]:     self.fn.run(
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank0]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank0]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank0]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank0]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank5]: Traceback (most recent call last):
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank5]:     return _run_code(code, main_globals, None,
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank5]:     exec(code, run_globals)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank5]:     main(Trainer)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank5]:     trainer.train()
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank5]:     return f(*args, **kwargs)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank5]:     self.train_step(data_iterator)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank5]:     loss = self.forward_backward_step(input_dict, labels)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank5]:     loss.backward()
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank5]:     torch.autograd.backward(
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank5]:     _engine_run_backward(
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank5]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank5]:     return user_fn(self, *args)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank5]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank5]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank5]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank5]:     l2norm_bwd_kernel[grid](
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank5]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank5]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank5]:     bench_fn()
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank5]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank5]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank5]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank5]:     fn()
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank5]:     self.fn.run(
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank5]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank5]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank5]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank5]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank7]: Traceback (most recent call last):
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank7]:     return _run_code(code, main_globals, None,
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank7]:     exec(code, run_globals)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank7]:     main(Trainer)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank7]:     trainer.train()
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank7]:     return f(*args, **kwargs)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank7]:     self.train_step(data_iterator)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank7]:     loss = self.forward_backward_step(input_dict, labels)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank7]:     loss.backward()
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank7]:     torch.autograd.backward(
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank7]:     _engine_run_backward(
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank7]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank7]:     return user_fn(self, *args)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank7]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank7]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank7]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank7]:     l2norm_bwd_kernel[grid](
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank7]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank7]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank7]:     bench_fn()
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank7]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank7]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank7]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank7]:     fn()
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank7]:     self.fn.run(
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank7]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank7]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank7]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank7]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank2]: Traceback (most recent call last):
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank2]:     return _run_code(code, main_globals, None,
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank2]:     exec(code, run_globals)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank2]:     main(Trainer)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank2]:     trainer.train()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank2]:     return f(*args, **kwargs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank2]:     self.train_step(data_iterator)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank2]:     loss = self.forward_backward_step(input_dict, labels)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank2]:     loss.backward()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank2]:     torch.autograd.backward(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank2]:     _engine_run_backward(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank2]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank2]:     return user_fn(self, *args)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank2]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank2]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank2]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank2]:     l2norm_bwd_kernel[grid](
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank2]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank2]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank2]:     bench_fn()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank2]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank2]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank2]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank2]:     fn()
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank2]:     self.fn.run(
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank2]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank2]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank2]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank2]: RuntimeError: Triton Error [CUDA]: out of memory
+[rank6]: Traceback (most recent call last):
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+[rank6]:     return _run_code(code, main_globals, None,
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+[rank6]:     exec(code, run_globals)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+[rank6]:     main(Trainer)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 852, in main
+[rank6]:     trainer.train()
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+[rank6]:     return f(*args, **kwargs)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+[rank6]:     self.train_step(data_iterator)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+[rank6]:     loss = self.forward_backward_step(input_dict, labels)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+[rank6]:     loss.backward()
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+[rank6]:     torch.autograd.backward(
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+[rank6]:     _engine_run_backward(
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+[rank6]:     return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+[rank6]:     return user_fn(self, *args)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+[rank6]:     return fn(*contiguous_args, **contiguous_kwargs)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+[rank6]:     return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+[rank6]:     dq = l2norm_bwd(q, q_rstd, dq)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+[rank6]:     l2norm_bwd_kernel[grid](
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+[rank6]:     return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+[rank6]:     used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+[rank6]:     bench_fn()
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+[rank6]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+[rank6]:     timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+[rank6]:     return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+[rank6]:     fn()
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+[rank6]:     self.fn.run(
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+[rank6]:     kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+[rank6]:   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+[rank6]:     self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+[rank6]: RuntimeError: Triton Error [CUDA]: out of memory
+W1217 18:36:00.692000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371330 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371331 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371332 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371333 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371335 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371336 closing signal SIGTERM
+W1217 18:36:00.693000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1371337 closing signal SIGTERM
+E1217 18:36:06.929000 1371239 site-packages/torch/distributed/elastic/multiprocessing/api.py:984] failed (exitcode: 1) local_rank: 4 (pid: 1371334) of binary: /home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/python3.10
+E1217 18:36:06.932000 1371239 site-packages/torch/distributed/elastic/multiprocessing/errors/error_handler.py:145] no error file defined for parent, to copy child error file (/tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/4/error.json)
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/torchrun", line 7, in <module>
+    sys.exit(main())
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 992, in main
+    run(args)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 983, in run
+    elastic_launch(
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.train FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1371330)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/0/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[2]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 1371331)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/1/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[3]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 1371332)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/2/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[4]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 1371333)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/3/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[5]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 5 (local_rank: 5)
+  exitcode  : 1 (pid: 1371335)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/5/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[6]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 6 (local_rank: 6)
+  exitcode  : 1 (pid: 1371336)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/6/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+[7]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 7 (local_rank: 7)
+  exitcode  : 1 (pid: 1371337)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/7/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-12-17_18:35:56
+  host      : d2dfac12-023.cloud.together.ai
+  rank      : 4 (local_rank: 4)
+  exitcode  : 1 (pid: 1371334)
+  error_file: /tmp/torchelastic_bcvzj4ua/none_7p2ke40e/attempt_0/4/error.json
+  traceback : Traceback (most recent call last):
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+      return f(*args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 772, in train
+      self.train_step(data_iterator)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 671, in train_step
+      loss = self.forward_backward_step(input_dict, labels)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 651, in forward_backward_step
+      loss.backward()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_tensor.py", line 631, in backward
+      torch.autograd.backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/__init__.py", line 365, in backward
+      _engine_run_backward(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/graph.py", line 865, in _engine_run_backward
+      return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/autograd/function.py", line 317, in apply
+      return user_fn(self, *args)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/utils.py", line 164, in wrapper
+      return fn(*contiguous_args, **contiguous_kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/amp/autocast_mode.py", line 527, in decorate_bwd
+      return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/ops/gated_delta_rule/chunk.py", line 213, in backward
+      dq = l2norm_bwd(q, q_rstd, dq)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/fla/modules/l2norm.py", line 217, in l2norm_bwd
+      l2norm_bwd_kernel[grid](
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 370, in <lambda>
+      return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 238, in run
+      used_cached_result = self.check_disk_cache(key, pruned_configs, benchmark)
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 202, in check_disk_cache
+      bench_fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in benchmark
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 229, in <dictcomp>
+      timings = {config: self._bench(*args, config=config, **kwargs) for config in pruned_configs}
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 164, in _bench
+      return self.do_bench(kernel_call, quantiles=(0.5, 0.2, 0.8))
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/testing.py", line 149, in do_bench
+      fn()
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/autotuner.py", line 150, in kernel_call
+      self.fn.run(
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/runtime/jit.py", line 744, in run
+      kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
+    File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/triton/backends/nvidia/driver.py", line 713, in __call__
+      self.launch(gridX, gridY, gridZ, stream, function, self.launch_cooperative_grid, self.launch_pdl,
+  RuntimeError: Triton Error [CUDA]: out of memory
+  
+============================================================
