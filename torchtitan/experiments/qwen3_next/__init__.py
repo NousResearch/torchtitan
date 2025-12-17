@@ -57,9 +57,13 @@ qwen3next_configs = {
             shared_gate=True
         ),
     ),
-    # Tuning configs for ~500-600M active, 8-10B total, top_k=8
-    # v1: More fine-grained experts (256 x 128)
-    "tune_v1": Qwen3NextModelArgs(
+    # ==========================================================================
+    # TUNING CONFIGS: ~500-600M active, 4-10B total, top_k=8, sparsity=3.125%
+    # Naming: {total}B_A{active}M_dim{dim}_hidden{hidden}_L{layers}_E{experts}_inter{moe_inter}
+    # ==========================================================================
+
+    # 4.0B total, 871M active, 27k tps
+    "4B_A871M_dim1024_hidden1024_L32_E256_inter128": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -83,8 +87,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v2: Balanced (256 experts x 192 inter_dim)
-    "tune_v2": Qwen3NextModelArgs(
+    # 4.9B total, 851M active, 31k tps - BEST THROUGHPUT for ~5B scale
+    "5B_A851M_dim1024_hidden1536_L28_E256_inter192": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -108,8 +112,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v3: Wider but shallower (dim=1280, 24 layers)
-    "tune_v3": Qwen3NextModelArgs(
+    # 3.8B total, 922M active, 31k tps
+    "4B_A922M_dim1280_hidden1024_L24_E256_inter128": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -133,8 +137,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v4: Medium experts (192 x 160)
-    "tune_v4": Qwen3NextModelArgs(
+    # 3.8B total, 898M active, 28k tps
+    "4B_A898M_dim1024_hidden1280_L32_E192_inter160": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -158,8 +162,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v5: Based on v2 but scaled to ~8B total (48 layers)
-    "tune_v5_8b": Qwen3NextModelArgs(
+    # 8.4B total, 1.5B active, 18k tps - DEEP scaling (48 layers)
+    "8B_A1500M_dim1024_hidden1536_L48_E256_inter192_deep": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -183,8 +187,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v6: Based on v2 but scaled to ~10B total (56 layers)
-    "tune_v6_10b": Qwen3NextModelArgs(
+    # 9.7B total, 1.7B active, 16k tps - DEEP scaling (56 layers)
+    "10B_A1700M_dim1024_hidden1536_L56_E256_inter192_deep": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -208,8 +212,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v7: ~8B total, 28 layers, WIDER (scale width not depth)
-    "tune_v7_8b_wide": Qwen3NextModelArgs(
+    # 8.4B total, 1.4B active, 26k tps - WIDE scaling (28 layers, larger dim)
+    "8B_A1400M_dim1280_hidden2048_L28_E256_inter256_wide": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,
@@ -233,8 +237,8 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
-    # v8: ~10B total, 28 layers, WIDER
-    "tune_v8_10b_wide": Qwen3NextModelArgs(
+    # 10.8B total, 1.7B active, 24k tps - WIDE scaling (28 layers, larger dim)
+    "11B_A1700M_dim1536_hidden2048_L28_E256_inter256_wide": Qwen3NextModelArgs(
         vocab_size=151936,
         max_seq_len=8192,
         head_dim=128,

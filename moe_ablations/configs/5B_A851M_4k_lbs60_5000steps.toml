@@ -1,14 +1,14 @@
 [job]
-dump_folder = "./outputs/tune_v2"
-description = "Tune v2: 256 experts x 192 inter_dim, 28 layers"
+dump_folder = "./outputs/5B_A851M_4k_lbs60_5000steps"
+description = "5B_A851M 4k ctx lbs=60 5000 steps"
 
 [profiling]
 enable_profiling = false
 
 [metrics]
-log_freq = 1
+log_freq = 10
 enable_tensorboard = false
-enable_wandb = false
+enable_wandb = true
 disable_color_printing = true
 
 [model]
@@ -30,11 +30,10 @@ decay_type = "cosine"
 min_lr_factor = 0
 
 [training]
-global_batch_size = 960
-local_batch_size = 20
-seq_len = 8192
+local_batch_size = 60
+seq_len = 4096
 max_norm = 1.0
-steps = 35
+steps = 5000
 dataset_type = "nanoset"
 dataset_folders = ["/home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3", "/home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3"]
 dataset_weights = [1, 1]

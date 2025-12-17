@@ -13,7 +13,7 @@ disable_color_printing = true
 
 [model]
 name = "qwen3_next"
-flavor = "tune_v8_10b_wide"
+flavor = "11B_A1700M_dim1536_hidden2048_L28_E256_inter256_wide"
 
 [optimizer]
 name = "AdamW"
