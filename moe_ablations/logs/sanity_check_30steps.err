@@ -1,0 +1,141 @@
+W1217 22:41:14.761000 2502815 site-packages/torch/distributed/run.py:853] 
+W1217 22:41:14.761000 2502815 site-packages/torch/distributed/run.py:853] *****************************************
+W1217 22:41:14.761000 2502815 site-packages/torch/distributed/run.py:853] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1217 22:41:14.761000 2502815 site-packages/torch/distributed/run.py:853] *****************************************
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+wandb: Currently logged in as: phucx (nous_research) to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run jkek5kpe
+wandb: Tracking run with wandb version 0.23.1
+wandb: Run data is saved locally in outputs/sanity_check_30steps/tb/20251217-2245/wandb/run-20251217_224529-jkek5kpe
+wandb: Run `wandb offline` to turn off syncing.
+wandb: Syncing run neat-star-626
+wandb: ⭐️ View project at https://wandb.ai/nous_research/torchtitan
+wandb: 🚀 View run at https://wandb.ai/nous_research/torchtitan/runs/jkek5kpe
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:2060: UserWarning: Dynamo detected a call to a `functools.lru_cache`-wrapped function. Dynamo ignores the cache wrapper and directly traces the wrapped function. Silent incorrectness is only a *potential* risk, not something we have observed. Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.
+  torch._dynamo.utils.warn_once(msg)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/_dynamo/variables/functions.py:1950: UserWarning: Dynamo does not know how to trace the builtin `cuda_utils.get_device_properties.` This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind).
+If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround.
+If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html for more details) or, if it is traceable, use `torch.compiler.allow_in_graph`.
+  torch._dynamo.utils.warn_once(explanation + "\n" + "\n".join(hints))
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/device_mesh.py:604: UserWarning: Slicing a flattened dim from root mesh will be deprecated in PT 2.11. Users need to bookkeep the flattened mesh directly. 
+  sliced_mesh_layout = self._get_slice_mesh_layout(mesh_dim_names)
+wandb: updating run metadata
+wandb: uploading config.yaml
+wandb: 
+wandb: Run history:
+wandb:                    grad_norm █▄▃▂▁▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: loss_metrics/global_avg_loss ▄▃█▅▂▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb: loss_metrics/global_max_loss ▄▃█▅▂▃▂▂▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                           lr ██████▇▇▇▇▆▆▆▅▅▅▄▄▄▃▃▃▂▂▂▁▁▁▁▁
+wandb:         memory/max_active(%) ▁█████████████████████████████
+wandb:       memory/max_active(GiB) ▁█████████████████████████████
+wandb:       memory/max_reserved(%) ▁█████████████████████████████
+wandb:     memory/max_reserved(GiB) ▁█████████████████████████████
+wandb:     memory/num_alloc_retries ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:              memory/num_ooms ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁
+wandb:                           +7 ...
+wandb: 
+wandb: Run summary:
+wandb:                    grad_norm 0.36475
+wandb: loss_metrics/global_avg_loss 4.08327
+wandb: loss_metrics/global_max_loss 4.14515
+wandb:                           lr 0.0
+wandb:         memory/max_active(%) 90.78335
+wandb:       memory/max_active(GiB) 161.92283
+wandb:       memory/max_reserved(%) 92.99369
+wandb:     memory/max_reserved(GiB) 165.86523
+wandb:     memory/num_alloc_retries 0
+wandb:              memory/num_ooms 0
+wandb:                           +7 ...
+wandb: 
+wandb: 🚀 View run neat-star-626 at: https://wandb.ai/nous_research/torchtitan/runs/jkek5kpe
+wandb: ⭐️ View project at: https://wandb.ai/nous_research/torchtitan
+wandb: Synced 5 W&B file(s), 0 media file(s), 0 artifact file(s) and 0 other file(s)
+wandb: Find logs at: outputs/sanity_check_30steps/tb/20251217-2245/wandb/run-20251217_224529-jkek5kpe/logs

@@ -1,0 +1,233 @@
+W1217 20:57:22.201000 1295769 site-packages/torch/distributed/run.py:853] 
+W1217 20:57:22.201000 1295769 site-packages/torch/distributed/run.py:853] *****************************************
+W1217 20:57:22.201000 1295769 site-packages/torch/distributed/run.py:853] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W1217 20:57:22.201000 1295769 site-packages/torch/distributed/run.py:853] *****************************************
+Traceback (most recent call last):
+Traceback (most recent call last):
+Traceback (most recent call last):
+Traceback (most recent call last):
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+        return _run_code(code, main_globals, None,return _run_code(code, main_globals, None,
+    
+return _run_code(code, main_globals, None,  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+      File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+return _run_code(code, main_globals, None,
+    
+return _run_code(code, main_globals, None,      File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+      File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+
+return _run_code(code, main_globals, None,return _run_code(code, main_globals, None,
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/runpy.py", line 86, in _run_code
+        exec(code, run_globals)exec(code, run_globals)
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    exec(code, run_globals)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    exec(code, run_globals)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    exec(code, run_globals)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    exec(code, run_globals)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    main(Trainer)    
+exec(code, run_globals)  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    exec(code, run_globals)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 864, in <module>
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+        config = config_manager.parse_args()    config = config_manager.parse_args()
+config = config_manager.parse_args()
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    main(Trainer)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/train.py", line 836, in main
+    config = config_manager.parse_args()
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+    config = config_manager.parse_args()
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+    config = config_manager.parse_args()
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+    config = config_manager.parse_args()    
+config = config_manager.parse_args()  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 51, in parse_args
+    self._dict_to_dataclass(config_cls, toml_values)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+        self._dict_to_dataclass(config_cls, toml_values)self._dict_to_dataclass(config_cls, toml_values)        
+    
+        self._dict_to_dataclass(config_cls, toml_values)self._dict_to_dataclass(config_cls, toml_values)  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+self._dict_to_dataclass(config_cls, toml_values)  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+self._dict_to_dataclass(config_cls, toml_values)self._dict_to_dataclass(config_cls, toml_values)
+
+
+
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 178, in _dict_to_dataclass
+        result[f.name] = self._dict_to_dataclass(f.type, value)result[f.name] = self._dict_to_dataclass(f.type, value)
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+    raise ValueError(
+ValueError: Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.    
+result[f.name] = self._dict_to_dataclass(f.type, value)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+            result[f.name] = self._dict_to_dataclass(f.type, value)result[f.name] = self._dict_to_dataclass(f.type, value)result[f.name] = self._dict_to_dataclass(f.type, value)
+
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+    raise ValueError(
+    result[f.name] = self._dict_to_dataclass(f.type, value)    ValueError
+result[f.name] = self._dict_to_dataclass(f.type, value):   File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.
+
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/torchtitan/config/manager.py", line 167, in _dict_to_dataclass
+    raise ValueError(
+ValueError: Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.
+    raise ValueError(    
+    raise ValueError(raise ValueError(
+ValueError
+: ValueErrorInvalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.: ValueError
+Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.: 
+Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.
+    raise ValueError(
+ValueError: Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.
+    raise ValueError(
+ValueError: Invalid field names in <class 'torchtitan.config.job_config.Metrics'> data: {'wandb_project'}.
+Please modify your .toml config file or override these fields from the command line.
+Run `NGPU=1 ./run_train.sh --help` to read all valid fields.
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295860 closing signal SIGTERM
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295861 closing signal SIGTERM
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295862 closing signal SIGTERM
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295863 closing signal SIGTERM
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295864 closing signal SIGTERM
+W1217 20:57:35.760000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295865 closing signal SIGTERM
+W1217 20:57:35.761000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:1010] Sending process 1295866 closing signal SIGTERM
+E1217 20:57:35.955000 1295769 site-packages/torch/distributed/elastic/multiprocessing/api.py:984] failed (exitcode: 1) local_rank: 0 (pid: 1295859) of binary: /home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/python3.10
+Traceback (most recent call last):
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/bin/torchrun", line 7, in <module>
+    sys.exit(main())
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 362, in wrapper
+    return f(*args, **kwargs)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 992, in main
+    run(args)
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/run.py", line 983, in run
+    elastic_launch(
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 170, in __call__
+    return launch_agent(self._config, self._entrypoint, list(args))
+  File "/home/phuc/workspace/moe/moe_ablations/torchtitan/env/lib/python3.10/site-packages/torch/distributed/launcher/api.py", line 317, in launch_agent
+    raise ChildFailedError(
+torch.distributed.elastic.multiprocessing.errors.ChildFailedError: 
+============================================================
+torchtitan.train FAILED
+------------------------------------------------------------
+Failures:
+[1]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 1 (local_rank: 1)
+  exitcode  : 1 (pid: 1295860)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[2]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 2 (local_rank: 2)
+  exitcode  : 1 (pid: 1295861)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[3]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 3 (local_rank: 3)
+  exitcode  : 1 (pid: 1295862)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[4]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 4 (local_rank: 4)
+  exitcode  : 1 (pid: 1295863)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[5]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 5 (local_rank: 5)
+  exitcode  : -15 (pid: 1295864)
+  error_file: <N/A>
+  traceback : Signal 15 (SIGTERM) received by PID 1295864
+[6]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 6 (local_rank: 6)
+  exitcode  : 1 (pid: 1295865)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+[7]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 7 (local_rank: 7)
+  exitcode  : 1 (pid: 1295866)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+------------------------------------------------------------
+Root Cause (first observed failure):
+[0]:
+  time      : 2025-12-17_20:57:35
+  host      : d2dfac12-027.cloud.together.ai
+  rank      : 0 (local_rank: 0)
+  exitcode  : 1 (pid: 1295859)
+  error_file: <N/A>
+  traceback : To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html
+============================================================

@@ -112,6 +112,31 @@ qwen3next_configs = {
             load_balance_coeff=0.001,
         ),
     ),
+    # 4.9B total, 851M active - rope_theta=500k for 8k context (like LLaMA3)
+    "5B_A851M_dim1024_hidden1536_L28_E256_inter192_rope500k": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
     # 3.8B total, 922M active, 31k tps
     "4B_A922M_dim1280_hidden1024_L24_E256_inter128": Qwen3NextModelArgs(
         vocab_size=151936,
@@ -681,6 +706,389 @@ qwen3next_configs = {
             shared_gate=False,  # No learnable gate for shared
             load_balance_coeff=1e-3,
         )
+    ),
+
+    # =========================================================================
+    # EXP1A: QUICK ABLATIONS - Based on 5B_A851M_8k reference config
+    # Base: 5B_A851M_dim1024_hidden1536_L28_E256_inter192_rope500k
+    # Naming: exp1a{sub}{idx}_{name}_{value}
+    # =========================================================================
+
+    # -------------------------------------------------------------------------
+    # EXP1AA: GQA RATIO (n_kv_heads) - Baseline: n_kv_heads=4 (exp1aa2)
+    # -------------------------------------------------------------------------
+    # exp1aa0: MQA (8:1 ratio)
+    "exp1aa0_gqa_kvheads1_mqa": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=1,  # MQA: 8:1 ratio
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1aa1: GQA 4:1 ratio
+    "exp1aa1_gqa_kvheads2_gqa4to1": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=2,  # GQA: 4:1 ratio
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1aa3: MHA (1:1 ratio)
+    "exp1aa3_gqa_kvheads8_mha": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=8,  # MHA: 1:1 ratio
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+
+    # -------------------------------------------------------------------------
+    # EXP1AB: LINEAR ATTENTION VALUE HEADS - Baseline: linear_num_value_heads=32 (exp1ab1)
+    # -------------------------------------------------------------------------
+    # exp1ab0: V/K = 1:1
+    "exp1ab0_linvheads_vheads16_ratio1to1": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        linear_num_value_heads=16,  # V/K = 1:1
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ab2: V/K = 3:1
+    "exp1ab2_linvheads_vheads48_ratio3to1": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        linear_num_value_heads=48,  # V/K = 3:1
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ab3: V/K = 4:1
+    "exp1ab3_linvheads_vheads64_ratio4to1": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        linear_num_value_heads=64,  # V/K = 4:1
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+
+    # -------------------------------------------------------------------------
+    # EXP1AC: SHARED EXPERTS - Baseline: num_shared_experts=1, shared_gate=True (exp1ac1)
+    # -------------------------------------------------------------------------
+    # exp1ac0: No shared expert
+    "exp1ac0_shared_noshared": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=0,  # No shared expert
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ac2: Shared expert always-on (no gate)
+    "exp1ac2_shared_shared1_alwayson": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=False,  # Always-on (no learnable gate)
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ac3: Two shared experts with smaller hidden_dim
+    "exp1ac3_shared_shared2_hdim768": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=768,  # Smaller to keep iso-compute with 2 shared
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=2,  # Two shared experts
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+
+    # -------------------------------------------------------------------------
+    # EXP1AD: HYBRID ATTENTION PATTERN - Baseline: full_attention_interval=4 (exp1ad2)
+    # -------------------------------------------------------------------------
+    # exp1ad0: 100% full attention
+    "exp1ad0_hybrid_allfull_interval1": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        full_attention_interval=1,  # 100% full attention
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ad1: 50% full, 50% linear
+    "exp1ad1_hybrid_half_interval2": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        full_attention_interval=2,  # 50% full, 50% linear
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ad3: 11% full (sparse)
+    "exp1ad3_hybrid_sparse_interval8": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        full_attention_interval=8,  # 11% full, 89% linear
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+    # exp1ad4: 0% full (all linear)
+    "exp1ad4_hybrid_alllinear_interval999": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        full_attention_interval=999,  # 0% full, 100% linear
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
+    ),
+
+    # -------------------------------------------------------------------------
+    # EXP1AE: SCORE TIMING - Baseline: score_before_experts=False (exp1ae0)
+    # -------------------------------------------------------------------------
+    # exp1ae1: Standard MoE (score before experts)
+    "exp1ae1_scoretime_before_standard": Qwen3NextModelArgs(
+        vocab_size=151936,
+        max_seq_len=8192,
+        head_dim=128,
+        dim=1024,
+        n_layers=28,
+        n_heads=8,
+        n_kv_heads=4,
+        hidden_dim=1536,
+        rope_theta=500000,
+        moe_enabled=True,
+        moe_inter_dim=192,
+        moe_args=MoEArgs(
+            num_experts=256,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=True,  # Standard MoE (not Qwen3 style)
+            shared_gate=True,
+            load_balance_coeff=0.001,
+        ),
     ),
 }
 

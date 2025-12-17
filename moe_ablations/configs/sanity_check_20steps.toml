@@ -1,0 +1,63 @@
+[job]
+dump_folder = "./outputs/sanity_check_20steps"
+description = "Sanity check: 5B_A851M 8k lbs30 20 steps"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = true
+wandb_project = "moe_ablations"
+disable_color_printing = true
+
+[model]
+name = "qwen3_next_5B_A0.8B"
+flavor = "5B_A851M_dim1024_hidden1536_L28_E256_inter192"
+rope_theta = 500000
+
+[optimizer]
+name = "AdamW"
+lr = 3e-4
+eps = 1e-8
+beta1 = 0.9
+beta2 = 0.95
+weight_decay = 0.1
+implementation = "fused"
+
+[lr_scheduler]
+warmup_steps = 4
+decay_type = "cosine"
+min_lr_factor = 0
+
+[training]
+local_batch_size = 30
+seq_len = 8192
+max_norm = 1.0
+steps = 20
+dataset_type = "nanoset"
+dataset_folders = ["/home/shared/datasets/fineweb-edu-v1_4-tokenized-qwen3", "/home/shared/datasets/dclm-baseline-1.0-tokenized-qwen3"]
+dataset_weights = [1, 1]
+gc_freq = 50
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+expert_parallel_degree = 1
+expert_tensor_parallel_degree = 1
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+
+[compile]
+enable = true
+fullgraph = false
+components = ["model", "loss"]
