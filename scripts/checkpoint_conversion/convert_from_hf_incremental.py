@@ -127,6 +127,7 @@ def convert_from_hf(input_dir, output_dir, model_name, model_flavor):
     print(f"Found {files_to_process} files to process")
     for file in tqdm.tqdm(files_to_process, desc="Processing files"):
         hf_state_dict = load_incremental_hf(os.path.join(root, file))
+        hf_state_dict = {k: v for k, v in hf_state_dict.items() if ".inv_freq" not in k}
         experts = aggregate_moe_experts(hf_state_dict, num_experts, leftover_experts)
         leftover_experts = [expert[1] for expert in experts if not expert[0]]
         for expert in experts:
