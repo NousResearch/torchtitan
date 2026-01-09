@@ -1238,6 +1238,13 @@ class LMEvalConfig:
     - 'slurm': Submit as SLURM job (fully async, separate resources)
     """
 
+    job_name_prefix: str = "lm_eval"
+    """
+    Prefix for SLURM job names. Final job name will be {prefix}_step_{step}.
+    Use this to identify eval jobs for a specific training run.
+    Example: 'lm_eval_my_experiment' -> 'lm_eval_my_experiment_step_100'
+    """
+
     # Output configuration
     output_dir: str = "eval_results"
     """Directory to save evaluation results (relative to job.dump_folder)"""
@@ -1265,6 +1272,26 @@ class LMEvalConfig:
     lm_eval_path: str | None = None
     """
     Path to lm-evaluation-harness installation. If None, uses installed package.
+    """
+
+    # WandB integration
+    log_to_wandb: bool = True
+    """
+    Log evaluation results to WandB. Results are logged to the same run as training,
+    allowing you to track eval metrics alongside training metrics over time.
+    Requires wandb to be enabled in metrics config and initialized during training.
+    """
+
+    wandb_project: str | None = None
+    """
+    WandB project name. If None, auto-detected from the training run.
+    Falls back to WANDB_PROJECT env var or 'torchtitan' if not set.
+    """
+
+    wandb_entity: str | None = None
+    """
+    WandB entity/team name. If None, auto-detected from the training run.
+    Falls back to WANDB_TEAM env var if not set.
     """
 
     def __post_init__(self):

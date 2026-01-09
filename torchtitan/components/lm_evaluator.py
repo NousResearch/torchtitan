@@ -313,7 +313,7 @@ class LMEvaluator:
 
         # Generate eval script
         script_path = output_dir / "run_eval.py"
-        self._generate_eval_script(checkpoint_path, output_dir, script_path)
+        self._generate_eval_script(step, checkpoint_path, output_dir, script_path)
 
         # Build environment
         env = os.environ.copy()
@@ -359,7 +359,7 @@ class LMEvaluator:
 
         # Generate eval script
         script_path = output_dir / "run_eval.py"
-        self._generate_eval_script(checkpoint_path, output_dir, script_path)
+        self._generate_eval_script(step, checkpoint_path, output_dir, script_path)
 
         # Generate SLURM script
         slurm_script_path = self.slurm_script_dir / f"eval_step_{step}.sh"
@@ -400,6 +400,7 @@ class LMEvaluator:
 
     def _generate_eval_script(
         self,
+        step: int,
         checkpoint_path: str,
         output_dir: Path,
         script_path: Path,
@@ -446,6 +447,7 @@ np.random.seed(NUMPY_SEED)
 torch.manual_seed(TORCH_SEED)
 
 # Evaluation configuration
+STEP = {step}
 CHECKPOINT_PATH = "{checkpoint_path}"
 TOKENIZER_PATH = "{model_cfg.hf_assets_path}"
 OUTPUT_DIR = "{output_dir}"
@@ -501,6 +503,7 @@ for task_name, task_results in results.get("results", {{}}).items():
     for metric, value in task_results.items():
         if isinstance(value, (int, float)):
             print(f"  {{metric}}: {{value:.4f}}")
+
 '''
 
         with open(script_path, "w") as f:
@@ -520,7 +523,8 @@ for task_name, task_results in results.get("results", {{}}).items():
     ) -> None:
         """Generate SLURM submission script for evaluation."""
         slurm_cfg = self.lm_eval_config.slurm
-        job_name = f"lm_eval_step_{step}"
+        job_name_prefix = self.lm_eval_config.job_name_prefix
+        job_name = f"{job_name_prefix}_step_{step}"
 
         # Build PYTHONPATH
         pythonpath_parts = []
@@ -583,8 +587,10 @@ export TRANSFORMERS_CACHE="{slurm_cfg.hf_cache}"
         if pythonpath:
             script_content += f'export PYTHONPATH="{pythonpath}:$PYTHONPATH"\n'
 
-        # Activate virtual environment if specified
+        # Determine python executable path
+        # Use venv python if specified, otherwise use the current python executable
         if slurm_cfg.venv_path:
+            python_exec = f"{slurm_cfg.venv_path}/bin/python"
             script_content += f"""
 # Activate Python virtual environment
 export PATH="{slurm_cfg.venv_path}/bin:$PATH"
@@ -592,21 +598,25 @@ export CONDA_PREFIX="{slurm_cfg.venv_path}"
 echo "Activated venv: {slurm_cfg.venv_path}"
 """
         elif slurm_cfg.conda_env:
+            python_exec = "python"  # Will use conda python after activation
             script_content += f"""
 # Activate conda environment
 conda activate {slurm_cfg.conda_env}
 """
+        else:
+            # Use the current python executable (best default for matching environment)
+            python_exec = sys.executable
 
         script_content += f"""
 # Verify python is available
-which python || echo "ERROR: python not found in PATH"
+which {python_exec} || echo "ERROR: {python_exec} not found"
 
 # Record start time
 START_TIME=$(date +%s)
 
 # Run evaluation
 echo "Starting evaluation..."
-python {eval_script_path}
+{python_exec} {eval_script_path}
 
 EXIT_CODE=$?
 END_TIME=$(date +%s)

@@ -1,0 +1,57 @@
+# Online Evaluation Test Config
+# Quick test: 20 training steps with evaluation every 5 steps
+#
+# Usage:
+#   PYTHONPATH="/path/to/torchtitan:/path/to/lm-evaluation-harness:$PYTHONPATH" \
+#   torchrun --nproc_per_node=1 --standalone \
+#     -m torchtitan.train --job.config-file configs/online_eval_test.toml
+
+[job]
+dump_folder = "./outputs/online_eval_test"
+description = "Online evaluation test run"
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+
+[training]
+steps = 20
+local_batch_size = 1
+seq_len = 128
+dataset = "c4_test"
+
+[checkpoint]
+enable = true
+interval = 5
+folder = "checkpoint"
+
+[lr_scheduler]
+warmup_steps = 0
+
+[metrics]
+log_freq = 1
+
+# ============================================
+# Online Evaluation Configuration
+# ============================================
+[lm_eval]
+enable = true
+tasks = "hellaswag"
+eval_interval = 5           # Eval at steps 5, 10, 15, 20
+num_fewshot = 0
+limit = 20                  # Small limit for fast testing
+batch_size = 4
+max_seq_len = 2048
+mode = "slurm"              # Async SLURM evaluation
+seed = 42
+output_dir = "eval_results"
+log_samples = false         # Disable for faster evals
+job_name_prefix = "eval_test"
+
+# SLURM config
+[lm_eval.slurm]
+partition = "batch"
+time = "00:30:00"
+gpus_per_node = 1
+cpus_per_task = 16
+hf_cache = "/home/shared/huggingface-cache"
