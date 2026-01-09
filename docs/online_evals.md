@@ -200,15 +200,3 @@ Set `venv_path` in SLURM config to your Python environment:
 [lm_eval.slurm]
 venv_path = "/path/to/your/venv"
 ```
-
-### Out of memory during inline eval
-
-- Reduce `batch_size`
-- Use `mode = "slurm"` to run on separate resources
-- Set `limit` to reduce number of samples
-
-### Evaluation results not appearing
-
-Check the SLURM logs in `eval_slurm_logs/` for errors. Common issues:
-- Missing HuggingFace cache permissions
-- Incompatible model/tokenizer paths
