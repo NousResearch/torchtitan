@@ -7,14 +7,53 @@
 
 """
 Parameter classification utilities for Dion optimizer integration.
+
+Includes support for QK-Clip (MuonClip) attention parameter detection.
 """
 
-from typing import Any, Dict, List
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
 
 from torchtitan.tools.logging import logger
+
+
+@dataclass
+class AttentionLayerInfo:
+    """Information about an attention layer for QK-Clip.
+
+    This dataclass stores references to Q/K projection weights for each attention
+    layer, enabling QK-Clip to rescale these weights based on attention logits.
+
+    For standard multi-head attention:
+        - wq: Query projection weights
+        - wk: Key projection weights
+
+    For MLA (Multi-head Latent Attention) as in DeepSeek v3:
+        - wq_c: Query compression weights (head-specific)
+        - wk_c: Key compression weights (head-specific)
+        - wq_r: Query rotary weights (head-specific)
+        - wk_r: Key rotary weights (shared across heads, not clipped)
+    """
+    layer_name: str
+    wq: Optional[torch.Tensor] = None  # Query projection weight
+    wk: Optional[torch.Tensor] = None  # Key projection weight
+    num_heads: int = 1
+    head_dim: Optional[int] = None
+    # MLA-specific (optional)
+    wq_c: Optional[torch.Tensor] = None
+    wk_c: Optional[torch.Tensor] = None
+    wq_r: Optional[torch.Tensor] = None
+    wk_r: Optional[torch.Tensor] = None
+
+
+@dataclass
+class ParameterClassificationResult:
+    """Result of parameter classification including attention layer info for QK-Clip."""
+    param_groups: List[Dict[str, Any]]
+    attention_layers: List[AttentionLayerInfo] = field(default_factory=list)
 
 
 def create_parameter_groups(
@@ -508,3 +547,188 @@ def create_expert_param_group(
         "weight_decay": dion_config.weight_decay,
         "epsilon": dion_config.epsilon,
     }
+
+
+# ==================== QK-Clip Attention Layer Detection ====================
+
+
+def collect_attention_layers(
+    model_parts: List[nn.Module],
+) -> List[AttentionLayerInfo]:
+    """Collect attention layer information for QK-Clip.
+
+    Scans model parts to find attention modules and extract their Q/K projection
+    weights. This information is used by MuonClip to rescale weights based on
+    attention logits.
+
+    MLA-specific components (wq_c, wk_c, etc.) are always extracted if present.
+
+    Args:
+        model_parts: List of model parts to scan
+
+    Returns:
+        List of AttentionLayerInfo for each detected attention layer
+    """
+    attention_layers = []
+
+    for model in model_parts:
+        for name, module in model.named_modules():
+            # Skip modules inside checkpoint wrappers or torch.compile wrappers
+            # These are duplicates of the parent wrapped module
+            if "_orig_mod" in name:
+                continue
+
+            info = _extract_attention_info(name, module)
+            if info is not None:
+                attention_layers.append(info)
+
+    if attention_layers:
+        logger.info(f"QK-Clip: Detected {len(attention_layers)} attention layers")
+        for info in attention_layers:
+            mla_info = " (MLA)" if info.wq_c is not None or info.wk_c is not None else ""
+            logger.info(f"  - {info.layer_name}: num_heads={info.num_heads}{mla_info}")
+
+    return attention_layers
+
+
+def _extract_attention_info(
+    module_name: str,
+    module: nn.Module,
+) -> Optional[AttentionLayerInfo]:
+    """Extract attention layer info from a module if it's an attention layer.
+
+    Supports multiple naming conventions:
+    - q_proj/k_proj (HuggingFace style)
+    - wq/wk (LLaMA style)
+    - query/key (generic)
+    - W_Q/W_K (some implementations)
+
+    MLA-specific components (wq_c, wk_c, etc.) are always extracted if present.
+
+    Args:
+        module_name: Full name of the module in the model
+        module: The module to inspect
+
+    Returns:
+        AttentionLayerInfo if this is an attention module, None otherwise
+    """
+    # Try different naming conventions for Q/K projections
+    wq, wk = None, None
+    num_heads = 1
+
+    # Convention 1: q_proj/k_proj (HuggingFace transformers)
+    q_proj = getattr(module, 'q_proj', None)
+    k_proj = getattr(module, 'k_proj', None)
+    if q_proj is not None and k_proj is not None:
+        wq = _get_weight(q_proj)
+        wk = _get_weight(k_proj)
+
+    # Convention 2: wq/wk (LLaMA, torchtitan)
+    if wq is None:
+        wq_attr = getattr(module, 'wq', None)
+        wk_attr = getattr(module, 'wk', None)
+        if wq_attr is not None and wk_attr is not None:
+            wq = _get_weight(wq_attr)
+            wk = _get_weight(wk_attr)
+
+    # Convention 3: query/key (generic)
+    if wq is None:
+        query = getattr(module, 'query', None)
+        key = getattr(module, 'key', None)
+        if query is not None and key is not None:
+            wq = _get_weight(query)
+            wk = _get_weight(key)
+
+    # Convention 4: W_Q/W_K
+    if wq is None:
+        w_q = getattr(module, 'W_Q', None)
+        w_k = getattr(module, 'W_K', None)
+        if w_q is not None and w_k is not None:
+            wq = _get_weight(w_q)
+            wk = _get_weight(w_k)
+
+    # If we didn't find Q/K projections, this isn't an attention module
+    if wq is None or wk is None:
+        return None
+
+    # Try to get num_heads from the module
+    for attr in ['num_heads', 'n_heads', 'num_attention_heads', 'n_head']:
+        if hasattr(module, attr):
+            num_heads = getattr(module, attr)
+            break
+
+    # Infer head_dim
+    head_dim = None
+    if wq is not None and wq.ndim >= 2:
+        head_dim = wq.shape[0] // num_heads if num_heads > 0 else wq.shape[0]
+
+    # Extract MLA-specific components (always try, set to None if not present)
+    wq_c = _get_weight(getattr(module, 'wq_c', None))
+    wk_c = _get_weight(getattr(module, 'wk_c', None))
+    wq_r = _get_weight(getattr(module, 'wq_r', None))
+    wk_r = _get_weight(getattr(module, 'wk_r', None))
+
+    # Also try alternative MLA naming conventions
+    if wq_c is None:
+        wq_c = _get_weight(getattr(module, 'q_compress', None))
+    if wk_c is None:
+        wk_c = _get_weight(getattr(module, 'k_compress', None))
+    if wq_r is None:
+        wq_r = _get_weight(getattr(module, 'q_rope', None))
+    if wk_r is None:
+        wk_r = _get_weight(getattr(module, 'k_rope', None))
+
+    # Create the info object with all found components
+    return AttentionLayerInfo(
+        layer_name=module_name,
+        wq=wq,
+        wk=wk,
+        num_heads=num_heads,
+        head_dim=head_dim,
+        wq_c=wq_c,
+        wk_c=wk_c,
+        wq_r=wq_r,
+        wk_r=wk_r,
+    )
+
+
+def _get_weight(obj: Any) -> Optional[torch.Tensor]:
+    """Extract weight tensor from an object (module or tensor)."""
+    if obj is None:
+        return None
+    if isinstance(obj, torch.Tensor):
+        return obj
+    if hasattr(obj, 'weight'):
+        return obj.weight
+    return None
+
+
+def create_parameter_groups_with_attention(
+    model_parts: List[nn.Module],
+    dion_config,
+) -> ParameterClassificationResult:
+    """Create parameter groups and collect attention layer info for QK-Clip.
+
+    This is an extended version of create_parameter_groups that also detects
+    attention layers when QK-Clip is enabled.
+
+    Args:
+        model_parts: List of model parts
+        dion_config: Optimizer configuration (MuonOptimizerConfig or similar)
+
+    Returns:
+        ParameterClassificationResult containing param_groups and attention_layers
+    """
+    # Get standard parameter groups
+    param_groups = create_parameter_groups(model_parts, dion_config)
+
+    # Collect attention layer info if QK-Clip is enabled
+    attention_layers = []
+    qk_clip_enabled = getattr(dion_config, 'qk_clip_enabled', False)
+    if qk_clip_enabled:
+        attention_layers = collect_attention_layers(model_parts)
+
+    return ParameterClassificationResult(
+        param_groups=param_groups,
+        attention_layers=attention_layers,
+    )

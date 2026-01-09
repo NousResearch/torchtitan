@@ -1,10 +1,12 @@
 # source link:
 # https://github.com/microsoft/dion/blob/main/dion/muon.py
+# MuonClip extension: https://arxiv.org/abs/2507.20534 (Kimi K2)
 
 import math
 
+from dataclasses import dataclass, field
 from itertools import chain
-from typing import Callable, Generator, List, Optional, Tuple, Union
+from typing import Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -22,6 +24,51 @@ from .opt_utils import (
     to_local,
 )
 from .scalar_opts import adamw_update_foreach, lion_update_foreach
+
+
+@dataclass
+class AttentionHeadParams:
+    """Container for attention head parameters used in QK-Clip.
+
+    For standard multi-head attention:
+        - wq: Query projection weights [head_dim, hidden_dim] or combined [num_heads * head_dim, hidden_dim]
+        - wk: Key projection weights [head_dim, hidden_dim] or combined [num_heads * head_dim, hidden_dim]
+
+    For MLA (Multi-head Latent Attention) as in DeepSeek v3:
+        - wq_c: Query compression weights (head-specific)
+        - wk_c: Key compression weights (head-specific)
+        - wq_r: Query rotary weights (head-specific)
+        - wk_r: Key rotary weights (shared across heads, not clipped)
+    """
+    wq: Optional[Tensor] = None
+    wk: Optional[Tensor] = None
+    # MLA-specific components
+    wq_c: Optional[Tensor] = None  # Query compression (head-specific)
+    wk_c: Optional[Tensor] = None  # Key compression (head-specific)
+    wq_r: Optional[Tensor] = None  # Query rotary (head-specific)
+    wk_r: Optional[Tensor] = None  # Key rotary (shared, not clipped)
+    head_idx: int = 0
+    num_heads: int = 1
+
+
+@dataclass
+class QKClipConfig:
+    """Configuration for QK-Clip mechanism.
+
+    QK-Clip prevents attention logit explosion by monitoring per-head maximum
+    attention logits and rescaling query/key projection weights when they exceed
+    a threshold τ.
+
+    From Kimi K2 paper (https://arxiv.org/abs/2507.20534):
+    - γ_h = min(1, τ / S_max^h) where S_max^h is max attention logit for head h
+    - Standard attention: Q and K weights scaled by sqrt(γ_h)
+    - MLA: Q_c and K_c scaled by sqrt(γ_h), Q_r scaled by γ_h, K_r unchanged
+
+    MLA mode is auto-detected based on whether MLA parameters (wq_c, wk_c, etc.)
+    are registered for each attention layer.
+    """
+    enabled: bool = False
+    tau: float = 100.0  # Threshold for attention logit clipping
 
 
 class Muon(Optimizer):
@@ -68,6 +115,8 @@ class Muon(Optimizer):
         flatten: bool = False,
         use_triton: bool = False,
         newton_schulz_func: Optional[Callable] = None,
+        # QK-Clip parameters (MuonClip from Kimi K2)
+        qk_clip_config: Optional[QKClipConfig] = None,
     ):
         # Check hyperparameters
         if lr < 0.0:
@@ -131,6 +180,12 @@ class Muon(Optimizer):
             self._newton_schulz_func = newton_schulz_triton
         else:
             self._newton_schulz_func = zeropower_via_newtonschulz5
+
+        # QK-Clip configuration (MuonClip)
+        self._qk_clip_config = qk_clip_config or QKClipConfig()
+        # Registry mapping layer names to attention head parameters
+        # Key: layer_name (str), Value: Dict[head_idx, AttentionHeadParams]
+        self._attention_params_registry: Dict[str, Dict[int, AttentionHeadParams]] = {}
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -210,6 +265,151 @@ class Muon(Optimizer):
         ]
         name_lower = name.lower()
         return any(pattern in name_lower for pattern in expert_patterns)
+
+    # ==================== QK-Clip (MuonClip) Methods ====================
+
+    def register_attention_params(
+        self,
+        layer_name: str,
+        wq: Optional[Tensor] = None,
+        wk: Optional[Tensor] = None,
+        num_heads: int = 1,
+        head_dim: Optional[int] = None,
+        # MLA-specific parameters
+        wq_c: Optional[Tensor] = None,
+        wk_c: Optional[Tensor] = None,
+        wq_r: Optional[Tensor] = None,
+        wk_r: Optional[Tensor] = None,
+    ) -> None:
+        """Register attention parameters for QK-Clip.
+
+        This method should be called during model initialization to register
+        the query and key projection weights for each attention layer.
+
+        Args:
+            layer_name: Unique identifier for the attention layer (e.g., "layers.0.attention")
+            wq: Query projection weights. Shape [num_heads * head_dim, hidden_dim] or [head_dim, hidden_dim]
+            wk: Key projection weights. Shape [num_heads * head_dim, hidden_dim] or [head_dim, hidden_dim]
+            num_heads: Number of attention heads
+            head_dim: Dimension per head (inferred from wq if not provided)
+            wq_c: (MLA) Query compression weights
+            wk_c: (MLA) Key compression weights
+            wq_r: (MLA) Query rotary weights (head-specific)
+            wk_r: (MLA) Key rotary weights (shared, not clipped)
+        """
+        if not self._qk_clip_config.enabled:
+            return
+
+        if layer_name not in self._attention_params_registry:
+            self._attention_params_registry[layer_name] = {}
+
+        if head_dim is None and wq is not None:
+            # Infer head_dim from weight shape
+            head_dim = wq.shape[0] // num_heads
+
+        # Register params for each head
+        # MLA params are stored if provided (auto-detected during apply_qk_clip)
+        for head_idx in range(num_heads):
+            self._attention_params_registry[layer_name][head_idx] = AttentionHeadParams(
+                wq=wq,
+                wk=wk,
+                wq_c=wq_c,
+                wk_c=wk_c,
+                wq_r=wq_r,
+                wk_r=wk_r,
+                head_idx=head_idx,
+                num_heads=num_heads,
+            )
+
+    def apply_qk_clip(
+        self,
+        attention_max_logits: Dict[str, Tensor],
+    ) -> Dict[str, Tensor]:
+        """Apply QK-Clip to rescale query/key weights based on max attention logits.
+
+        This method should be called AFTER the optimizer step, providing the maximum
+        attention logits observed during the forward pass. It rescales the Q/K
+        projection weights to prevent attention logit explosion.
+
+        Args:
+            attention_max_logits: Dictionary mapping layer names to tensors of max logits
+                                  per head. Shape: [num_heads] or scalar for single head.
+                                  Example: {"layers.0.attention": tensor([105.2, 98.1, ...])}
+
+        Returns:
+            Dictionary mapping layer names to the scaling factors applied (γ_h) for logging.
+        """
+        if not self._qk_clip_config.enabled:
+            return {}
+
+        tau = self._qk_clip_config.tau
+        scaling_factors = {}
+
+        for layer_name, max_logits in attention_max_logits.items():
+            if layer_name not in self._attention_params_registry:
+                continue
+
+            # Ensure max_logits is a tensor
+            if not isinstance(max_logits, Tensor):
+                max_logits = torch.tensor(max_logits, device=next(iter(self._attention_params_registry[layer_name].values())).wq.device if self._attention_params_registry[layer_name] else "cpu")
+
+            # Handle scalar case (single head)
+            if max_logits.ndim == 0:
+                max_logits = max_logits.unsqueeze(0)
+
+            layer_scaling = []
+
+            for head_idx, head_params in self._attention_params_registry[layer_name].items():
+                if head_idx >= len(max_logits):
+                    continue
+
+                s_max_h = max_logits[head_idx].item()
+
+                # Compute scaling factor: γ_h = min(1, τ / S_max^h)
+                gamma_h = min(1.0, tau / (s_max_h + 1e-8))
+                layer_scaling.append(gamma_h)
+
+                if gamma_h < 1.0:
+                    # Need to rescale weights
+                    sqrt_gamma = math.sqrt(gamma_h)
+
+                    # Auto-detect MLA mode: if MLA params exist, use MLA-style clipping
+                    has_mla_params = head_params.wq_c is not None or head_params.wk_c is not None
+
+                    if has_mla_params:
+                        # MLA-specific clipping (Kimi K2 paper):
+                        # - Q_c and K_c scaled by sqrt(γ_h)
+                        # - Q_r scaled by γ_h
+                        # - K_r left unchanged (shared across heads)
+                        if head_params.wq_c is not None:
+                            _apply_head_scaling(head_params.wq_c, sqrt_gamma, head_idx, head_params.num_heads)
+                        if head_params.wk_c is not None:
+                            _apply_head_scaling(head_params.wk_c, sqrt_gamma, head_idx, head_params.num_heads)
+                        if head_params.wq_r is not None:
+                            _apply_head_scaling(head_params.wq_r, gamma_h, head_idx, head_params.num_heads)
+                        # wk_r is NOT scaled (shared component)
+                    else:
+                        # Standard attention: Q and K scaled by sqrt(γ_h)
+                        if head_params.wq is not None:
+                            _apply_head_scaling(head_params.wq, sqrt_gamma, head_idx, head_params.num_heads)
+                        if head_params.wk is not None:
+                            _apply_head_scaling(head_params.wk, sqrt_gamma, head_idx, head_params.num_heads)
+
+            scaling_factors[layer_name] = torch.tensor(layer_scaling)
+
+        return scaling_factors
+
+    @property
+    def qk_clip_enabled(self) -> bool:
+        """Check if QK-Clip is enabled."""
+        return self._qk_clip_config.enabled
+
+    @property
+    def qk_clip_tau(self) -> float:
+        """Get the QK-Clip threshold τ."""
+        return self._qk_clip_config.tau
+
+    # ==================== End QK-Clip Methods ====================
 
     def _get_or_initialize_state(self, param: Tensor, algo: str) -> dict:
         """
@@ -662,6 +862,58 @@ def adjust_lr_spectral_norm(lr, param_shape):
     fan_out, fan_in = param_shape[:2]
     adjusted_lr = lr * math.sqrt(fan_out / fan_in)
     return adjusted_lr
+
+
+# ==================== QK-Clip Helper Functions ====================
+
+
+@torch.no_grad()
+def _apply_head_scaling(
+    weight: Tensor,
+    scale: float,
+    head_idx: int,
+    num_heads: int,
+) -> None:
+    """Apply scaling factor to a specific head's portion of the weight matrix.
+
+    For combined Q/K projections with shape [num_heads * head_dim, hidden_dim],
+    this function scales only the portion corresponding to the specified head.
+
+    Args:
+        weight: The weight tensor to scale (modified in-place)
+        scale: Scaling factor to apply
+        head_idx: Index of the attention head (0-indexed)
+        num_heads: Total number of attention heads
+    """
+    if weight is None:
+        return
+
+    # Handle DTensor by getting local tensor
+    if hasattr(weight, '_local_tensor'):
+        local_weight = weight._local_tensor
+    else:
+        local_weight = weight
+
+    # Determine the head dimension from weight shape
+    # Weight shape is typically [out_features, in_features] where out_features = num_heads * head_dim
+    out_features = local_weight.shape[0]
+    head_dim = out_features // num_heads
+
+    if head_dim * num_heads != out_features:
+        # Weight is not evenly divisible by num_heads, might be a single head or different layout
+        # Just scale the entire weight in this case
+        local_weight.mul_(scale)
+        return
+
+    # Calculate the slice for this head
+    start_idx = head_idx * head_dim
+    end_idx = start_idx + head_dim
+
+    # Scale only the portion of the weight corresponding to this head
+    local_weight[start_idx:end_idx].mul_(scale)
+
+
+# ==================== End QK-Clip Helper Functions ====================
 
 
 # @torch.compile(fullgraph=True)

@@ -251,6 +251,17 @@ class Optimizer:
     use_triton: bool = False
     """Whether to use Triton kernel for Newton-Schulz in Muon optimizer."""
 
+    # QK-Clip parameters (MuonClip from Kimi K2)
+    # See: https://arxiv.org/abs/2507.20534
+    qk_clip_enabled: bool = False
+    """Whether to enable QK-Clip for training stability (prevents attention logit explosion)."""
+
+    qk_clip_tau: float = 100.0
+    """Threshold τ for attention logit clipping. When max attention logit exceeds τ, Q/K weights are rescaled."""
+
+    qk_clip_interval: int = 1
+    """How often to apply QK-Clip, in steps. Higher values reduce overhead but may miss logit spikes."""
+
 
 @dataclass
 class LRScheduler:

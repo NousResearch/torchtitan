@@ -196,6 +196,10 @@ class Attention(nn.Module):
         else:
             self.inner_attention = ScaledDotProductAttentionWrapper()
 
+        # QK-Clip max logit tracking (for MuonClip)
+        self.track_max_logits = False
+        self._max_logits: torch.Tensor | None = None
+
     def forward(
         self,
         x: torch.Tensor,
@@ -252,6 +256,14 @@ class Attention(nn.Module):
         k = k.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
         v = v.transpose(1, 2)  # (bsz, n_heads, seqlen, v_head_dim)
 
+        # Track max attention logits for QK-Clip (MuonClip)
+        if self.track_max_logits:
+            with torch.no_grad():
+                # Compute attention logits: (bsz, n_heads, seqlen, seqlen)
+                attn_logits = torch.matmul(q, k.transpose(-2, -1)) * self.softmax_scale
+                # Get max per head: (bsz, n_heads)
+                self._max_logits = attn_logits.amax(dim=(-2, -1))
+
         if self.use_flex_attn:
             assert isinstance(attention_masks, BlockMask)
             output = self.inner_attention(
@@ -285,6 +297,14 @@ class Attention(nn.Module):
         self.kv_norm.reset_parameters()
         if self.q_lora_rank > 0:
             self.q_norm.reset_parameters()
+
+    def get_max_logits(self) -> torch.Tensor | None:
+        """Get the tracked max attention logits per head."""
+        return self._max_logits
+
+    def clear_max_logits(self) -> None:
+        """Clear the tracked max attention logits."""
+        self._max_logits = None
 
 
 class TransformerBlock(nn.Module):
@@ -457,3 +477,29 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         h = self.norm(h) if self.norm is not None else h
         output = self.output(h) if self.output is not None else h
         return output
+
+    def set_track_max_logits(self, enabled: bool) -> None:
+        """Enable or disable max attention logit tracking for QK-Clip."""
+        for layer in self.layers.values():
+            if layer is not None:
+                layer.attention.track_max_logits = enabled
+
+    def get_attention_max_logits(self) -> dict[str, torch.Tensor]:
+        """Collect max attention logits from all layers.
+
+        Returns:
+            Dict mapping layer names to max logits tensors of shape (bsz, n_heads).
+        """
+        max_logits = {}
+        for layer_name, layer in self.layers.items():
+            if layer is not None:
+                logits = layer.attention.get_max_logits()
+                if logits is not None:
+                    max_logits[f"layers.{layer_name}.attention"] = logits
+        return max_logits
+
+    def clear_attention_max_logits(self) -> None:
+        """Clear tracked max attention logits from all layers."""
+        for layer in self.layers.values():
+            if layer is not None:
+                layer.attention.clear_max_logits()

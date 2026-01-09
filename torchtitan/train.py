@@ -294,6 +294,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.lr_schedulers = self.train_spec.build_lr_schedulers_fn(
             self.optimizers, job_config.lr_scheduler, job_config.training.steps
         )
+        # Post-build setup for optimizer-specific initialization (e.g., QK-Clip)
+        self.optimizers.post_build_setup(self.model_parts)
         # Post optimizer step model converters hook.
         # e.g. calculate float8 dynamic amax/scale for all-parameter for FSDP2
         # where it issues a single all-reduce for all parameters at once for better performance
@@ -714,6 +716,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             "lr": lr,
         }
         extra_metrics.update(self._collect_moe_expert_metrics())
+
+        # Log max attention logit if QK-Clip is enabled
+        if self.optimizers.last_max_logit is not None:
+            extra_metrics["max_attn_logit"] = self.optimizers.last_max_logit
         self.metrics_processor.log(
             self.step,
             global_avg_loss,

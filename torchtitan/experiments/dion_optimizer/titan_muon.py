@@ -23,13 +23,20 @@ from torchtitan.config import Optimizer as OptimizerConfig
 from torchtitan.distributed import ParallelDims
 
 # Import the Muon optimizer (assuming it's available)
-from .muon import Muon
-from .parameter_classification import create_parameter_groups
+from .muon import Muon, QKClipConfig, AttentionHeadParams
+from .parameter_classification import (
+    create_parameter_groups_with_attention,
+    collect_attention_layers,
+    AttentionLayerInfo,
+)
 
 __all__ = [
     "MuonOptimizersContainer",
     "build_muon_optimizers",
     "MuonOptimizerConfig",
+    "QKClipConfig",
+    "AttentionHeadParams",
+    "AttentionLayerInfo",
 ]
 
 
@@ -77,6 +84,13 @@ class MuonOptimizerConfig:
     # Gradient synchronization
     replicate_mesh_grad_sync: bool = True
 
+    # QK-Clip parameters (MuonClip from Kimi K2)
+    # See: https://arxiv.org/abs/2507.20534
+    qk_clip_enabled: bool = False  # Whether to enable QK-Clip for training stability
+    qk_clip_tau: float = 100.0  # Threshold τ for attention logit clipping
+    qk_clip_interval: int = 1  # How often to apply QK-Clip (1 = every step, 10 = every 10 steps)
+    # Note: MLA mode is auto-detected based on whether MLA params (wq_c, wk_c, etc.) are found
+
 
 class MuonOptimizersContainer(OptimizersContainer):
     """A container for Muon optimizers compatible with TorchTitan interface.
@@ -104,8 +118,18 @@ class MuonOptimizersContainer(OptimizersContainer):
         # Setup device meshes from parallel dimensions
         distributed_mesh = self._setup_device_mesh(parallel_dims)
 
-        # Classify parameters and create appropriate parameter groups
-        param_groups = create_parameter_groups(model_parts, muon_config)
+        # Classify parameters and collect attention layer info for QK-Clip
+        classification_result = create_parameter_groups_with_attention(model_parts, muon_config)
+        param_groups = classification_result.param_groups
+        self._attention_layers = classification_result.attention_layers
+
+        # Create QK-Clip configuration if enabled
+        qk_clip_config = None
+        if muon_config.qk_clip_enabled:
+            qk_clip_config = QKClipConfig(
+                enabled=muon_config.qk_clip_enabled,
+                tau=muon_config.qk_clip_tau,
+            )
 
         # Create the Muon optimizer
         self.muon_optimizer = Muon(
@@ -120,6 +144,7 @@ class MuonOptimizersContainer(OptimizersContainer):
             adjust_lr=muon_config.adjust_lr,
             flatten=muon_config.flatten,
             use_triton=muon_config.use_triton,
+            qk_clip_config=qk_clip_config,
         )
 
         # Initialize parent class with dummy optimizer kwargs
@@ -132,6 +157,15 @@ class MuonOptimizersContainer(OptimizersContainer):
 
         # For compatibility with OptimizersContainer interface
         self.optimizers = [self.muon_optimizer]
+
+        # Auto-register attention layers for QK-Clip using classification results
+        if muon_config.qk_clip_enabled and self._attention_layers:
+            self._register_attention_layers_from_classification()
+
+        # Track max attention logit for logging (updated after each step)
+        self._last_max_logit: Optional[float] = None
+        # Step counter for QK-Clip interval tracking
+        self._qk_clip_step: int = 0
 
     def _setup_device_mesh(
         self, parallel_dims: ParallelDims
@@ -201,6 +235,210 @@ class MuonOptimizersContainer(OptimizersContainer):
             options=StateDictOptions(flatten_optimizer_state_dict=True),
         )
         list(map(func, self.model_parts, [self.muon_optimizer] * len(self.model_parts)))
+
+    # ==================== QK-Clip (MuonClip) Methods ====================
+
+    def post_build_setup(self, model_parts: List[nn.Module]) -> None:
+        """Setup QK-Clip after optimizer is built.
+
+        This method enables max logit tracking on model attention modules and
+        registers a post-step hook to apply QK-Clip based on qk_clip_interval.
+
+        Args:
+            model_parts: List of model parts to setup.
+        """
+        if not self.muon_config.qk_clip_enabled:
+            return
+
+        interval = self.muon_config.qk_clip_interval
+
+        # Enable max logit tracking for the first step (step 0 is a clip step)
+        self._enable_max_logit_tracking(model_parts, enabled=True)
+
+        # Register post-step hook for QK-Clip
+        def qk_clip_post_step_hook(*args, **kwargs):
+            # Check if this is a clip step (before incrementing counter)
+            is_clip_step = (self._qk_clip_step % interval) == 0
+
+            if is_clip_step:
+                # Collect max logits from model attention modules
+                attention_max_logits = self._collect_attention_max_logits(model_parts)
+
+                if attention_max_logits:
+                    # Compute and store global max logit for logging
+                    global_max = None
+                    for layer_logits in attention_max_logits.values():
+                        # layer_logits shape: (batch_size, n_heads) - take max across batch and heads
+                        layer_max = layer_logits.max().item()
+                        if global_max is None or layer_max > global_max:
+                            global_max = layer_max
+                    self._last_max_logit = global_max
+
+                    # Apply QK-Clip
+                    self.apply_qk_clip(attention_max_logits)
+
+                # Clear max logits
+                self._clear_attention_max_logits(model_parts)
+
+            # Increment step counter
+            self._qk_clip_step += 1
+
+            # Enable/disable tracking for next step based on interval
+            next_is_clip_step = (self._qk_clip_step % interval) == 0
+            self._enable_max_logit_tracking(model_parts, enabled=next_is_clip_step)
+
+        self.register_step_post_hook(qk_clip_post_step_hook)
+
+    def _enable_max_logit_tracking(
+        self, model_parts: List[nn.Module], enabled: bool = True
+    ) -> None:
+        """Enable or disable max logit tracking on model attention modules.
+
+        Args:
+            model_parts: List of model parts.
+            enabled: Whether to enable (True) or disable (False) tracking.
+        """
+        for model in model_parts:
+            if hasattr(model, "set_track_max_logits"):
+                model.set_track_max_logits(enabled)
+
+    def _collect_attention_max_logits(
+        self, model_parts: List[nn.Module]
+    ) -> Dict[str, torch.Tensor]:
+        """Collect max attention logits from model attention modules.
+
+        Returns a dictionary mapping layer names to max logit tensors.
+        """
+        attention_max_logits = {}
+        for model in model_parts:
+            if hasattr(model, "get_attention_max_logits"):
+                logits = model.get_attention_max_logits()
+                attention_max_logits.update(logits)
+        return attention_max_logits
+
+    def _clear_attention_max_logits(self, model_parts: List[nn.Module]) -> None:
+        """Clear max logit tracking on model attention modules."""
+        for model in model_parts:
+            if hasattr(model, "clear_attention_max_logits"):
+                model.clear_attention_max_logits()
+
+    def register_attention_params(
+        self,
+        layer_name: str,
+        wq: Optional[torch.Tensor] = None,
+        wk: Optional[torch.Tensor] = None,
+        num_heads: int = 1,
+        head_dim: Optional[int] = None,
+        wq_c: Optional[torch.Tensor] = None,
+        wk_c: Optional[torch.Tensor] = None,
+        wq_r: Optional[torch.Tensor] = None,
+        wk_r: Optional[torch.Tensor] = None,
+    ) -> None:
+        """Register attention parameters for QK-Clip.
+
+        Delegates to the underlying Muon optimizer's register_attention_params method.
+
+        Args:
+            layer_name: Unique identifier for the attention layer
+            wq: Query projection weights
+            wk: Key projection weights
+            num_heads: Number of attention heads
+            head_dim: Dimension per head (inferred from wq if not provided)
+            wq_c: (MLA) Query compression weights
+            wk_c: (MLA) Key compression weights
+            wq_r: (MLA) Query rotary weights (head-specific)
+            wk_r: (MLA) Key rotary weights (shared, not clipped)
+        """
+        self.muon_optimizer.register_attention_params(
+            layer_name=layer_name,
+            wq=wq,
+            wk=wk,
+            num_heads=num_heads,
+            head_dim=head_dim,
+            wq_c=wq_c,
+            wk_c=wk_c,
+            wq_r=wq_r,
+            wk_r=wk_r,
+        )
+
+    def apply_qk_clip(
+        self,
+        attention_max_logits: Dict[str, torch.Tensor],
+    ) -> Dict[str, torch.Tensor]:
+        """Apply QK-Clip after optimizer step.
+
+        This method should be called AFTER the optimizer step, providing the maximum
+        attention logits observed during the forward pass.
+
+        Args:
+            attention_max_logits: Dictionary mapping layer names to tensors of max logits
+                                  per head. Shape: [num_heads] or scalar.
+
+        Returns:
+            Dictionary mapping layer names to the scaling factors applied (γ_h).
+        """
+        return self.muon_optimizer.apply_qk_clip(attention_max_logits)
+
+    @property
+    def qk_clip_enabled(self) -> bool:
+        """Check if QK-Clip is enabled."""
+        return self.muon_optimizer.qk_clip_enabled
+
+    @property
+    def qk_clip_tau(self) -> float:
+        """Get the QK-Clip threshold τ."""
+        return self.muon_optimizer.qk_clip_tau
+
+    @property
+    def last_max_logit(self) -> Optional[float]:
+        """Get the max attention logit from the last forward pass.
+
+        This returns the global maximum across all layers, heads, and batch samples.
+        Useful for logging/monitoring attention logit growth during training.
+        Returns None if no logits have been tracked yet.
+        """
+        return self._last_max_logit
+
+    def _register_attention_layers_from_classification(self) -> None:
+        """Register attention layers detected during parameter classification.
+
+        This is called automatically during __init__ when QK-Clip is enabled.
+        Uses the AttentionLayerInfo collected by create_parameter_groups_with_attention.
+        """
+        for layer_info in self._attention_layers:
+            self.muon_optimizer.register_attention_params(
+                layer_name=layer_info.layer_name,
+                wq=layer_info.wq,
+                wk=layer_info.wk,
+                num_heads=layer_info.num_heads,
+                head_dim=layer_info.head_dim,
+                wq_c=layer_info.wq_c,
+                wk_c=layer_info.wk_c,
+                wq_r=layer_info.wq_r,
+                wk_r=layer_info.wk_r,
+            )
+
+    def auto_register_attention_params(self) -> None:
+        """Manually trigger attention parameter registration.
+
+        Note: This is typically not needed as registration happens automatically
+        during optimizer initialization when qk_clip_enabled=True. This method
+        is provided for cases where you want to re-scan or update registrations.
+        """
+        if not self.muon_config.qk_clip_enabled:
+            return
+
+        # Use the classification system to detect attention layers
+        # MLA params are auto-detected if present
+        self._attention_layers = collect_attention_layers(self.model_parts)
+        self._register_attention_layers_from_classification()
+
+    @property
+    def attention_layers(self) -> List[AttentionLayerInfo]:
+        """Get the list of detected attention layers."""
+        return self._attention_layers
+
+    # ==================== End QK-Clip Methods ====================
 
 
 def build_muon_optimizers(

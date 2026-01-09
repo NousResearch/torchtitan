@@ -167,6 +167,32 @@ class OptimizersContainer(Optimizer, Stateful, Generic[T]):
         # functionality such as hooks.
         Optimizer.__init__(self, all_params, optimizer_kwargs)
 
+    def post_build_setup(self, model_parts: list[nn.Module]) -> None:
+        """Called after optimizer is built to perform any additional setup.
+
+        This method allows subclasses to perform setup that requires access to the
+        model parts after the optimizer has been fully constructed. For example,
+        setting up QK-Clip for MuonClip which requires enabling max logit tracking
+        on attention modules.
+
+        The default implementation does nothing. Subclasses can override to add
+        custom behavior.
+
+        Args:
+            model_parts: List of model parts (same as passed to optimizer).
+        """
+        pass
+
+    @property
+    def last_max_logit(self) -> float | None:
+        """Get the max attention logit from the last forward pass.
+
+        This is used for logging attention logit growth during training.
+        Only available when QK-Clip is enabled with Muon optimizer.
+        Returns None for standard optimizers.
+        """
+        return None
+
 
 class OptimizersInBackwardContainer(OptimizersContainer):
     """OptimizersContainer for executing ``optim.step()`` in backward pass.
@@ -437,6 +463,10 @@ def build_optimizers(
             head_lr_factor=getattr(optimizer_config, "head_lr_factor", 1.0),
             routing_lr_factor=getattr(optimizer_config, "routing_lr_factor", 1.0),
             expert_lr_factor=getattr(optimizer_config, "expert_lr_factor", 1.0),
+            # QK-Clip parameters (MuonClip)
+            qk_clip_enabled=getattr(optimizer_config, "qk_clip_enabled", False),
+            qk_clip_tau=getattr(optimizer_config, "qk_clip_tau", 100.0),
+            qk_clip_interval=getattr(optimizer_config, "qk_clip_interval", 1),
         )
 
         return MuonOptimizersContainer(
