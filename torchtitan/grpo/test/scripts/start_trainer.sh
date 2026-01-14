@@ -8,8 +8,7 @@ echo "========================================"
 echo "Starting TorchTitan RL Trainer"
 echo "========================================"
 
-# Add Atropos to PYTHONPATH
-export PYTHONPATH=/home/shared/atropos:$PYTHONPATH
+source /home/nightwing/Projects/torchtitan/.venv/bin/activate
 
 # Get the torchtitan root directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

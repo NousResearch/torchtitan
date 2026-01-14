@@ -7,8 +7,7 @@ echo "========================================"
 echo "Starting Atropos API Server"
 echo "========================================"
 
-# Add Atropos to PYTHONPATH
-export PYTHONPATH=/home/shared/atropos:$PYTHONPATH
+source /home/nightwing/Projects/torchtitan/.venv/bin/activate
 
 # Change to Atropos directory
 cd /home/shared/atropos

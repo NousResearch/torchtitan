@@ -7,8 +7,8 @@ echo "========================================"
 echo "Starting GSM8k Environment Server"
 echo "========================================"
 
-# Add Atropos to PYTHONPATH
-export PYTHONPATH=/home/shared/atropos:$PYTHONPATH
+# Activate TorchTitan venv (has atroposlib installed)
+source /home/nightwing/Projects/torchtitan/.venv/bin/activate
 
 # Get the torchtitan root directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,23 +19,19 @@ cd "$TORCHTITAN_ROOT"
 
 # Configuration
 MODEL_NAME="Qwen/Qwen3-1.7B"
-SGLANG_URL_1="http://localhost:9001/v1"
-SGLANG_URL_2="http://localhost:9002/v1"
+SGLANG_URL="http://localhost:9001/v1"
 
 # Check if Atropos is accessible
 if ! python -c "from atroposlib.envs.base import BaseEnv" 2>/dev/null; then
-    echo "ERROR: Cannot import Atropos. Is PYTHONPATH set correctly?"
-    echo "PYTHONPATH=$PYTHONPATH"
+    echo "ERROR: Cannot import Atropos. Is it installed in the venv?"
+    echo "Run: pip install -e /home/shared/atropos"
     exit 1
 fi
 
-# Check if SGLang servers are running
+# Check if SGLang server is running
 echo "Checking SGLang server availability..."
-if ! curl -s "$SGLANG_URL_1/models" > /dev/null; then
-    echo "WARNING: SGLang server at $SGLANG_URL_1 is not responding"
-fi
-if ! curl -s "$SGLANG_URL_2/models" > /dev/null; then
-    echo "WARNING: SGLang server at $SGLANG_URL_2 is not responding"
+if ! curl -s "$SGLANG_URL/models" > /dev/null; then
+    echo "WARNING: SGLang server at $SGLANG_URL is not responding"
 fi
 
 # Check if Atropos API is running

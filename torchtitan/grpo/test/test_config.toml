@@ -54,8 +54,7 @@ pipeline_parallel_degree = 1
 
 [grpo]
 sglang_tp = 1
-# update these URLs based on SGLang server configuration
-sglang_urls = ["localhost:9001", "localhost:9002"]
+sglang_urls = ["localhost:9001"]
 sglang_slurm_num_nodes = 1
 sglang_port = 26756
 

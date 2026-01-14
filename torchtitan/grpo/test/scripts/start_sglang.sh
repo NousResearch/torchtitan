@@ -1,58 +1,60 @@
 #!/bin/bash
-# Start SGLang Inference Servers
+# Start SGLang Inference Server
 
 set -e
 
 echo "========================================"
-echo "Starting SGLang Inference Servers"
+echo "Starting SGLang Inference Server"
 echo "========================================"
 
+# Cleanup function
+cleanup_sglang() {
+    echo "Cleaning up any existing SGLang processes..."
+    pkill -9 -f "sglang.launch_server" 2>/dev/null || true
+    sleep 2
+}
+
+# Run cleanup first
+cleanup_sglang
+
+source /home/nightwing/Projects/torchtitan/sglangvenv/bin/activate
+
 # Configuration
-MODEL_PATH="/home/shared/torchtitan-conversions/qwen3_1.7b" # update with model path
+MODEL_PATH="/home/nightwing/Projects/torchtitan/tmp/qwen3-1.7b-hf"  # HF path
 TP_SIZE=1
-NUM_SERVERS=2
+NUM_SERVERS=1  # Using 1 server for testing to avoid OOM
 BASE_PORT=9001
 
-# Check if model path exists
-if [ ! -d "$MODEL_PATH" ]; then
-    echo "ERROR: Model path not found: $MODEL_PATH"
-    echo "Please update MODEL_PATH in this script to point to your Qwen3-1.7B checkpoint"
-    exit 1
-fi
+# Note: Using HF model name - SGLang will auto-download if needed
 
-# Start SGLang servers
-for i in $(seq 0 $((NUM_SERVERS - 1))); do
-    PORT=$((BASE_PORT + i))
-    echo "Starting SGLang server $((i+1))/$NUM_SERVERS on port $PORT..."
+# Start SGLang server
+echo "Starting SGLang server on port $BASE_PORT..."
 
-    python -m sglang.launch_server \
-        --model-path "$MODEL_PATH" \
-        --port $PORT \
-        --tp $TP_SIZE \
-        --host 0.0.0.0 \
-        --log-level info \
-        2>&1 | tee "/tmp/sglang_server_${PORT}.log" &
+python -m sglang.launch_server \
+    --model-path "$MODEL_PATH" \
+    --port $BASE_PORT \
+    --tp $TP_SIZE \
+    --host 0.0.0.0 \
+    --log-level info \
+    2>&1 | tee "/tmp/sglang_server_${BASE_PORT}.log" &
 
-    echo "SGLang server $((i+1)) starting (PID: $!)"
-done
+SERVER_PID=$!
+echo "SGLang server starting (PID: $SERVER_PID)"
 
 echo ""
-echo "All SGLang servers started!"
-echo "Waiting for servers to be ready..."
-sleep 30
+echo "Waiting for server to be ready (~30 seconds)..."
+sleep 60
 
 # Test server connectivity
 echo ""
 echo "Testing server connectivity..."
-for i in $(seq 0 $((NUM_SERVERS - 1))); do
-    PORT=$((BASE_PORT + i))
-    if curl -s "http://localhost:${PORT}/v1/models" > /dev/null; then
-        echo "Server on port $PORT is ready"
-    else
-        echo "Server on port $PORT is not responding"
-    fi
-done
+if curl -s "http://localhost:${BASE_PORT}/v1/models" > /dev/null; then
+    echo "Server on port $BASE_PORT is ready"
+else
+    echo "Server on port $BASE_PORT is not responding"
+    echo "Check log at: /tmp/sglang_server_${BASE_PORT}.log"
+fi
 
 echo ""
-echo "SGLang servers are ready for inference!"
-echo "Logs available at: /tmp/sglang_server_*.log"
+echo "SGLang server ready for inference!"
+echo "Log available at: /tmp/sglang_server_${BASE_PORT}.log"

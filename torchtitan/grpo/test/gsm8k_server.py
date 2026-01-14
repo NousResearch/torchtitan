@@ -74,12 +74,6 @@ class GSM8kEnv(BaseEnv):
                 api_key="x",
                 num_requests_for_eval=256,
             ),
-            APIServerConfig(
-                model_name="Qwen/Qwen3-1.7B",
-                base_url="http://localhost:9002/v1",
-                api_key="x",
-                num_requests_for_eval=256,
-            ),
         ]
 
         return env_config, server_configs

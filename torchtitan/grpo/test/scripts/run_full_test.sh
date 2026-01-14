@@ -34,9 +34,10 @@ cleanup() {
     if [ ! -z "$SGLANG_PID" ]; then
         echo "Stopping SGLang servers (PID: $SGLANG_PID)"
         kill $SGLANG_PID 2>/dev/null || true
-        # Also kill any remaining sglang processes
-        pkill -f "sglang.launch_server" 2>/dev/null || true
     fi
+
+    echo "Force-killing any remaining SGLang processes..."
+    pkill -9 -f "sglang.launch_server" 2>/dev/null || true
 
     if [ ! -z "$ENV_PID" ]; then
         echo "Stopping GSM8k environment (PID: $ENV_PID)"
