@@ -5,14 +5,17 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed.tensor import DTensor
 
-from .utils import indices_padding_wrapper
+from torchtitan.components.peft.lora import Lora
+from torchtitan.config.job_config import PEFT
+
+from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
 @dataclass
@@ -65,11 +68,38 @@ class FeedForward(nn.Module):
         self,
         dim: int,
         hidden_dim: int,
+        peft_config: Optional[PEFT] = None,
     ):
         super().__init__()
-        self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-        self.w2 = nn.Linear(hidden_dim, dim, bias=False)
-        self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        if peft_config is not None and peft_config.enable_peft:
+            self.w1 = Lora(
+                dim,
+                hidden_dim,
+                bias=False,
+                r=peft_config.lora_rank,
+                lora_alpha=peft_config.lora_alpha,
+                lora_dropout=peft_config.lora_dropout,
+            )
+            self.w2 = Lora(
+                hidden_dim,
+                dim,
+                bias=False,
+                r=peft_config.lora_rank,
+                lora_alpha=peft_config.lora_alpha,
+                lora_dropout=peft_config.lora_dropout,
+            )
+            self.w3 = Lora(
+                dim,
+                hidden_dim,
+                bias=False,
+                r=peft_config.lora_rank,
+                lora_alpha=peft_config.lora_alpha,
+                lora_dropout=peft_config.lora_dropout,
+            )
+        else:
+            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
+            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
+            self.w3 = nn.Linear(dim, hidden_dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -107,6 +137,68 @@ def _run_experts_for_loop(
         h = F.silu(torch.matmul(x_expert, w1[expert_idx].transpose(-2, -1)))
         h = h * torch.matmul(x_expert, w3[expert_idx].transpose(-2, -1))
         h = torch.matmul(h, w2[expert_idx].transpose(-2, -1))
+        # h shape (tokens_per_expert(varying), dim)
+        out_experts_splits.append(h)
+    out = torch.cat(out_experts_splits, dim=0)
+
+    # side-effect code due to the usage of generate_permute_indices
+    out = torch.vstack((out, out.new_zeros((num_padding, out.shape[-1]))))
+
+    return out
+
+
+def _run_experts_for_loop_lora_helper(
+    w: torch.Tensor,
+    w_lora_a: torch.Tensor,
+    w_lora_b: torch.Tensor,
+    x: torch.Tensor,
+) -> torch.Tensor:
+    return torch.matmul(x, w.transpose(-2, -1)) + torch.matmul(
+        torch.matmul(x, w_lora_b.transpose(-2, -1)), w_lora_a.transpose(-2, -1)
+    )
+
+
+# NOTE: keeping this for-loop implementation for comparison
+#       and readability, may remove later
+def _run_experts_for_loop_lora(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    w1_lora_a: torch.Tensor,
+    w1_lora_b: torch.Tensor,
+    w2_lora_a: torch.Tensor,
+    w2_lora_b: torch.Tensor,
+    w3_lora_a: torch.Tensor,
+    w3_lora_b: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    # NOTE: this would incur a synchronization between device and host
+    num_tokens_per_expert = num_tokens_per_expert.tolist()
+
+    # side-effect code due to the usage of generate_permute_indices
+    num_padding = x.shape[0] - sum(num_tokens_per_expert)
+
+    # a tuple of tensors indexed by experts
+    # each with shape (tokens_per_expert(varying), dim)
+    x = torch.split(
+        x[: sum(num_tokens_per_expert)],
+        split_size_or_sections=num_tokens_per_expert,
+        dim=0,
+    )
+    out_experts_splits = []
+    for expert_idx, x_expert in enumerate(x):
+        h = F.silu(
+            _run_experts_for_loop_lora_helper(
+                w1[expert_idx], w1_lora_a[expert_idx], w1_lora_b[expert_idx], x_expert
+            )
+        )
+        h = h * _run_experts_for_loop_lora_helper(
+            w3[expert_idx], w3_lora_a[expert_idx], w3_lora_b[expert_idx], x_expert
+        )
+        h = _run_experts_for_loop_lora_helper(
+            w2[expert_idx], w2_lora_a[expert_idx], w2_lora_b[expert_idx], x_expert
+        )
         # h shape (tokens_per_expert(varying), dim)
         out_experts_splits.append(h)
     out = torch.cat(out_experts_splits, dim=0)
@@ -189,6 +281,158 @@ class GroupedExperts(nn.Module):
         nn.init.trunc_normal_(self.w1, mean=0.0, std=std_in)
         nn.init.trunc_normal_(self.w2, mean=0.0, std=std_in)
         nn.init.trunc_normal_(self.w3, mean=0.0, std=std_out)
+
+
+def _groupmm(x, w, offs):
+    return torch._grouped_mm(x.bfloat16(), w.bfloat16().transpose(-2, -1), offs=offs)
+
+
+def _groupmm_lora(x, w, w_lora_a, w_lora_b, offs):
+    linear = _groupmm(x, w, offs)
+    lora_a = _groupmm(x, w_lora_a, offs)
+    lora_b = _groupmm(lora_a, w_lora_b, offs)
+    return linear + lora_b
+
+
+def _run_experts_grouped_mm_lora(
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    w3: torch.Tensor,
+    w1_lora_a: torch.Tensor,
+    w1_lora_b: torch.Tensor,
+    w2_lora_a: torch.Tensor,
+    w2_lora_b: torch.Tensor,
+    w3_lora_a: torch.Tensor,
+    w3_lora_b: torch.Tensor,
+    x: torch.Tensor,
+    num_tokens_per_expert: torch.Tensor,
+) -> torch.Tensor:
+    offsets = torch.cumsum(num_tokens_per_expert, dim=0, dtype=torch.int32)
+
+    h = F.silu(_groupmm_lora(x, w1, w1_lora_a, w1_lora_b, offsets))
+    h = h * _groupmm_lora(x, w3, w3_lora_a, w3_lora_b, offsets)
+    out = _groupmm_lora(h, w2, w2_lora_a, w2_lora_b, offsets).type_as(x)
+
+    return out
+
+
+class LoraGroupedExperts(nn.Module):
+    def __init__(
+        self,
+        dim: int,
+        hidden_dim: int,
+        num_experts: int,
+        use_grouped_mm: bool,
+        peft_config: PEFT,
+    ):
+        super().__init__()
+        self.num_experts = num_experts
+        self.w1 = nn.Parameter(
+            torch.empty(num_experts, hidden_dim, dim), requires_grad=False
+        )
+        self.w2 = nn.Parameter(
+            torch.empty(num_experts, dim, hidden_dim), requires_grad=False
+        )
+        self.w3 = nn.Parameter(
+            torch.empty(num_experts, hidden_dim, dim), requires_grad=False
+        )
+        self.use_grouped_mm = use_grouped_mm
+        self.w1_lora_a = nn.Parameter(
+            torch.empty(num_experts, peft_config.lora_rank, dim)
+        )
+        self.w1_lora_b = nn.Parameter(
+            torch.empty(num_experts, hidden_dim, peft_config.lora_rank)
+        )
+        self.w2_lora_a = nn.Parameter(
+            torch.empty(num_experts, peft_config.lora_rank, hidden_dim)
+        )
+        self.w2_lora_b = nn.Parameter(
+            torch.empty(num_experts, dim, peft_config.lora_rank)
+        )
+        self.w3_lora_a = nn.Parameter(
+            torch.empty(num_experts, peft_config.lora_rank, dim)
+        )
+        self.w3_lora_b = nn.Parameter(
+            torch.empty(num_experts, hidden_dim, peft_config.lora_rank)
+        )
+
+    def forward(
+        self, x: torch.Tensor, num_tokens_per_expert: torch.Tensor
+    ) -> torch.Tensor:
+        if isinstance(self.w1, DTensor):
+            w1 = self.w1.to_local()
+            w2 = self.w2.to_local()
+            w3 = self.w3.to_local()
+            w1_lora_a = self.w1_lora_a.to_local()
+            w1_lora_b = self.w1_lora_b.to_local()
+            w2_lora_a = self.w2_lora_a.to_local()
+            w2_lora_b = self.w2_lora_b.to_local()
+            w3_lora_a = self.w3_lora_a.to_local()
+            w3_lora_b = self.w3_lora_b.to_local()
+        else:
+            w1 = self.w1
+            w2 = self.w2
+            w3 = self.w3
+            w1_lora_a = self.w1_lora_a
+            w1_lora_b = self.w1_lora_b
+            w2_lora_a = self.w2_lora_a
+            w2_lora_b = self.w2_lora_b
+            w3_lora_a = self.w3_lora_a
+            w3_lora_b = self.w3_lora_b
+
+        if self.use_grouped_mm:
+            # NOTE: If EP is not used, we need to pad the indices
+            #       to prepare for grouped_mm;
+            #       otherwise, EP will handle the padding.
+            if (
+                not isinstance(self.w1, DTensor)
+                or "ep" not in self.w1.device_mesh.mesh_dim_names
+            ):
+                run_experts_fn_lora = indices_padding_wrapper_lora(
+                    _run_experts_grouped_mm_lora
+                )
+            else:
+                run_experts_fn_lora = _run_experts_grouped_mm_lora
+            return run_experts_fn_lora(
+                w1,
+                w2,
+                w3,
+                w1_lora_a,
+                w1_lora_b,
+                w2_lora_a,
+                w2_lora_b,
+                w3_lora_a,
+                w3_lora_b,
+                x,
+                num_tokens_per_expert,
+            )
+        else:
+            return _run_experts_for_loop_lora(
+                w1,
+                w2,
+                w3,
+                w1_lora_a,
+                w1_lora_b,
+                w2_lora_a,
+                w2_lora_b,
+                w3_lora_a,
+                w3_lora_b,
+                x,
+                num_tokens_per_expert,
+            )
+
+    def init_weights(self, init_std: float, n_layers: int):
+        std_in = moe_init_std(self.w1.shape[-1], n_layers)
+        std_out = moe_init_std(self.w2.shape[0], n_layers)
+        nn.init.trunc_normal_(self.w1, mean=0.0, std=std_in)
+        nn.init.trunc_normal_(self.w2, mean=0.0, std=std_in)
+        nn.init.trunc_normal_(self.w3, mean=0.0, std=std_out)
+        nn.init.trunc_normal_(self.w1_lora_a, mean=0.0, std=std_in)
+        nn.init.trunc_normal_(self.w2_lora_a, mean=0.0, std=std_in)
+        nn.init.trunc_normal_(self.w3_lora_a, mean=0.0, std=std_in)
+        nn.init.zeros_(self.w1_lora_b)
+        nn.init.zeros_(self.w2_lora_b)
+        nn.init.zeros_(self.w3_lora_b)
 
 
 class TokenChoiceTopKRouter(nn.Module):
@@ -308,7 +552,7 @@ class TokenChoiceTopKRouter(nn.Module):
         temp_weight = torch.empty_like(self.gate.weight)
         nn.init.normal_(temp_weight, mean=0.0, std=1.0)
 
-        row_norms = torch.norm(temp_weight, dim=1, keepdim=True)
+        row_norms = torch.norm(temp_weight, dim=1, keepdim=True)  # noqa: TOR101
         temp_weight = temp_weight / row_norms.clamp(min=1e-6)  # avoid divide by 0
 
         std = moe_init_std(self.gate.weight.shape[1], n_layers)
@@ -377,16 +621,41 @@ class TokenReorderer(nn.Module):
 
 
 class MoE(nn.Module):
-    def __init__(self, moe_args: MoEArgs, dim: int, hidden_dim: int):
+    """
+    MoE Module
+
+    Args:
+        moe_args (MoEArgs): MoE configuration.
+        dim (int): Dimension of the input tokens.
+        hidden_dim (int): Dimension of the hidden layer.
+        peft_config (PEFT): PEFT configuration.
+    """
+
+    def __init__(
+        self,
+        moe_args: MoEArgs,
+        dim: int,
+        hidden_dim: int,
+        peft_config: Optional[PEFT] = None,
+    ):
         super().__init__()
 
         num_experts = moe_args.num_experts
-        self.experts = GroupedExperts(
-            dim=dim,
-            hidden_dim=hidden_dim,
-            num_experts=num_experts,
-            use_grouped_mm=moe_args.use_grouped_mm,
-        )
+        if peft_config is not None and peft_config.enable_peft:
+            self.experts = LoraGroupedExperts(
+                dim=dim,
+                hidden_dim=hidden_dim,
+                num_experts=num_experts,
+                use_grouped_mm=moe_args.use_grouped_mm,
+                peft_config=peft_config,
+            )
+        else:
+            self.experts = GroupedExperts(
+                dim=dim,
+                hidden_dim=hidden_dim,
+                num_experts=num_experts,
+                use_grouped_mm=moe_args.use_grouped_mm,
+            )
         self.router = TokenChoiceTopKRouter(
             dim=dim,
             num_experts=num_experts,
@@ -396,15 +665,27 @@ class MoE(nn.Module):
             route_scale=moe_args.route_scale,
             _debug_force_load_balance=moe_args._debug_force_load_balance,
         )
+        if peft_config is not None and peft_config.enable_peft:
+            self.router.gate.weight.requires_grad = False
         self.reorderer = TokenReorderer(num_experts=num_experts, top_k=moe_args.top_k)
         self.shared_experts = (
-            FeedForward(dim=dim, hidden_dim=hidden_dim * moe_args.num_shared_experts)
+            FeedForward(
+                dim=dim,
+                hidden_dim=hidden_dim * moe_args.num_shared_experts,
+                peft_config=peft_config,
+            )
             if moe_args.num_shared_experts > 0
             else None
         )
         self.shared_gate = (
             nn.Linear(dim, 1, bias=False) if moe_args.shared_gate else None
         )
+        if (
+            peft_config is not None
+            and peft_config.enable_peft
+            and self.shared_gate is not None
+        ):
+            self.shared_gate.weight.requires_grad = False
         self.score_before_experts = moe_args.score_before_experts
 
         # define fields for auxiliary-loss-free load balancing (https://arxiv.org/abs/2408.15664)
