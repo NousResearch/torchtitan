@@ -15,8 +15,16 @@ from torch.distributed.tensor import DTensor
 from torchtitan.components.peft.lora import Lora
 from torchtitan.config.job_config import PEFT
 from torchtitan.distributed.deepep.fused_activation import fused_silu_gate_prob
-from torchtitan.distributed.deepep.utils import DeepEPTokenDispatcher
 from torchtitan.tools.logging import logger
+
+try:
+    from torchtitan.distributed.deepep.utils import DeepEPTokenDispatcher
+except ImportError:
+    DeepEPTokenDispatcher = None
+    logger.warning(
+        "DeepEP is not installed, using default token dispatcher. "
+        "Please install DeepEP to use DeepEP token dispatcher."
+    )
 
 from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
@@ -1012,10 +1020,16 @@ class MoE(nn.Module):
             # shared expert
             # Note: we execute the shared expert before scoring the output of the routed expert
             # to "implicitly" overlap the shared expert compute with token combine communication
+            flat_x = x.view(-1, x.shape[-1])
             if self.shared_experts is not None:
-                out = self.shared_experts(x)
+                shared_out = self.shared_experts(flat_x)
+                if self.shared_gate is not None:
+                    shared_gate_val = F.sigmoid(self.shared_gate(flat_x))
+                    out = shared_out * shared_gate_val
+                else:
+                    out = shared_out
             else:
-                out = torch.zeros_like(x)
+                out = torch.zeros_like(flat_x)
 
             if not self.score_before_experts:
                 routed_output = (

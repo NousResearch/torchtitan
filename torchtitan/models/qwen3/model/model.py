@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn.attention.flex_attention import and_masks, BlockMask
-from torchtitan.components.peft.lora import Lora
+from torchtitan.components.peft.lora import lora_or_linear, per_layer_config
 
 from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.config.job_config import PEFT
@@ -167,55 +167,34 @@ class Attention(nn.Module):
         else:
             self.q_norm = None
             self.k_norm = None
-        if peft_config.enable_peft:
-            self.wq = Lora(
-                model_args.dim,
-                model_args.n_heads * self.head_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.wk = Lora(
-                model_args.dim,
-                self.n_kv_heads * self.head_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.wv = Lora(
-                model_args.dim,
-                self.n_kv_heads * self.head_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.wo = Lora(
-                model_args.n_heads * self.head_dim,
-                model_args.dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
+        self.wq = lora_or_linear(
+            model_args.dim,
+            model_args.n_heads * self.head_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.wk = lora_or_linear(
+            model_args.dim,
+            self.n_kv_heads * self.head_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.wv = lora_or_linear(
+            model_args.dim,
+            self.n_kv_heads * self.head_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.wo = lora_or_linear(
+            model_args.n_heads * self.head_dim,
+            model_args.dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        if peft_config.enable_peft and not peft_config.lora_train_norm:
             if model_args.qk_norm:
                 self.q_norm.weight.requires_grad = False
                 self.k_norm.weight.requires_grad = False
-        else:
-            self.wq = nn.Linear(
-                model_args.dim, model_args.n_heads * self.head_dim, bias=False
-            )
-            self.wk = nn.Linear(
-                model_args.dim, self.n_kv_heads * self.head_dim, bias=False
-            )
-            self.wv = nn.Linear(
-                model_args.dim, self.n_kv_heads * self.head_dim, bias=False
-            )
-            self.wo = nn.Linear(
-                model_args.n_heads * self.head_dim, model_args.dim, bias=False
-            )
 
         if self.use_flex_attn:
             self.inner_attention = FlexAttentionWrapper()
@@ -321,36 +300,25 @@ class FeedForward(nn.Module):
     ):
         super().__init__()
 
-        # Hidden dimension is directly added from the model argsS
-        if peft_config.enable_peft:
-            self.w1 = Lora(
-                dim,
-                hidden_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.w2 = Lora(
-                hidden_dim,
-                dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.w3 = Lora(
-                dim,
-                hidden_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-        else:
-            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
-            self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        # Hidden dimension is directly added from the model args
+        self.w1 = lora_or_linear(
+            dim,
+            hidden_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.w2 = lora_or_linear(
+            hidden_dim,
+            dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.w3 = lora_or_linear(
+            dim,
+            hidden_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
 
     def forward(self, x):
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -406,7 +374,8 @@ class TransformerBlock(nn.Module):
             )
         self.attention_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
         self.ffn_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
-        if peft_config.enable_peft:
+
+        if peft_config.enable_peft and not peft_config.lora_train_norm:
             self.attention_norm.weight.requires_grad = False
             self.ffn_norm.weight.requires_grad = False
 
@@ -494,9 +463,18 @@ class Qwen3Model(nn.Module, ModelProtocol):
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
+            peft_config_layer = per_layer_config(peft_config, layer_id)
             self.layers[str(layer_id)] = TransformerBlock(
-                layer_id, model_args, peft_config
+                layer_id, model_args, peft_config_layer
             )
+            if (
+                peft_config.enable_peft
+                and (peft_config.layers_to_train is not None)
+                and (layer_id not in peft_config.layers_to_train)
+            ):
+                # We have layers that are not in the layers_to_train list, so we need to freeze them.
+                for param in self.layers[str(layer_id)].parameters():
+                    param.requires_grad = False
         self.norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
 
         self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
@@ -505,7 +483,8 @@ class Qwen3Model(nn.Module, ModelProtocol):
                 self.tok_embeddings.weight.requires_grad = False
             if not peft_config.train_output_layer:
                 self.output.weight.requires_grad = False
-                self.norm.weight.requires_grad = False
+                if not peft_config.lora_train_norm:
+                    self.norm.weight.requires_grad = False
 
     def init_weights(
         self,

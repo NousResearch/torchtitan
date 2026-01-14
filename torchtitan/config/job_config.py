@@ -44,6 +44,12 @@ class PEFT:
     enable_peft: bool = False
     """Whether to enable PEFT"""
 
+    use_lora: bool = False
+    """Whether to use PEFT with LoRA"""
+
+    layers_to_train: List[int] | None = None
+    """List of layers to train for PEFT"""
+
     lora_rank: int = 8
     """Rank of the low-rank approximation for PEFT"""
 
@@ -52,6 +58,9 @@ class PEFT:
 
     lora_dropout: float = 0.0
     """Dropout probability for the PEFT"""
+
+    lora_train_norm: bool = False
+    """Whether to train the normalization layers while using LoRA"""
 
     train_embeddings: bool = False
     """Whether to train the embeddings for PEFT"""

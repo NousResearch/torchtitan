@@ -1,5 +1,7 @@
+import copy
 import math
 from functools import partial
+from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -15,13 +17,50 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.parallel import ColwiseParallel, RowwiseParallel
 from torch.nn import init
 
+from torchtitan.config.job_config import PEFT
+
+
+def per_layer_config(peft_config: PEFT, layer_id: int) -> PEFT:
+    """
+    Create a per-layer PEFT configuration by copying the global PEFT configuration
+        and disabling PEFT for the layers that are not in the layers_to_train list
+        so we don't waste flops on adapters that are not being trained.
+
+    Args:
+        peft_config (PEFT): Global PEFT configuration.
+        layer_id (int): Layer identifier.
+
+    Returns:
+        PEFT: Per-layer PEFT configuration.
+
+    Examples:
+        >>> peft_config = PEFT(enable_peft=True, layers_to_train=[0, 2, 4])
+        >>> per_layer_config(peft_config, 1)
+        PEFT(enable_peft=True, layers_to_train=[0, 2, 4])
+        >>> per_layer_config(peft_config, 3)
+        PEFT(enable_peft=False, layers_to_train=[0, 2, 4])
+        >>> per_layer_config(peft_config, 5)
+        PEFT(enable_peft=False, layers_to_train=[0, 2, 4])
+    """
+    per_layer_peft_config = copy.deepcopy(peft_config)
+    if (
+        peft_config.enable_peft
+        and (peft_config.layers_to_train is not None)
+        and (layer_id not in peft_config.layers_to_train)
+    ):
+        # in case we mix LoRA and other PEFT methods, we need to disable PEFT for the layers that are not in the
+        # layers_to_train list so we don't waste flops on adapters that are not being trained
+        per_layer_peft_config.enable_peft = False
+    return per_layer_peft_config
+
 
 class Lora(nn.Module):
     r"""Applies an affine linear transformation to the incoming data: :math:`y = xA^T + b + ((xB^T)C^T)`.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
-    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+    On certain ROCm devices, when using float16 inputs this module will use
+        :ref:`different precision<fp16_on_mi200>` for backward.
 
     Args:
         in_features: size of each input sample
@@ -120,6 +159,45 @@ class Lora(nn.Module):
             f"r={self.r}, "
             f"lora_alpha={self.lora_alpha}, "
             f"lora_dropout={self.lora_dropout}"
+        )
+
+
+def lora_or_linear(
+    in_features: int,
+    out_features: int,
+    bias: bool = True,
+    device=None,
+    dtype=None,
+    peft_config: Optional[PEFT] = None,
+) -> Union[Lora, nn.Linear]:
+    """
+    Return a LoRA or Linear module based on the PEFT configuration.
+
+    Args:
+        in_features (int): Size of each input sample.
+        out_features (int): Size of each output sample.
+        bias (bool): If set to ``False``, the layer will not learn an additive bias.
+        device (torch.device): Device to use for the module.
+        dtype (torch.dtype): Data type to use for the module.
+        peft_config (PEFT | None): PEFT configuration. If None, return a Linear module.
+
+    Returns:
+        nn.Module: LoRA or Linear module.
+    """
+    if peft_config is not None and peft_config.enable_peft and peft_config.use_lora:
+        return Lora(
+            in_features,
+            out_features,
+            bias=bias,
+            r=peft_config.lora_rank,
+            lora_alpha=peft_config.lora_alpha,
+            lora_dropout=peft_config.lora_dropout,
+            device=device,
+            dtype=dtype,
+        )
+    else:
+        return nn.Linear(
+            in_features, out_features, bias=bias, device=device, dtype=dtype
         )
 
 

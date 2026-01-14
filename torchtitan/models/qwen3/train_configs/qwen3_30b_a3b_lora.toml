@@ -70,6 +70,7 @@ filter_fqns = ["output"]
 
 [peft]
 enable_peft = true
+use_lora = true
 lora_rank = 64
-train_embeddings = true
-train_output_layer = true
+train_embeddings = false
+train_output_layer = false
