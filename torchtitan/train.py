@@ -19,7 +19,6 @@ from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.data_stages import (
     build_stage_aware_dataloader,
     DataStageManager,
-    StageAwareDataloader,
 )
 from torchtitan.components.dataloader import DataloaderExhaustedError
 from torchtitan.components.ft import FTManager, maybe_semi_sync_training
@@ -802,11 +801,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             while self.should_continue_training():
                 self.step += 1
 
-                # Check for data stage transition (if multi-stage training is enabled)
-                if isinstance(self.dataloader, StageAwareDataloader):
-                    if self.dataloader.maybe_transition(self.step):
-                        # Rebuild iterator after stage transition
-                        data_iterator = self.batch_generator(self.dataloader)
+                # Check for data stage transition
+                if self.dataloader.maybe_transition(self.step):
+                    # Rebuild iterator after stage transition
+                    data_iterator = self.batch_generator(self.dataloader)
 
                 self.gc_handler.run(self.step)
                 try:

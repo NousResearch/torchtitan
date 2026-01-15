@@ -42,30 +42,35 @@ warmup_steps = 2
 
 [training]
 local_batch_size = 2
-seq_len = 512
 max_norm = 1.0
 steps = 15
-dataset = "c4_test"
-dataset_type = "huggingface"
-dataset_random_seed = 42
 
 # 3 stages: transitions at step 5 and step 10
-# Each stage uses different random seed to get different data ordering
+# Each stage is fully self-contained with all data configuration
 [[training.data_stages]]
 name = "stage_1_general"
 start_step = 0
 end_step = 5
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
 dataset_random_seed = 1111
 
 [[training.data_stages]]
 name = "stage_2_reasoning"
 start_step = 5
 end_step = 10
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
 dataset_random_seed = 2222
 
 [[training.data_stages]]
 name = "stage_3_final"
 start_step = 10
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
 dataset_random_seed = 3333
 
 [parallelism]

@@ -11,19 +11,29 @@ This module provides DataStageManager and StageAwareDataloader for training
 with different data mixtures at different stages of training, similar to
 approaches used in Qwen3, DeepSeek-V3, and Llama 3.
 
+Data stages are REQUIRED. Each stage must be fully self-contained with all
+data configuration fields explicitly defined.
+
 Example usage:
     [[training.data_stages]]
     name = "general"
     start_step = 0
     end_step = 100000
+    dataset_type = "nanoset"
+    dataset_folders = ["/data/web", "/data/books", "/data/code"]
     dataset_weights = [0.7, 0.2, 0.1]
+    seq_len = 4096
 
     [[training.data_stages]]
     name = "reasoning"
     start_step = 100000
+    dataset_type = "nanoset"
+    dataset_folders = ["/data/web", "/data/books", "/data/code"]
     dataset_weights = [0.3, 0.35, 0.35]
+    seq_len = 4096
 """
 
+import math
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
 
@@ -34,9 +44,9 @@ from torchtitan.tools.logging import logger
 
 @dataclass
 class EffectiveStageConfig:
-    """Resolved stage config with inherited values from Training."""
+    """Resolved stage config. Each stage must define all required fields."""
 
-    dataset: str
+    dataset: str | None
     dataset_path: str | None
     dataset_type: str
     dataset_folders: list[str]
@@ -75,24 +85,23 @@ class DataStageManager:
             else:
                 self.stages.append(stage)
 
+        # Data stages are required
+        if not self.stages:
+            raise ValueError(
+                "At least one data stage must be defined in [[training.data_stages]]. "
+                "Even for single-stage training, define one stage with start_step=0."
+            )
+
         self._current_stage_idx = 0
 
         # Sort stages by start_step for consistent ordering
-        if self.stages:
-            self.stages.sort(key=lambda s: s.start_step)
-            self._validate_stages()
-            self._log_stage_plan()
+        self.stages.sort(key=lambda s: s.start_step)
+        self._validate_stages()
+        self._log_stage_plan()
 
     @property
-    def is_enabled(self) -> bool:
-        """Check if multi-stage training is enabled."""
-        return len(self.stages) > 0
-
-    @property
-    def current_stage(self) -> DataStage | None:
+    def current_stage(self) -> DataStage:
         """Get current stage config."""
-        if not self.is_enabled:
-            return None
         return self.stages[self._current_stage_idx]
 
     @property
@@ -101,30 +110,178 @@ class DataStageManager:
         return self._current_stage_idx
 
     def _validate_stages(self) -> None:
-        """Validate stage configurations."""
+        """Validate stage configurations comprehensively."""
+        training = self.job_config.training
+        total_steps = training.steps
+
+        # Check for duplicate stage names
+        stage_names = [s.name for s in self.stages]
+        if len(stage_names) != len(set(stage_names)):
+            duplicates = [n for n in stage_names if stage_names.count(n) > 1]
+            raise ValueError(f"Duplicate stage names found: {set(duplicates)}")
+
+        # Validate each stage
         for i, stage in enumerate(self.stages):
+            # Validate stage name
+            if not stage.name or not stage.name.strip():
+                raise ValueError(f"Stage at index {i} has empty or whitespace name")
+
+            # Validate step ranges
             if stage.start_step < 0:
                 raise ValueError(
                     f"Stage '{stage.name}' has invalid start_step: {stage.start_step}"
                 )
             if stage.end_step is not None and stage.end_step <= stage.start_step:
                 raise ValueError(
-                    f"Stage '{stage.name}' has end_step ({stage.end_step}) <= start_step ({stage.start_step})"
+                    f"Stage '{stage.name}' has end_step ({stage.end_step}) <= "
+                    f"start_step ({stage.start_step})"
                 )
 
-        # Check for gaps or overlaps
+            # Validate required fields are set
+            if stage.dataset_type is None:
+                raise ValueError(
+                    f"Stage '{stage.name}' must define 'dataset_type' "
+                    "(e.g., 'huggingface', 'nanoset')"
+                )
+            if stage.seq_len is None:
+                raise ValueError(f"Stage '{stage.name}' must define 'seq_len'")
+            if stage.seq_len <= 0:
+                raise ValueError(
+                    f"Stage '{stage.name}' has invalid seq_len: {stage.seq_len}. "
+                    "seq_len must be positive."
+                )
+
+            # Validate dataset_random_seed if provided
+            if stage.dataset_random_seed is not None and stage.dataset_random_seed < 0:
+                raise ValueError(
+                    f"Stage '{stage.name}' has negative dataset_random_seed: "
+                    f"{stage.dataset_random_seed}. Seeds must be non-negative."
+                )
+
+            # Validate start_step doesn't exceed total training steps
+            if stage.start_step >= total_steps:
+                raise ValueError(
+                    f"Stage '{stage.name}' starts at step {stage.start_step} but "
+                    f"training.steps is only {total_steps}. This stage would never run."
+                )
+
+            # Validate dataset source based on type
+            if stage.dataset_type == "nanoset":
+                if not stage.dataset_folders:
+                    raise ValueError(
+                        f"Stage '{stage.name}' with dataset_type='nanoset' "
+                        "must define 'dataset_folders'"
+                    )
+                # Validate no empty or whitespace-only folder paths
+                for j, folder in enumerate(stage.dataset_folders):
+                    if not folder or not folder.strip():
+                        raise ValueError(
+                            f"Stage '{stage.name}' has empty or whitespace-only path "
+                            f"in dataset_folders at index {j}"
+                        )
+            elif stage.dataset_type == "huggingface":
+                if stage.dataset is None:
+                    raise ValueError(
+                        f"Stage '{stage.name}' with dataset_type='huggingface' "
+                        "must define 'dataset'"
+                    )
+                # Validate dataset is not empty string
+                if not stage.dataset.strip():
+                    raise ValueError(
+                        f"Stage '{stage.name}' has empty or whitespace-only 'dataset' value"
+                    )
+
+            # Validate dataset_weights if provided
+            if stage.dataset_weights is not None:
+                if not stage.dataset_weights:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has empty dataset_weights list"
+                    )
+                # Check for NaN or inf values
+                for j, w in enumerate(stage.dataset_weights):
+                    if math.isnan(w):
+                        raise ValueError(
+                            f"Stage '{stage.name}' has NaN in dataset_weights "
+                            f"at index {j}: {stage.dataset_weights}"
+                        )
+                    if math.isinf(w):
+                        raise ValueError(
+                            f"Stage '{stage.name}' has infinity in dataset_weights "
+                            f"at index {j}: {stage.dataset_weights}"
+                        )
+                if any(w < 0 for w in stage.dataset_weights):
+                    raise ValueError(
+                        f"Stage '{stage.name}' has negative dataset_weights: "
+                        f"{stage.dataset_weights}"
+                    )
+                if any(w > 1 for w in stage.dataset_weights):
+                    raise ValueError(
+                        f"Stage '{stage.name}' has dataset_weight > 1: "
+                        f"{stage.dataset_weights}"
+                    )
+                # Check weights sum to 1 (with tolerance for floating point)
+                weight_sum = sum(stage.dataset_weights)
+                if abs(weight_sum - 1.0) > 0.001:
+                    raise ValueError(
+                        f"Stage '{stage.name}' dataset_weights must sum to 1.0, "
+                        f"but sum is {weight_sum:.6f}: {stage.dataset_weights}"
+                    )
+                # Check weights match folders count for nanoset
+                if stage.dataset_type == "nanoset" and stage.dataset_folders:
+                    if len(stage.dataset_weights) != len(stage.dataset_folders):
+                        raise ValueError(
+                            f"Stage '{stage.name}' has {len(stage.dataset_weights)} "
+                            f"weights but {len(stage.dataset_folders)} folders"
+                        )
+
+        # Check first stage starts at step 0
+        if self.stages[0].start_step != 0:
+            raise ValueError(
+                f"First stage '{self.stages[0].name}' must start at step 0, "
+                f"but starts at {self.stages[0].start_step}"
+            )
+
+        # Check for gaps or overlaps between stages
         for i in range(len(self.stages) - 1):
             current = self.stages[i]
             next_stage = self.stages[i + 1]
-            current_end = (
-                current.end_step
-                if current.end_step is not None
-                else next_stage.start_step
-            )
-            if current_end != next_stage.start_step:
+
+            # Determine current stage's end
+            if current.end_step is not None:
+                current_end = current.end_step
+            else:
+                # If no end_step, it should extend to next stage's start
+                current_end = next_stage.start_step
+
+            if current_end < next_stage.start_step:
+                raise ValueError(
+                    f"Gap in data stages: '{current.name}' ends at {current_end} "
+                    f"but '{next_stage.name}' starts at {next_stage.start_step}. "
+                    f"Steps {current_end} to {next_stage.start_step - 1} are not covered."
+                )
+            elif current_end > next_stage.start_step:
+                raise ValueError(
+                    f"Overlap in data stages: '{current.name}' ends at {current_end} "
+                    f"but '{next_stage.name}' starts at {next_stage.start_step}. "
+                    f"Steps {next_stage.start_step} to {current_end - 1} are covered "
+                    f"by both stages."
+                )
+
+        # Check last stage covers until training end
+        last_stage = self.stages[-1]
+        if last_stage.end_step is not None:
+            if last_stage.end_step < total_steps:
+                raise ValueError(
+                    f"Last stage '{last_stage.name}' ends at step {last_stage.end_step} "
+                    f"but training.steps is {total_steps}. "
+                    f"Steps {last_stage.end_step} to {total_steps - 1} are not covered. "
+                    f"Remove 'end_step' from the last stage to cover until training end."
+                )
+            elif last_stage.end_step > total_steps:
                 logger.warning(
-                    f"Data stages have gap or overlap between '{current.name}' "
-                    f"(end={current_end}) and '{next_stage.name}' (start={next_stage.start_step})"
+                    f"Last stage '{last_stage.name}' end_step ({last_stage.end_step}) "
+                    f"exceeds training.steps ({total_steps}). "
+                    f"Training will end at step {total_steps}."
                 )
 
     def _log_stage_plan(self) -> None:
@@ -189,30 +346,27 @@ class DataStageManager:
         logger.info("=" * 60)
 
     def get_effective_config(self, stage: DataStage) -> EffectiveStageConfig:
-        """Get effective config for a stage, inheriting from Training where not overridden."""
+        """Get effective config for a stage. Each stage is self-contained."""
+        # Use training.dataset_random_seed as fallback since it's optional
         training = self.job_config.training
         return EffectiveStageConfig(
-            dataset=stage.dataset if stage.dataset is not None else training.dataset,
-            dataset_path=stage.dataset_path
-            if stage.dataset_path is not None
-            else training.dataset_path,
-            dataset_type=stage.dataset_type
-            if stage.dataset_type is not None
-            else training.dataset_type,
-            dataset_folders=stage.dataset_folders
-            if stage.dataset_folders
-            else training.dataset_folders,
-            dataset_weights=stage.dataset_weights
-            if stage.dataset_weights is not None
-            else training.dataset_weights,
-            dataset_random_seed=stage.dataset_random_seed
-            if stage.dataset_random_seed is not None
-            else training.dataset_random_seed,
-            seq_len=stage.seq_len if stage.seq_len is not None else training.seq_len,
+            dataset=stage.dataset,
+            dataset_path=stage.dataset_path,
+            dataset_type=stage.dataset_type,
+            dataset_folders=stage.dataset_folders,
+            dataset_weights=stage.dataset_weights,
+            dataset_random_seed=(
+                stage.dataset_random_seed
+                if stage.dataset_random_seed is not None
+                else training.dataset_random_seed
+            ),
+            seq_len=stage.seq_len,
         )
 
     def find_stage_for_step(self, step: int) -> int:
         """Find the stage index for the given training step."""
+        if step < 0:
+            raise ValueError(f"Step cannot be negative, got {step}")
         for i, stage in enumerate(self.stages):
             in_range = step >= stage.start_step
             if stage.end_step is not None:
@@ -237,9 +391,6 @@ class DataStageManager:
 
     def maybe_transition_stage(self, step: int) -> bool:
         """Check if stage transition needed at this step. Returns True if transitioned."""
-        if not self.is_enabled:
-            return False
-
         new_idx = self.find_stage_for_step(step)
         if new_idx != self._current_stage_idx:
             old_stage = self.stages[self._current_stage_idx]
@@ -290,15 +441,6 @@ class DataStageManager:
         if stage_idx is None:
             stage_idx = self._current_stage_idx
 
-        if not self.is_enabled:
-            # No stages configured, use default behavior
-            return self.build_dataloader_fn(
-                dp_world_size=self.dp_world_size,
-                dp_rank=self.dp_rank,
-                tokenizer=self.tokenizer,
-                job_config=self.job_config,
-            )
-
         stage = self.stages[stage_idx]
         effective = self.get_effective_config(stage)
 
@@ -344,7 +486,7 @@ class DataStageManager:
         if "current_stage_idx" in state_dict:
             old_idx = self._current_stage_idx
             self._current_stage_idx = state_dict["current_stage_idx"]
-            if self.is_enabled and old_idx != self._current_stage_idx:
+            if old_idx != self._current_stage_idx:
                 logger.info(
                     f"Restored data stage index: {old_idx} -> {self._current_stage_idx} "
                     f"(stage: '{self.current_stage.name}')"
@@ -411,11 +553,7 @@ class StageAwareDataloader(BaseDataLoader):
         """
         return {
             "stage_idx": self._stage_manager.current_stage_idx,
-            "stage_name": (
-                self._stage_manager.current_stage.name
-                if self._stage_manager.current_stage
-                else None
-            ),
+            "stage_name": self._stage_manager.current_stage.name,
             "dataloader_state": self._dataloader.state_dict(),
             "world_size": self._dp_world_size,
         }
@@ -441,9 +579,20 @@ class StageAwareDataloader(BaseDataLoader):
                 )
 
         # Restore stage index
-        if "stage_idx" in state_dict and self._stage_manager.is_enabled:
+        if "stage_idx" in state_dict:
             saved_stage_idx = state_dict["stage_idx"]
             saved_stage_name = state_dict.get("stage_name", "unknown")
+            num_stages = len(self._stage_manager.stages)
+
+            # Validate stage_idx is within bounds
+            if saved_stage_idx < 0 or saved_stage_idx >= num_stages:
+                raise ValueError(
+                    f"Checkpoint stage_idx ({saved_stage_idx}) is out of bounds. "
+                    f"Current config has {num_stages} stages (indices 0-{num_stages - 1}). "
+                    f"Checkpoint was at stage '{saved_stage_name}'. "
+                    "The stage configuration may have changed since the checkpoint was saved."
+                )
+
             current_stage_idx = self._stage_manager.current_stage_idx
 
             if saved_stage_idx != current_stage_idx:
@@ -474,14 +623,14 @@ def build_stage_aware_dataloader(
     dp_world_size: int,
     dp_rank: int,
     tokenizer: Any,
-) -> tuple[BaseDataLoader, DataStageManager]:
-    """Build a stage-aware dataloader if data stages are configured.
+) -> tuple[StageAwareDataloader, DataStageManager]:
+    """Build a stage-aware dataloader.
+
+    Data stages are required. At least one stage must be defined in
+    [[training.data_stages]].
 
     Returns:
-        tuple of (dataloader, stage_manager)
-
-        If data_stages is empty, returns (regular_dataloader, disabled_stage_manager)
-        If data_stages is configured, returns (StageAwareDataloader, active_stage_manager)
+        tuple of (StageAwareDataloader, DataStageManager)
     """
     stage_manager = DataStageManager(
         job_config=job_config,
@@ -491,21 +640,9 @@ def build_stage_aware_dataloader(
         tokenizer=tokenizer,
     )
 
-    if stage_manager.is_enabled:
-        # Build initial dataloader for stage 0 (or whichever stage step 0 falls into)
-        initial_dataloader = stage_manager.build_dataloader_for_stage()
-        dataloader = StageAwareDataloader(stage_manager, initial_dataloader)
-        logger.info(
-            f"Created StageAwareDataloader with {len(stage_manager.stages)} stages"
-        )
-    else:
-        # No stages configured, use standard dataloader
-        dataloader = build_dataloader_fn(
-            dp_world_size=dp_world_size,
-            dp_rank=dp_rank,
-            tokenizer=tokenizer,
-            job_config=job_config,
-        )
-        logger.info("No data stages configured, using single-stage training")
+    # Build initial dataloader for stage 0 (or whichever stage step 0 falls into)
+    initial_dataloader = stage_manager.build_dataloader_for_stage()
+    dataloader = StageAwareDataloader(stage_manager, initial_dataloader)
+    logger.info(f"Created StageAwareDataloader with {len(stage_manager.stages)} stages")
 
     return dataloader, stage_manager
