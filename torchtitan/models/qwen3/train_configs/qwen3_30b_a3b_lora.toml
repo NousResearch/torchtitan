@@ -44,7 +44,7 @@ fsdp_reshard_after_forward = "default" # default / never / always
 tensor_parallel_degree = 1
 context_parallel_degree = 1
 enable_async_tensor_parallel = false
-expert_parallel_degree = 2
+expert_parallel_degree = 1
 expert_tensor_parallel_degree = 1
 
 [checkpoint]
@@ -72,5 +72,5 @@ filter_fqns = ["output"]
 enable_peft = true
 use_lora = true
 lora_rank = 64
-train_embeddings = false
-train_output_layer = false
+train_embeddings = true
+train_output_layer = true

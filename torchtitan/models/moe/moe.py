@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.distributed.tensor import DTensor
 
-from torchtitan.components.peft.lora import Lora
+from torchtitan.components.peft.lora import lora_or_linear
 from torchtitan.config.job_config import PEFT
 from torchtitan.distributed.deepep.fused_activation import fused_silu_gate_prob
 from torchtitan.tools.logging import logger
@@ -151,35 +151,24 @@ class FeedForward(nn.Module):
         peft_config: Optional[PEFT] = None,
     ):
         super().__init__()
-        if peft_config is not None and peft_config.enable_peft:
-            self.w1 = Lora(
-                dim,
-                hidden_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.w2 = Lora(
-                hidden_dim,
-                dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-            self.w3 = Lora(
-                dim,
-                hidden_dim,
-                bias=False,
-                r=peft_config.lora_rank,
-                lora_alpha=peft_config.lora_alpha,
-                lora_dropout=peft_config.lora_dropout,
-            )
-        else:
-            self.w1 = nn.Linear(dim, hidden_dim, bias=False)
-            self.w2 = nn.Linear(hidden_dim, dim, bias=False)
-            self.w3 = nn.Linear(dim, hidden_dim, bias=False)
+        self.w1 = lora_or_linear(
+            dim,
+            hidden_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.w2 = lora_or_linear(
+            hidden_dim,
+            dim,
+            bias=False,
+            peft_config=peft_config,
+        )
+        self.w3 = lora_or_linear(
+            dim,
+            hidden_dim,
+            bias=False,
+            peft_config=peft_config,
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.w2(F.silu(self.w1(x)) * self.w3(x))
