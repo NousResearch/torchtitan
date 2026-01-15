@@ -4,7 +4,11 @@ Multi-stage training allows switching between different data mixtures at specifi
 
 ## Quick Start
 
-Data stages are **required**. Define `[[training.data_stages]]` sections in your TOML config. Each stage must be fully self-contained with all data configuration:
+Data stages are **optional**. If no `[[training.data_stages]]` are defined, a single stage is auto-created from `[training]` data fields (backward compatible). When stages ARE defined, they override `[training]` data fields completely.
+
+### Multi-Stage Example
+
+Define `[[training.data_stages]]` sections for multi-stage training:
 
 ```toml
 [training]
@@ -56,9 +60,21 @@ Each `[[training.data_stages]]` section must define all data-related fields expl
 
 *Required based on `dataset_type`: `dataset` for huggingface, `dataset_folders` for nanoset.
 
-## Single-Stage Training
+## Single-Stage Training (Backward Compatible)
 
-Even for single-stage training, you must define one data stage:
+For single-stage training, you can simply use `[training]` data fields - no `[[training.data_stages]]` needed:
+
+```toml
+[training]
+steps = 100000
+dataset_type = "huggingface"
+dataset = "c4_test"
+seq_len = 4096
+```
+
+A single stage named "default" is auto-created internally. This maintains full backward compatibility with existing configs.
+
+Alternatively, you can explicitly define a single stage:
 
 ```toml
 [training]
@@ -149,6 +165,37 @@ dataset_weights = [0.7, 0.3]
 dataset_random_seed = 5678
 seq_len = 4096
 ```
+
+### Pattern 4: Mid-Training Ablation
+
+To test different data mixtures from a checkpoint (e.g., ablation studies), modify the config to add a new stage at the resume point:
+
+**Original config** (trained to step 100):
+```toml
+[[training.data_stages]]
+name = "original"
+start_step = 0
+dataset_weights = [0.7, 0.3]
+...
+```
+
+**Modified config** (resume at step 101 with new mixture):
+```toml
+[[training.data_stages]]
+name = "original"
+start_step = 0
+end_step = 101  # Add end_step at resume point
+dataset_weights = [0.7, 0.3]
+...
+
+[[training.data_stages]]
+name = "ablation"
+start_step = 101  # New stage starts here
+dataset_weights = [0.5, 0.5]  # Different mixture to test
+...
+```
+
+On resume, the system auto-transitions to the new stage at step 101.
 
 ## Logging
 

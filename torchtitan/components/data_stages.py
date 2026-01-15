@@ -11,10 +11,11 @@ This module provides DataStageManager and StageAwareDataloader for training
 with different data mixtures at different stages of training, similar to
 approaches used in Qwen3, DeepSeek-V3, and Llama 3.
 
-Data stages are REQUIRED. Each stage must be fully self-contained with all
-data configuration fields explicitly defined.
+Data stages are OPTIONAL. If no [[training.data_stages]] are defined, a single
+stage is auto-created from [training] data fields for backward compatibility.
+When stages ARE defined, they override [training] data fields completely.
 
-Example usage:
+Example usage (multi-stage):
     [[training.data_stages]]
     name = "general"
     start_step = 0
@@ -31,6 +32,13 @@ Example usage:
     dataset_folders = ["/data/web", "/data/books", "/data/code"]
     dataset_weights = [0.3, 0.35, 0.35]
     seq_len = 4096
+
+Example usage (single-stage, backward compatible):
+    [training]
+    dataset_type = "huggingface"
+    dataset = "c4_test"
+    seq_len = 4096
+    # No [[training.data_stages]] needed - auto-created internally
 """
 
 import math
@@ -85,12 +93,68 @@ class DataStageManager:
             else:
                 self.stages.append(stage)
 
-        # Data stages are required
+        training = job_config.training
+
+        # Case 1: No stages defined - auto-create from [training] (backward compat)
         if not self.stages:
-            raise ValueError(
-                "At least one data stage must be defined in [[training.data_stages]]. "
-                "Even for single-stage training, define one stage with start_step=0."
+            auto_stage = DataStage(
+                name="default",
+                start_step=0,
+                end_step=None,
+                dataset=training.dataset,
+                dataset_path=training.dataset_path,
+                dataset_type=training.dataset_type,
+                dataset_folders=training.dataset_folders,
+                dataset_weights=training.dataset_weights,
+                dataset_random_seed=training.dataset_random_seed,
+                seq_len=training.seq_len,
             )
+            self.stages.append(auto_stage)
+            logger.info(
+                "No [[training.data_stages]] defined. "
+                "Auto-created single stage from [training] config."
+            )
+        else:
+            # Sort stages by start_step first to find the earliest
+            self.stages.sort(key=lambda s: s.start_step)
+            first_stage_start = self.stages[0].start_step
+
+            # Check if [training] has non-default data fields
+            training_has_data = self._has_non_default_training_data(training)
+
+            if first_stage_start == 0:
+                # Case 2: Stages cover from step 0 - warn if [training] has non-default data
+                if training_has_data:
+                    raise ValueError(
+                        "Cannot define data fields in both [training] and [[training.data_stages]].\n"
+                        "Your [[training.data_stages]] starts at step 0, so it fully covers training.\n"
+                        "Please either:\n"
+                        "  1. Remove data fields from [training] and use [[training.data_stages]] only, OR\n"
+                        "  2. Remove [[training.data_stages]] and use [training] only\n\n"
+                        "Detected non-default [training] data fields:\n"
+                        f"{self._format_training_data_fields(training)}"
+                    )
+            else:
+                # Case 3: Stages start after step 0 - auto-create stage from [training]
+                # for the gap (ablation/resume use case)
+                # Always use [training] values for the gap, even if they are defaults
+                auto_stage = DataStage(
+                    name="pre_stages",
+                    start_step=0,
+                    end_step=first_stage_start,
+                    dataset=training.dataset,
+                    dataset_path=training.dataset_path,
+                    dataset_type=training.dataset_type,
+                    dataset_folders=training.dataset_folders,
+                    dataset_weights=training.dataset_weights,
+                    dataset_random_seed=training.dataset_random_seed,
+                    seq_len=training.seq_len,
+                )
+                self.stages.insert(0, auto_stage)
+                logger.info(
+                    f"[[training.data_stages]] starts at step {first_stage_start}. "
+                    f"Auto-created 'pre_stages' from [training] for steps 0-{first_stage_start}."
+                )
 
         self._current_stage_idx = 0
 
@@ -283,6 +347,41 @@ class DataStageManager:
                     f"exceeds training.steps ({total_steps}). "
                     f"Training will end at step {total_steps}."
                 )
+
+    def _has_non_default_training_data(self, training) -> bool:
+        """Check if [training] has non-default data fields set."""
+        # Default values from Training dataclass
+        defaults = {
+            "dataset": "c4_test",
+            "dataset_path": None,
+            "dataset_type": "huggingface",
+            "dataset_folders": [],
+            "dataset_weights": None,
+            # Note: dataset_random_seed and seq_len are not checked since they
+            # have valid defaults that users commonly keep
+        }
+        return (
+            training.dataset != defaults["dataset"]
+            or training.dataset_path != defaults["dataset_path"]
+            or training.dataset_type != defaults["dataset_type"]
+            or training.dataset_folders != defaults["dataset_folders"]
+            or training.dataset_weights != defaults["dataset_weights"]
+        )
+
+    def _format_training_data_fields(self, training) -> str:
+        """Format [training] data fields for error message."""
+        lines = []
+        if training.dataset != "c4_test":
+            lines.append(f"  dataset = {training.dataset!r}")
+        if training.dataset_path is not None:
+            lines.append(f"  dataset_path = {training.dataset_path!r}")
+        if training.dataset_type != "huggingface":
+            lines.append(f"  dataset_type = {training.dataset_type!r}")
+        if training.dataset_folders:
+            lines.append(f"  dataset_folders = {training.dataset_folders!r}")
+        if training.dataset_weights is not None:
+            lines.append(f"  dataset_weights = {training.dataset_weights!r}")
+        return "\n".join(lines) if lines else "  (none detected)"
 
     def _log_stage_plan(self) -> None:
         """Log the data stage training plan."""

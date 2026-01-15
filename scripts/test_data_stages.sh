@@ -1,32 +1,86 @@
 #!/bin/bash
 # Test script for multi-stage data training
-# Verifies: stage transitions, checkpoint save/resume, exact reproducibility
+# Verifies: backward compatibility, stage transitions, checkpoint resume, ablation
 #
 # Usage: ./scripts/test_data_stages.sh
 
 set -e
 
-CONFIG="torchtitan/models/llama3/train_configs/data_stages_test.toml"
-OUTPUT_DIR="./outputs/data_stages_test"
+STAGES_CONFIG="torchtitan/models/llama3/train_configs/data_stages_test.toml"
+BACKCOMPAT_CONFIG="torchtitan/models/llama3/train_configs/data_stages_backcompat_test.toml"
+ABLATION_CONFIG="torchtitan/models/llama3/train_configs/data_stages_ablation_test.toml"
+
+STAGES_OUTPUT="./outputs/data_stages_test"
+BACKCOMPAT_OUTPUT="./outputs/data_stages_backcompat_test"
+ABLATION_OUTPUT="./outputs/data_stages_ablation_test"
+
 FULL_LOG="/tmp/data_stages_full_run.log"
 RESUME_LOG="/tmp/data_stages_resume_run.log"
+BACKCOMPAT_LOG="/tmp/data_stages_backcompat.log"
+ABLATION_LOG="/tmp/data_stages_ablation.log"
 
 echo "============================================================"
-echo "DATA STAGES TEST"
+echo "DATA STAGES TEST SUITE"
 echo "============================================================"
 echo ""
 
 # Clean previous outputs
-rm -rf "$OUTPUT_DIR" "$FULL_LOG" "$RESUME_LOG"
+rm -rf "$STAGES_OUTPUT" "$BACKCOMPAT_OUTPUT" "$ABLATION_OUTPUT"
+rm -f "$FULL_LOG" "$RESUME_LOG" "$BACKCOMPAT_LOG" "$ABLATION_LOG"
 
-# Test 1: Full run
-echo "[Test 1] Full run: steps 1-15 with 3 stage transitions"
+##############################################################################
+# Test 1: Backward Compatibility (no data_stages defined)
+##############################################################################
+echo "[Test 1] Backward Compatibility: No [[training.data_stages]]"
 echo "------------------------------------------------------------"
+echo "Config uses only [training] data fields, no data_stages."
+echo ""
+
 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
-    -m torchtitan.train --job.config_file "$CONFIG" 2>&1 | tee "$FULL_LOG"
+    -m torchtitan.train --job.config_file "$BACKCOMPAT_CONFIG" 2>&1 | tee "$BACKCOMPAT_LOG"
 
 echo ""
-echo "[Test 1] Verifying stage transitions occurred..."
+echo "[Test 1] Verifying backward compatibility..."
+
+if grep -q "No \[\[training.data_stages\]\] defined. Auto-created single stage from \[training\] config" "$BACKCOMPAT_LOG"; then
+    echo "  ✓ Auto-created 'default' stage from [training]"
+else
+    echo "  ✗ Failed to auto-create stage from [training]"
+    exit 1
+fi
+
+if grep -q "Stage 1: default" "$BACKCOMPAT_LOG"; then
+    echo "  ✓ Stage named 'default'"
+else
+    echo "  ✗ Stage name incorrect"
+    exit 1
+fi
+
+if grep -q "Training completed" "$BACKCOMPAT_LOG"; then
+    echo "  ✓ Training completed successfully"
+else
+    echo "  ✗ Training did not complete"
+    exit 1
+fi
+
+echo ""
+echo "[Test 1] PASSED: Backward compatibility works"
+echo ""
+
+##############################################################################
+# Test 2: Multi-stage with transitions
+##############################################################################
+echo "[Test 2] Multi-Stage Training: Full run with 3 stages"
+echo "------------------------------------------------------------"
+echo "Config has 3 stages with transitions at step 5 and 10."
+echo ""
+
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file "$STAGES_CONFIG" 2>&1 | tee "$FULL_LOG"
+
+echo ""
+echo "[Test 2] Verifying stage transitions occurred..."
+
 if grep -q "stage_1_general.*stage_2_reasoning" "$FULL_LOG"; then
     echo "  ✓ Transition at step 5: stage_1_general -> stage_2_reasoning"
 else
@@ -42,16 +96,24 @@ else
 fi
 
 echo ""
+echo "[Test 2] PASSED: Stage transitions work correctly"
+echo ""
 
-# Test 2: Resume from step 7
-echo "[Test 2] Resume run: from checkpoint at step 7"
+##############################################################################
+# Test 3: Checkpoint resume
+##############################################################################
+echo "[Test 3] Checkpoint Resume: from step 7"
 echo "------------------------------------------------------------"
+echo "Resume from checkpoint at step 7, verify state restoration."
+echo ""
+
 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
-    -m torchtitan.train --job.config_file "$CONFIG" \
+    -m torchtitan.train --job.config_file "$STAGES_CONFIG" \
     --checkpoint.load_step 7 2>&1 | tee "$RESUME_LOG"
 
 echo ""
-echo "[Test 2] Verifying checkpoint restore..."
+echo "[Test 3] Verifying checkpoint restore..."
+
 if grep -q "Checkpoint was at stage 'stage_2_reasoning'" "$RESUME_LOG"; then
     echo "  ✓ Stage correctly restored to stage_2_reasoning"
 else
@@ -74,9 +136,13 @@ else
 fi
 
 echo ""
+echo "[Test 3] PASSED: Checkpoint resume works correctly"
+echo ""
 
-# Test 3: Compare losses
-echo "[Test 3] Reproducibility: comparing losses between full and resumed runs"
+##############################################################################
+# Test 4: Reproducibility (compare losses)
+##############################################################################
+echo "[Test 4] Reproducibility: Comparing losses between full and resumed runs"
 echo "------------------------------------------------------------"
 
 # Extract losses from both runs (steps 8-15)
@@ -120,23 +186,86 @@ for step in 8 9 10 11 12 13 14 15; do
 done
 
 echo ""
-
-# Final result
-echo "============================================================"
 if [ "$MISMATCH" -eq 0 ]; then
-    echo "SUCCESS: All tests passed!"
-    echo ""
-    echo "Verified:"
-    echo "  - Stage transitions work correctly"
-    echo "  - Checkpoint saves stage index and dataloader position"
-    echo "  - Resume restores exact state (losses match)"
-    echo "============================================================"
-
-    # Cleanup
-    rm -rf "$OUTPUT_DIR" "$FULL_LOG" "$RESUME_LOG"
-    exit 0
+    echo "[Test 4] PASSED: Losses match exactly"
 else
-    echo "FAILURE: Losses do not match between full and resumed runs"
-    echo "============================================================"
+    echo "[Test 4] FAILED: Losses do not match"
     exit 1
 fi
+echo ""
+
+##############################################################################
+# Test 5: Ablation (stages start mid-training)
+##############################################################################
+echo "[Test 5] Ablation: Stages start at step 5 (dmayhem use case)"
+echo "------------------------------------------------------------"
+echo "Config has [training] data for steps 0-5, then [[training.data_stages]]"
+echo "at step 5 with different random seed. Tests mid-training ablation."
+echo ""
+
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file "$ABLATION_CONFIG" 2>&1 | tee "$ABLATION_LOG"
+
+echo ""
+echo "[Test 5] Verifying ablation setup..."
+
+if grep -q "Auto-created 'pre_stages' from \[training\] for steps 0-5" "$ABLATION_LOG"; then
+    echo "  ✓ Auto-created 'pre_stages' for gap (steps 0-5)"
+else
+    echo "  ✗ Failed to auto-create pre_stages"
+    exit 1
+fi
+
+if grep -q "Stage 1: pre_stages" "$ABLATION_LOG"; then
+    echo "  ✓ First stage is 'pre_stages'"
+else
+    echo "  ✗ First stage not correctly named"
+    exit 1
+fi
+
+if grep -q "Stage 2: ablation_stage" "$ABLATION_LOG"; then
+    echo "  ✓ Second stage is 'ablation_stage'"
+else
+    echo "  ✗ Second stage not correctly named"
+    exit 1
+fi
+
+if grep -q "pre_stages.*ablation_stage" "$ABLATION_LOG"; then
+    echo "  ✓ Transition occurred: pre_stages -> ablation_stage"
+else
+    echo "  ✗ Transition did not occur"
+    exit 1
+fi
+
+if grep -q "Training completed" "$ABLATION_LOG"; then
+    echo "  ✓ Training completed successfully"
+else
+    echo "  ✗ Training did not complete"
+    exit 1
+fi
+
+echo ""
+echo "[Test 5] PASSED: Ablation mode works correctly"
+echo ""
+
+##############################################################################
+# Final Summary
+##############################################################################
+echo "============================================================"
+echo "ALL TESTS PASSED!"
+echo "============================================================"
+echo ""
+echo "Verified:"
+echo "  [Test 1] Backward compatibility - no data_stages"
+echo "  [Test 2] Multi-stage transitions"
+echo "  [Test 3] Checkpoint save/resume"
+echo "  [Test 4] Exact reproducibility on resume"
+echo "  [Test 5] Ablation mode (stages start mid-training)"
+echo ""
+echo "============================================================"
+
+# Cleanup
+rm -rf "$STAGES_OUTPUT" "$BACKCOMPAT_OUTPUT" "$ABLATION_OUTPUT"
+rm -f "$FULL_LOG" "$RESUME_LOG" "$BACKCOMPAT_LOG" "$ABLATION_LOG"
+
+exit 0
