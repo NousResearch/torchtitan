@@ -19,7 +19,7 @@ cd "$TORCHTITAN_ROOT"
 
 # Configuration
 MODEL_NAME="Qwen/Qwen3-1.7B"
-SGLANG_URL="http://localhost:9001/v1"
+VLLM_URL="http://localhost:9001/v1"
 
 # Check if Atropos is accessible
 if ! python -c "from atroposlib.envs.base import BaseEnv" 2>/dev/null; then
@@ -28,10 +28,10 @@ if ! python -c "from atroposlib.envs.base import BaseEnv" 2>/dev/null; then
     exit 1
 fi
 
-# Check if SGLang server is running
-echo "Checking SGLang server availability..."
-if ! curl -s "$SGLANG_URL/models" > /dev/null; then
-    echo "WARNING: SGLang server at $SGLANG_URL is not responding"
+# Check if vLLM server is running
+echo "Checking vLLM server availability..."
+if ! curl -s "$VLLM_URL/models" > /dev/null; then
+    echo "WARNING: vLLM server at $VLLM_URL is not responding"
 fi
 
 # Check if Atropos API is running

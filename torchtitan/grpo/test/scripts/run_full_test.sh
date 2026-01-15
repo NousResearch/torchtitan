@@ -12,7 +12,7 @@ echo "========================================"
 echo ""
 echo "This script will start all components:"
 echo "  1. Atropos API Server"
-echo "  2. SGLang Inference Servers"
+echo "  2. vLLM Inference Server"
 echo "  3. GSM8k Environment Server"
 echo "  4. TorchTitan Trainer"
 echo ""
@@ -31,13 +31,14 @@ cleanup() {
         kill $API_PID 2>/dev/null || true
     fi
 
-    if [ ! -z "$SGLANG_PID" ]; then
-        echo "Stopping SGLang servers (PID: $SGLANG_PID)"
-        kill $SGLANG_PID 2>/dev/null || true
+    if [ ! -z "$VLLM_PID" ]; then
+        echo "Stopping vLLM server (PID: $VLLM_PID)"
+        kill $VLLM_PID 2>/dev/null || true
     fi
 
-    echo "Force-killing any remaining SGLang processes..."
-    pkill -9 -f "sglang.launch_server" 2>/dev/null || true
+    echo "Force-killing any remaining vLLM processes..."
+    pkill -9 -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true
+    pkill -9 -f "vllm serve" 2>/dev/null || true
 
     if [ ! -z "$ENV_PID" ]; then
         echo "Stopping GSM8k environment (PID: $ENV_PID)"
@@ -68,29 +69,28 @@ fi
 echo "API is ready"
 echo ""
 
-# Step 2: Start SGLang servers
-echo "Step 2/4: Starting SGLang Inference Servers..."
-"$SCRIPT_DIR/start_sglang.sh" > /tmp/sglang_launcher.log 2>&1 &
-SGLANG_PID=$!
-echo "SGLang launcher started (PID: $SGLANG_PID)"
-echo "Waiting for SGLang servers to load models (this may take ~30 seconds)..."
+# Step 2: Start vLLM server
+echo "Step 2/4: Starting vLLM Inference Server..."
+"$SCRIPT_DIR/start_vllm.sh" > /tmp/vllm_launcher.log 2>&1 &
+VLLM_PID=$!
+echo "vLLM launcher started (PID: $VLLM_PID)"
+echo "Waiting for vLLM server to load model (this may take ~30 seconds)..."
 sleep 35
 
-# Check if SGLang servers are running
-SGLANG_READY=true
-for PORT in 9001 9002; do
-    if ! curl -s "http://localhost:${PORT}/v1/models" > /dev/null; then
-        echo "WARNING: SGLang server on port $PORT is not responding"
-        SGLANG_READY=false
-    fi
-done
+# Check if vLLM server is running
+VLLM_READY=true
+PORT=9001
+if ! curl -s "http://localhost:${PORT}/v1/models" > /dev/null; then
+    echo "WARNING: vLLM server on port $PORT is not responding"
+    VLLM_READY=false
+fi
 
-if [ "$SGLANG_READY" = false ]; then
-    echo "WARNING: Some SGLang servers may not be ready"
-    echo "Check logs at: /tmp/sglang_server_*.log"
+if [ "$VLLM_READY" = false ]; then
+    echo "WARNING: vLLM server may not be ready"
+    echo "Check log at: /tmp/vllm_server_${PORT}.log"
     echo "Continuing anyway..."
 else
-    echo "SGLang servers are ready"
+    echo "vLLM server is ready"
 fi
 echo ""
 
