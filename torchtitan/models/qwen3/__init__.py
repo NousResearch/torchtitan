@@ -244,6 +244,8 @@ qwen3_args = {
             route_scale=1.0,
             score_before_experts=False,
         ),
+        use_flex_attn=True,
+        attn_mask_type="block_causal_by_sequence_lengths",
     ),
     "235B-A22B": Qwen3ModelArgs(
         vocab_size=151936,

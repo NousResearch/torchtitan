@@ -16,6 +16,7 @@ from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.models.attention import (
     create_attention_mask,
     FlexAttentionWrapper,
+    get_block_causal_mask_mod_by_seq_lens,
     get_causal_mask_mod,
     get_document_mask_mod,
     ScaledDotProductAttentionWrapper,
@@ -82,17 +83,28 @@ def reshape_for_broadcast(rope_cache: torch.Tensor, x: torch.Tensor) -> torch.Te
 
 
 def apply_rotary_emb(
-    xq: torch.Tensor, xk: torch.Tensor, rope_cache: torch.Tensor
+    xq: torch.Tensor,
+    xk: torch.Tensor,
+    rope_cache: torch.Tensor,
+    position_ids: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # input tensor x has shape [bsz, seq_len, num_heads, head_dim]
     head_dim = xq.shape[-1]
 
-    # reshape for broadcast
-    rope_cache = reshape_for_broadcast(rope_cache, xq)
-
-    # [bsz, seq_len, 1, head_dim]
-    cos = rope_cache[..., :head_dim].to(dtype=xq.dtype, device=xq.device)
-    sin = rope_cache[..., head_dim:].to(dtype=xq.dtype, device=xq.device)
+    if position_ids is not None:
+        # Use position_ids to gather the rope embeddings
+        # rope_cache shape: [max_seq_len, head_dim * 2]
+        # position_ids shape: [bsz, seq_len]
+        gathered_rope = rope_cache[position_ids]  # [bsz, seq_len, head_dim * 2]
+        gathered_rope = gathered_rope.unsqueeze(2)  # [bsz, seq_len, 1, head_dim * 2]
+        cos = gathered_rope[..., :head_dim].to(dtype=xq.dtype, device=xq.device)
+        sin = gathered_rope[..., head_dim:].to(dtype=xq.dtype, device=xq.device)
+    else:
+        # reshape for broadcast
+        rope_cache = reshape_for_broadcast(rope_cache, xq)
+        # [bsz, seq_len, 1, head_dim]
+        cos = rope_cache[..., :head_dim].to(dtype=xq.dtype, device=xq.device)
+        sin = rope_cache[..., head_dim:].to(dtype=xq.dtype, device=xq.device)
 
     # xq:  [bsz, seq_len, num_heads, head_dim]
     # xk:  [bsz, seq_len, num_kv_heads, head_dim]
@@ -186,12 +198,14 @@ class Attention(nn.Module):
         x: torch.Tensor,
         rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None,
+        position_ids: torch.Tensor | None = None,
     ):
         """
         Forward pass of the attention module.
 
         Args:
             x (torch.Tensor): Input tensor.
+            position_ids (torch.Tensor, optional): Custom position IDs of shape [batch_size, seq_len].
 
         Returns:
             torch.Tensor: Output tensor after attention.
@@ -216,7 +230,7 @@ class Attention(nn.Module):
             xk = self.k_norm(xk)
 
         # Apply rotary embedding
-        xq, xk = apply_rotary_emb(xq, xk, rope_cache)
+        xq, xk = apply_rotary_emb(xq, xk, rope_cache, position_ids)
 
         # repeat k/v heads if n_kv_heads < n_heads
         keys = repeat_kv(xk, self.n_rep)  # (bs, seqlen, n_local_heads, head_dim)
@@ -331,6 +345,7 @@ class TransformerBlock(nn.Module):
         x: torch.Tensor,
         rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None,
+        position_ids: torch.Tensor | None = None,
     ):
         """
         Perform a forward pass through the TransformerBlock.
@@ -338,12 +353,13 @@ class TransformerBlock(nn.Module):
         Args:
             x (torch.Tensor): Input tensor.
             rope_cache (torch.Tensor): Precomputed cosine and sine frequencies.
+            position_ids (torch.Tensor, optional): Custom position IDs of shape [batch_size, seq_len].
 
         Returns:
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        x = x + self.attention(self.attention_norm(x), rope_cache, attention_masks)
+        x = x + self.attention(self.attention_norm(x), rope_cache, attention_masks, position_ids)
 
         if self.moe_enabled:
             x = x + self.moe(self.ffn_norm(x))
@@ -459,6 +475,16 @@ class Qwen3Model(nn.Module, ModelProtocol):
             case "block_causal":
                 B = input_batch.shape[0]
                 mask_mods.append(get_document_mask_mod(input_batch, tokenizer.eos_id))
+            case "block_causal_by_sequence_lengths":
+                sequence_lengths = extra_inputs.pop("sequence_lengths", None)
+                if sequence_lengths is None:
+                    raise RuntimeError(
+                        "`sequence_lengths` required for `block_causal_by_sequence_lengths`"
+                    )
+                B = input_batch.shape[0]
+                mask_mods.append(
+                    get_block_causal_mask_mod_by_seq_lens(sequence_lengths)
+                )
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
@@ -471,6 +497,7 @@ class Qwen3Model(nn.Module, ModelProtocol):
         self,
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
+        position_ids: torch.Tensor | None = None,
     ):
         """
         Perform a forward pass through the Transformer model.
@@ -480,6 +507,7 @@ class Qwen3Model(nn.Module, ModelProtocol):
                 If pipeline parallelism is enabled, this will be the input token indices
                 for the ranks on the first pipeline stage. This will be the activation of the
                 previous pipeline stage if the current rank is not on the first stage.
+            position_ids (torch.Tensor, optional): Custom position IDs of shape [batch_size, seq_len].
 
         Returns:
             torch.Tensor: Output logits after applying the Transformer model.
@@ -489,7 +517,7 @@ class Qwen3Model(nn.Module, ModelProtocol):
         h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
         for layer in self.layers.values():
-            h = layer(h, self.rope_cache, attention_masks)
+            h = layer(h, self.rope_cache, attention_masks, position_ids)
 
         h = self.norm(h) if self.norm else h
         output = self.output(h) if self.output else h
