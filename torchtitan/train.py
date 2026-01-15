@@ -393,7 +393,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # Calculate global batch size in tokens
         global_batch_size_tokens = global_batch_size * job_config.training.seq_len
-        total_tokens_all_dp_ranks = global_batch_size_tokens * dp_degree
 
         # TODO(phuc): move to appropriate place
         def format_tokens(num):
@@ -408,7 +407,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         logger.info(
             "[Global training] "
             f"global batch size {global_batch_size} ({format_tokens(global_batch_size_tokens)} tokens), "
-            f"total tokens across all DP ranks per step {format_tokens(total_tokens_all_dp_ranks)}"
         )
 
     def init_distributed(self) -> ParallelDims:
@@ -799,6 +797,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 ),
             ),
         ):
+            first_step_save = (
+                self.step == 0 and job_config.checkpoint.enable_first_step_checkpoint
+            )
+            if first_step_save:
+                self.checkpointer.save(1, False)
+
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
@@ -809,9 +813,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                self.checkpointer.save(
-                    self.step, last_step=(self.step == job_config.training.steps)
-                )
+                if not first_step_save:
+                    self.checkpointer.save(
+                        self.step, last_step=(self.step == job_config.training.steps)
+                    )
 
                 # Run validation if validator is available
                 if (

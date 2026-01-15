@@ -16,7 +16,9 @@ from torchtitan.components.peft.lora import lora_or_linear
 from torchtitan.config.job_config import PEFT
 from torchtitan.distributed.deepep.fused_activation import fused_silu_gate_prob
 from torchtitan.tools.logging import logger
+from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
+# Lazy import DeepEP - only required when use_deepep=True in config
 try:
     from torchtitan.distributed.deepep.utils import DeepEPTokenDispatcher
 except ImportError:
@@ -26,7 +28,10 @@ except ImportError:
         "Please install DeepEP to use DeepEP token dispatcher."
     )
 
-from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
+    DEEPEP_AVAILABLE = True
+except ImportError:
+    DEEPEP_AVAILABLE = False
+    DeepEPTokenDispatcher = None
 
 
 @dataclass
@@ -731,8 +736,6 @@ class TokenChoiceTopKRouter(nn.Module):
         temp_weight = torch.empty_like(self.gate.weight)
         nn.init.normal_(temp_weight, mean=0.0, std=1.0)
 
-        # TODO(phuc): change to torch.linalg.norm
-        # due to TOR101 Use of deprecated function torch.norm
         row_norms = torch.norm(temp_weight, dim=1, keepdim=True)  # noqa: TOR101
         temp_weight = temp_weight / row_norms.clamp(min=1e-6)  # avoid divide by 0
 
@@ -826,6 +829,15 @@ class MoE(nn.Module):
         num_experts = moe_args.num_experts
 
         self.use_deepep = moe_args.use_deepep
+
+        # Validate DeepEP availability when use_deepep=True
+        if self.use_deepep and not DEEPEP_AVAILABLE:
+            raise ImportError(
+                "use_deepep=True requires deep_ep to be installed, but it is not available. "
+                "Please install deep_ep or set use_deepep=False in your model config. "
+                "See torchtitan/distributed/deepep/README.md for installation instructions."
+            )
+
         if self.use_deepep:
             self.deepep_dispatcher = DeepEPTokenDispatcher(
                 moe_router_topk=moe_args.top_k,
@@ -959,6 +971,17 @@ class MoE(nn.Module):
             if self.log_expert_routing:
                 self.expert_routing_counter.add_(num_tokens_per_expert)
 
+        # Compute shared expert output (shared by both DeepEP and non-DeepEP paths)
+        if self.shared_experts is not None:
+            shared_out = self.shared_experts(x)
+            if self.shared_gate is not None:
+                shared_gate_val = F.sigmoid(self.shared_gate(x))
+                shared_expert_out = shared_out * shared_gate_val
+            else:
+                shared_expert_out = shared_out
+        else:
+            shared_expert_out = torch.zeros_like(x)
+
         if self.use_deepep:
             top_scores = top_scores.float()
             self.experts.deepep_dispatcher.dispatch_preprocess(
@@ -966,12 +989,7 @@ class MoE(nn.Module):
             )
             # shape (bs*slen*top_k, dim)
             routed_output = self.experts(x, num_tokens_per_expert)
-            # shared expert
-            if self.shared_experts is not None:
-                out = self.shared_experts(x)
-            else:
-                out = torch.zeros_like(x)
-            out = routed_output + out
+            out = routed_output + shared_expert_out
             out = out.reshape(bs, slen, dim)
             return out
         else:
@@ -1006,27 +1024,13 @@ class MoE(nn.Module):
             # shape (bs*slen*top_k, dim)
             routed_output = self.experts(routed_input, num_tokens_per_expert)
 
-            # shared expert
-            # Note: we execute the shared expert before scoring the output of the routed expert
-            # to "implicitly" overlap the shared expert compute with token combine communication
-            flat_x = x.view(-1, x.shape[-1])
-            if self.shared_experts is not None:
-                shared_out = self.shared_experts(flat_x)
-                if self.shared_gate is not None:
-                    shared_gate_val = F.sigmoid(self.shared_gate(flat_x))
-                    out = shared_out * shared_gate_val
-                else:
-                    out = shared_out
-            else:
-                out = torch.zeros_like(flat_x)
-
             if not self.score_before_experts:
                 routed_output = (
                     routed_output.to(torch.float32)
                     * top_scores_experts_sorted.reshape(-1, 1)
                 ).to(x.dtype)
 
-            out = out.scatter_add(
+            out = shared_expert_out.scatter_add(
                 dim=0, index=token_indices_experts_sorted, src=routed_output
             )
             out = out.reshape(bs, slen, dim)
