@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import argparse
+import shutil
 from pathlib import Path
 
 import torch
@@ -53,6 +54,20 @@ def convert_to_hf(input_dir, output_dir, model_name, model_flavor, hf_assets_pat
         hf_state_dict,
         storage_writer=storage_writer,
     )
+
+    # Copy config files from HF assets to output directory
+    config_files = [
+        "config.json",
+        "generation_config.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "merges.txt",
+        "vocab.json",
+    ]
+    for config_file in config_files:
+        src = hf_assets_path / config_file
+        if src.exists():
+            shutil.copy(src, output_dir / config_file)
 
 
 if __name__ == "__main__":
