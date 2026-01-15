@@ -1,3 +1,9 @@
+# Copyright (c) Nous Research.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
 # Test config for multi-stage data training
 # Tests: stage transitions, checkpoint save/resume, reproducibility
 #
