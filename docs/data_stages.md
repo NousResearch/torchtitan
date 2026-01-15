@@ -4,7 +4,7 @@ Multi-stage training allows switching between different data mixtures at specifi
 
 ## Quick Start
 
-Add `[[training.data_stages]]` sections to your TOML config. Each stage is self-contained and defines all its data configuration:
+Data stages are **required**. Define `[[training.data_stages]]` sections in your TOML config. Each stage must be fully self-contained with all data configuration:
 
 ```toml
 [training]
@@ -39,7 +39,7 @@ seq_len = 32768
 
 ## Configuration Fields
 
-Each `[[training.data_stages]]` section should define all data-related fields explicitly:
+Each `[[training.data_stages]]` section must define all data-related fields explicitly:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -48,13 +48,40 @@ Each `[[training.data_stages]]` section should define all data-related fields ex
 | `end_step` | int | No | Step when stage ends (exclusive). Omit for final stage |
 | `dataset` | string | Yes* | Dataset name (for huggingface type) |
 | `dataset_path` | string | No | Path to dataset |
-| `dataset_type` | string | Yes* | `"huggingface"`, `"nanoset"`, `"preprocessed"`, `"packed_memmap"` |
+| `dataset_type` | string | Yes | `"huggingface"`, `"nanoset"`, `"preprocessed"`, `"packed_memmap"` |
 | `dataset_folders` | list | Yes* | Folders for nanoset datasets |
-| `dataset_weights` | list | No | Weights for blending datasets |
-| `dataset_random_seed` | int | No | Random seed for this stage |
-| `seq_len` | int | Yes* | Sequence length |
+| `dataset_weights` | list | No | Weights for blending datasets (must sum to 1.0) |
+| `dataset_random_seed` | int | No | Random seed for this stage (defaults to `training.dataset_random_seed`) |
+| `seq_len` | int | Yes | Sequence length |
 
-*Required for each stage to be self-contained. Falls back to `[training]` if not set.
+*Required based on `dataset_type`: `dataset` for huggingface, `dataset_folders` for nanoset.
+
+## Single-Stage Training
+
+Even for single-stage training, you must define one data stage:
+
+```toml
+[training]
+steps = 100000
+
+[[training.data_stages]]
+name = "pretrain"
+start_step = 0
+dataset_type = "nanoset"
+dataset_folders = ["/data/web", "/data/books"]
+dataset_weights = [0.7, 0.3]
+seq_len = 4096
+```
+
+## Validation
+
+The following validations are performed at startup:
+
+- **Stage coverage**: First stage must start at step 0, no gaps or overlaps between stages
+- **Required fields**: `name`, `start_step`, `dataset_type`, `seq_len` must be defined
+- **Dataset source**: `dataset` required for huggingface, `dataset_folders` required for nanoset
+- **Weights**: Must be non-negative, each <= 1.0, sum to 1.0, count must match folders
+- **Value ranges**: `seq_len > 0`, `dataset_random_seed >= 0`, `start_step < training.steps`
 
 ## Common Patterns
 
@@ -167,11 +194,6 @@ Stage state is automatically saved in checkpoints:
 - `dataloader_state`: Position within the dataset
 
 On resume, the exact stage and dataloader position are restored. No manual intervention needed.
-
-## Backward Compatibility
-
-- If no `[[training.data_stages]]` sections are defined, training runs as single-stage (existing behavior)
-- All existing configs work without modification
 
 ## Testing
 
