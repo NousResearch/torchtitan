@@ -139,7 +139,7 @@ class DataStageManager:
                 # for the gap (ablation/resume use case)
                 # Always use [training] values for the gap, even if they are defaults
                 auto_stage = DataStage(
-                    name="pre_stages",
+                    name="default",
                     start_step=0,
                     end_step=first_stage_start,
                     dataset=training.dataset,
@@ -153,7 +153,7 @@ class DataStageManager:
                 self.stages.insert(0, auto_stage)
                 logger.info(
                     f"[[training.data_stages]] starts at step {first_stage_start}. "
-                    f"Auto-created 'pre_stages' from [training] for steps 0-{first_stage_start}."
+                    f"Auto-created 'default' stage from [training] for steps 0-{first_stage_start}."
                 )
 
         self._current_stage_idx = 0

@@ -168,34 +168,28 @@ seq_len = 4096
 
 ### Pattern 4: Mid-Training Ablation
 
-To test different data mixtures from a checkpoint (e.g., ablation studies), modify the config to add a new stage at the resume point:
+For ablation studies where you want to test different data mixtures from a checkpoint, you can add stages that start mid-training. The system will auto-create a "default" stage from `[training]` fields for the gap.
 
-**Original config** (trained to step 100):
+**Ablation config** (start new mixture at step 5):
 ```toml
+[training]
+steps = 10
+# These fields cover steps 0-5 (auto-created as "default")
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+
+# Ablation stage starts at step 5 with different random seed
 [[training.data_stages]]
-name = "original"
-start_step = 0
-dataset_weights = [0.7, 0.3]
-...
+name = "ablation_stage"
+start_step = 5
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+dataset_random_seed = 9999  # Different seed for ablation
 ```
 
-**Modified config** (resume at step 101 with new mixture):
-```toml
-[[training.data_stages]]
-name = "original"
-start_step = 0
-end_step = 101  # Add end_step at resume point
-dataset_weights = [0.7, 0.3]
-...
-
-[[training.data_stages]]
-name = "ablation"
-start_step = 101  # New stage starts here
-dataset_weights = [0.5, 0.5]  # Different mixture to test
-...
-```
-
-On resume, the system auto-transitions to the new stage at step 101.
+The system auto-creates "default" for steps 0-5 from `[training]`, then transitions to "ablation_stage" at step 5.
 
 ## Logging
 
@@ -244,70 +238,95 @@ On resume, the exact stage and dataloader position are restored. No manual inter
 
 ## Testing
 
-### Automated Test
+### Test Configs
 
-Run the test script to verify stage transitions, checkpoint save/resume, and exact reproducibility:
+Test configs are located in `docs/data_stages/configs/`:
+
+| Config | Description |
+|--------|-------------|
+| `data_stages_test.toml` | 3 stages with transitions at step 5 and 10 |
+| `data_stages_backcompat_test.toml` | No data_stages (backward compatibility) |
+| `data_stages_ablation_test.toml` | Stages start at step 5 (ablation use case) |
+
+### Automated Test Suite
+
+Run the test script to verify all functionality:
 
 ```bash
 ./scripts/test_data_stages.sh
 ```
 
-Expected output:
+The test suite runs 5 tests:
+
 ```
-[Test 1] Full run: steps 1-15 with 3 stage transitions
+============================================================
+DATA STAGES TEST SUITE
+============================================================
+
+[Test 1] Backward Compatibility: No [[training.data_stages]]
+  ✓ Auto-created 'default' stage from [training]
+  ✓ Stage named 'default'
+  ✓ Training completed successfully
+
+[Test 2] Multi-Stage Training: Full run with 3 stages
   ✓ Transition at step 5: stage_1_general -> stage_2_reasoning
   ✓ Transition at step 10: stage_2_reasoning -> stage_3_final
 
-[Test 2] Resume run: from checkpoint at step 7
+[Test 3] Checkpoint Resume: from step 7
   ✓ Stage correctly restored to stage_2_reasoning
   ✓ Dataloader position restored
   ✓ Training resumed at correct step (8)
 
-[Test 3] Reproducibility: comparing losses between full and resumed runs
+[Test 4] Reproducibility: Comparing losses between full and resumed runs
 Step  | Full Run | Resume   | Match
 ------|----------|----------|------
-8     | 4.7074   | 4.7074   | ✓
-...
-15    | 3.7097   | 3.7097   | ✓
+8     | 4.7073   | 4.7073   | ✓
+9     | 4.0312   | 4.0312   | ✓
+10    | 4.0548   | 4.0548   | ✓
+11    | 3.8143   | 3.8143   | ✓
+12    | 3.8702   | 3.8702   | ✓
+13    | 4.2306   | 4.2306   | ✓
+14    | 3.6354   | 3.6354   | ✓
+15    | 3.7099   | 3.7099   | ✓
 
-SUCCESS: All tests passed!
+[Test 5] Ablation: Stages start at step 5
+  ✓ Auto-created 'default' stage for gap (steps 0-5)
+  ✓ First stage is 'default'
+  ✓ Second stage is 'ablation_stage'
+  ✓ Transition occurred: default -> ablation_stage
+  ✓ Training completed successfully
+
+============================================================
+ALL TESTS PASSED!
+============================================================
 ```
 
 ### Manual Testing
 
-A test config is provided at `torchtitan/models/llama3/train_configs/data_stages_test.toml`.
-
 ```bash
-# Full run
+# Backward compatibility (no data_stages)
 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
-    -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml
+    -m torchtitan.train --job.config_file docs/data_stages/configs/data_stages_backcompat_test.toml
+
+# Multi-stage training
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file docs/data_stages/configs/data_stages_test.toml
 
 # Resume from step 7
 CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
-    -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml \
+    -m torchtitan.train --job.config_file docs/data_stages/configs/data_stages_test.toml \
     --checkpoint.load_step 7
+
+# Ablation (stages start mid-training)
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file docs/data_stages/configs/data_stages_ablation_test.toml
 ```
 
-### What the Test Verifies
+### What the Tests Verify
 
-1. **Stage transitions**: Dataloader rebuilds at step 5 and 10
-2. **Checkpoint saves**: Stage index + exact dataloader position (sample count)
-3. **Resume restores**: Exact state - losses match between full run and resumed run
-4. **No data skip/repeat**: Same batches processed in same order
-
-### Verified Test Results
-
-Results from running `./scripts/test_data_stages.sh`, comparing a full run (steps 1-15) vs resumed run (checkpoint at step 7, resume steps 8-15):
-
-| Step | Full Run Loss | Resume Loss | Full Grad Norm | Resume Grad Norm |
-|------|---------------|-------------|----------------|------------------|
-| 8    | 4.7074        | 4.7074      | 1.6950         | 1.6950           |
-| 9    | 4.0312        | 4.0312      | 1.9540         | 1.9540           |
-| 10   | 4.0549        | 4.0549      | 1.5458         | 1.5458           |
-| 11   | 3.8140        | 3.8140      | 1.5492         | 1.5492           |
-| 12   | 3.8702        | 3.8702      | 1.4857         | 1.4857           |
-| 13   | 4.2307        | 4.2307      | 1.3210         | 1.3210           |
-| 14   | 3.6352        | 3.6352      | 1.4496         | 1.4496           |
-| 15   | 3.7097        | 3.7097      | 1.3688         | 1.3688           |
-
-All values match exactly, proving the dataloader position within the stage is correctly saved and restored.
+1. **Backward compatibility**: Existing configs without `[[training.data_stages]]` still work
+2. **Stage transitions**: Dataloader rebuilds correctly at stage boundaries
+3. **Checkpoint saves**: Stage index + exact dataloader position (sample count)
+4. **Resume restores**: Exact state - losses match between full run and resumed run
+5. **Ablation mode**: When `[[training.data_stages]]` starts after step 0 (e.g., step 5), the system auto-creates a "default" stage from `[training]` fields to cover the gap (steps 0-5). This lets you train initially with `[training]` only, then later add stages mid-training to test different data mixtures from a checkpoint.
+6. **No data skip/repeat**: Same batches processed in same order

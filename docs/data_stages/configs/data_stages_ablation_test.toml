@@ -1,5 +1,5 @@
 # Test config for dmayhem's ablation use case
-# [training] data fields cover steps 0-5 (auto-created as "pre_stages")
+# [training] data fields cover steps 0-5 (auto-created as "default")
 # [[training.data_stages]] starts at step 5 with different seed (ablation)
 #
 # This tests the scenario where a user:
@@ -36,7 +36,7 @@ local_batch_size = 2
 max_norm = 1.0
 steps = 10
 
-# These fields cover steps 0-5 (auto-created as "pre_stages")
+# These fields cover steps 0-5 (auto-created as "default")
 dataset = "c4_test"
 dataset_type = "huggingface"
 seq_len = 512

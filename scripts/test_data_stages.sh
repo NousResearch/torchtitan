@@ -6,9 +6,9 @@
 
 set -e
 
-STAGES_CONFIG="torchtitan/models/llama3/train_configs/data_stages_test.toml"
-BACKCOMPAT_CONFIG="torchtitan/models/llama3/train_configs/data_stages_backcompat_test.toml"
-ABLATION_CONFIG="torchtitan/models/llama3/train_configs/data_stages_ablation_test.toml"
+STAGES_CONFIG="docs/data_stages/configs/data_stages_test.toml"
+BACKCOMPAT_CONFIG="docs/data_stages/configs/data_stages_backcompat_test.toml"
+ABLATION_CONFIG="docs/data_stages/configs/data_stages_ablation_test.toml"
 
 STAGES_OUTPUT="./outputs/data_stages_test"
 BACKCOMPAT_OUTPUT="./outputs/data_stages_backcompat_test"
@@ -209,15 +209,15 @@ CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
 echo ""
 echo "[Test 5] Verifying ablation setup..."
 
-if grep -q "Auto-created 'pre_stages' from \[training\] for steps 0-5" "$ABLATION_LOG"; then
-    echo "  ✓ Auto-created 'pre_stages' for gap (steps 0-5)"
+if grep -q "Auto-created 'default' stage from \[training\] for steps 0-5" "$ABLATION_LOG"; then
+    echo "  ✓ Auto-created 'default' for gap (steps 0-5)"
 else
-    echo "  ✗ Failed to auto-create pre_stages"
+    echo "  ✗ Failed to auto-create default"
     exit 1
 fi
 
-if grep -q "Stage 1: pre_stages" "$ABLATION_LOG"; then
-    echo "  ✓ First stage is 'pre_stages'"
+if grep -q "Stage 1: default" "$ABLATION_LOG"; then
+    echo "  ✓ First stage is 'default'"
 else
     echo "  ✗ First stage not correctly named"
     exit 1
@@ -230,8 +230,8 @@ else
     exit 1
 fi
 
-if grep -q "pre_stages.*ablation_stage" "$ABLATION_LOG"; then
-    echo "  ✓ Transition occurred: pre_stages -> ablation_stage"
+if grep -q "default.*ablation_stage" "$ABLATION_LOG"; then
+    echo "  ✓ Transition occurred: default -> ablation_stage"
 else
     echo "  ✗ Transition did not occur"
     exit 1
