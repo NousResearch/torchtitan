@@ -147,3 +147,56 @@ On resume, the exact stage and dataloader position are restored. No manual inter
 
 - If no `[[training.data_stages]]` sections are defined, training runs as single-stage (existing behavior)
 - All existing configs work without modification
+
+## Testing
+
+### Automated Test
+
+Run the test script to verify stage transitions, checkpoint save/resume, and exact reproducibility:
+
+```bash
+./scripts/test_data_stages.sh
+```
+
+Expected output:
+```
+[Test 1] Full run: steps 1-15 with 3 stage transitions
+  ✓ Transition at step 5: stage_1_general -> stage_2_reasoning
+  ✓ Transition at step 10: stage_2_reasoning -> stage_3_final
+
+[Test 2] Resume run: from checkpoint at step 7
+  ✓ Stage correctly restored to stage_2_reasoning
+  ✓ Dataloader position restored
+  ✓ Training resumed at correct step (8)
+
+[Test 3] Reproducibility: comparing losses between full and resumed runs
+Step  | Full Run | Resume   | Match
+------|----------|----------|------
+8     | 4.7074   | 4.7074   | ✓
+...
+15    | 3.7097   | 3.7097   | ✓
+
+SUCCESS: All tests passed!
+```
+
+### Manual Testing
+
+A test config is provided at `torchtitan/models/llama3/train_configs/data_stages_test.toml`.
+
+```bash
+# Full run
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml
+
+# Resume from step 7
+CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+    -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml \
+    --checkpoint.load_step 7
+```
+
+### What the Test Verifies
+
+1. **Stage transitions**: Dataloader rebuilds at step 5 and 10
+2. **Checkpoint saves**: Stage index + exact dataloader position (sample count)
+3. **Resume restores**: Exact state - losses match between full run and resumed run
+4. **No data skip/repeat**: Same batches processed in same order
