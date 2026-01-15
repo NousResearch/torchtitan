@@ -40,9 +40,45 @@ class Job:
 
 
 @dataclass
+class PEFT:
+    enable_peft: bool = False
+    """Whether to enable PEFT"""
+
+    use_lora: bool = False
+    """Whether to use PEFT with LoRA"""
+
+    layers_to_train: List[int] | None = None
+    """List of layers to train for PEFT"""
+
+    lora_rank: int = 8
+    """Rank of the low-rank approximation for PEFT"""
+
+    lora_alpha: float = 1.0
+    """Alpha parameter for the PEFT"""
+
+    lora_dropout: float = 0.0
+    """Dropout probability for the PEFT"""
+
+    lora_train_norm: bool = False
+    """Whether to train the normalization layers while using LoRA"""
+
+    train_embeddings: bool = False
+    """Whether to train the embeddings for PEFT"""
+
+    train_output_layer: bool = False
+    """Whether to train the output layer for PEFT"""
+
+
+@dataclass
 class Profiling:
     enable_profiling: bool = False
     """Whether to enable pytorch profile"""
+
+    with_stack: bool = True
+    """Record source information (file and line number) for the ops"""
+
+    with_modules: bool = True
+    """Record module hierarchy (including function names) corresponding to the callstack of the op"""
 
     save_traces_folder: str = "profile_traces"
     """Trace files location"""
@@ -517,6 +553,53 @@ class Parallelism:
     - [partial dp -> ep] etp = tp
     - [partial dp + all tp -> ep] etp = 1
     Note that this is still an experimental feature.
+    """
+
+
+@dataclass
+class DeepEP:
+    """Configuration for DeepEP (Deep Expert Parallelism) MoE communication.
+
+    DeepEP provides optimized all-to-all communication for MoE token dispatch/combine.
+    These settings only take effect when model.use_deepep is enabled.
+    """
+
+    sync_comm_stream: bool = False
+    """
+    Whether to synchronize the DeepEP communication stream with the default CUDA stream.
+
+    DeepEP uses a separate communication stream for dispatch/combine operations.
+    Without sync (default): Better performance, but may cause race conditions if
+    the DeepEP version doesn't properly synchronize streams internally.
+
+    With sync enabled: Adds explicit CUDA event-based synchronization between the
+    comm stream and default stream after each dispatch/combine operation.
+    """
+
+    fused_weighted_scatter_add: bool = False
+    """
+    Whether to use fused weighted scatter_add kernel for combining expert outputs.
+
+    When enabled (default) and score_before_experts=False, the routing probability
+    multiplication is fused into the scatter_add operation in unpermute, providing
+    2-3x speedup over separate multiply + scatter_add.
+
+    When disabled, the multiplication happens in GroupedExperts.forward() after
+    expert computation (original behavior).
+    """
+
+    fused_silu_gate_prob: bool = False
+    """
+    Whether to use fused SiLU-Gate-Prob Triton kernel for expert computation.
+
+    When enabled, fuses silu(x@w1) * (x@w3) * prob into a single Triton kernel,
+    providing ~3.5x speedup over separate operations. Requires score_before_experts=False.
+
+    The kernel computes intermediates in float32 for numerical stability,
+    with bfloat16 input/output.
+
+    Note: This may cause ~0.15% gradient difference compared to unfused version
+    due to different operation ordering (prob applied before w2 matmul vs after).
     """
 
 
@@ -1327,6 +1410,7 @@ class JobConfig:
     lr_scheduler: LRScheduler = field(default_factory=LRScheduler)
     training: Training = field(default_factory=Training)
     parallelism: Parallelism = field(default_factory=Parallelism)
+    deepep: DeepEP = field(default_factory=DeepEP)
     checkpoint: Checkpoint = field(default_factory=Checkpoint)
     activation_checkpoint: ActivationCheckpoint = field(
         default_factory=ActivationCheckpoint
@@ -1341,6 +1425,7 @@ class JobConfig:
     grpo: GRPO = field(default_factory=GRPO)
     debug: Debug = field(default_factory=Debug)
     lm_eval: LMEvalConfig = field(default_factory=LMEvalConfig)
+    peft: PEFT = field(default_factory=PEFT)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

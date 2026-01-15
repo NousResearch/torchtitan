@@ -33,6 +33,7 @@ except ImportError:
     )
 
     PrepareModuleInputOutput = None
+from torchtitan.components.peft.lora import LoraColwiseParallel, LoraRowwiseParallel
 from torchtitan.config import JobConfig, TORCH_DTYPE_MAP
 from torchtitan.config.job_config import Compile as CompileConfig
 from torchtitan.distributed import NoParallel, ParallelDims
@@ -40,6 +41,7 @@ from torchtitan.distributed.activation_checkpoint import apply_ac
 
 from torchtitan.distributed.expert_parallel import (
     ExpertParallel,
+    ExpertParallelDeepEP,
     ExpertTensorParallel,
     ReordererSequenceParallel,
     TensorParallel,
@@ -366,6 +368,21 @@ def apply_fsdp(
                 > transformer_block.moe.experts.num_experts
             ):
                 _experts_shard_placement_fn = lambda param: Shard(1)
+            if hasattr(transformer_block.moe.experts, "w1_lora_a"):
+                # change dtype if mixed precision is enabled
+                transformer_block.moe.experts.w1.requires_grad = False
+                transformer_block.moe.experts.w2.requires_grad = False
+                transformer_block.moe.experts.w3.requires_grad = False
+                if param_dtype == torch.bfloat16:
+                    transformer_block.moe.experts.w1.data = (
+                        transformer_block.moe.experts.w1.data.to(torch.bfloat16)
+                    )
+                    transformer_block.moe.experts.w2.data = (
+                        transformer_block.moe.experts.w2.data.to(torch.bfloat16)
+                    )
+                    transformer_block.moe.experts.w3.data = (
+                        transformer_block.moe.experts.w3.data.to(torch.bfloat16)
+                    )
 
             fully_shard(
                 transformer_block.moe.experts,
@@ -380,6 +397,32 @@ def apply_fsdp(
             transformer_block.moe.experts.set_gradient_divide_factor(
                 gradient_divide_factor,
             )
+        if not transformer_block.moe_enabled:
+            if hasattr(transformer_block.feed_forward.w1, "lora_a"):
+                if param_dtype == torch.bfloat16:
+                    transformer_block.feed_forward.w1.weight.data = (
+                        transformer_block.feed_forward.w1.weight.data.to(torch.bfloat16)
+                    )
+                    transformer_block.feed_forward.w2.weight.data = (
+                        transformer_block.feed_forward.w2.weight.data.to(torch.bfloat16)
+                    )
+                    transformer_block.feed_forward.w3.weight.data = (
+                        transformer_block.feed_forward.w3.weight.data.to(torch.bfloat16)
+                    )
+        if hasattr(transformer_block.attention.wq, "lora_a"):
+            if param_dtype == torch.bfloat16:
+                transformer_block.attention.wq.weight.data = (
+                    transformer_block.attention.wq.weight.data.to(torch.bfloat16)
+                )
+                transformer_block.attention.wk.weight.data = (
+                    transformer_block.attention.wk.weight.data.to(torch.bfloat16)
+                )
+                transformer_block.attention.wv.weight.data = (
+                    transformer_block.attention.wv.weight.data.to(torch.bfloat16)
+                )
+                transformer_block.attention.wo.weight.data = (
+                    transformer_block.attention.wo.weight.data.to(torch.bfloat16)
+                )
 
         fully_shard(
             transformer_block,
@@ -456,6 +499,7 @@ def apply_moe_ep_tp(
     ep_mesh: DeviceMesh | None,
     ep_tp_mesh: DeviceMesh | None,
     etp_enabled: bool,
+    use_deepep: bool,
 ):
     assert ep_mesh is not None or tp_mesh is not None
 
@@ -491,11 +535,11 @@ def apply_moe_ep_tp(
                 # input Replicate, output Partial
                 moe_layer_plan.update(
                     {
-                        "moe.shared_experts.w1": ColwiseParallel(),
-                        "moe.shared_experts.w2": RowwiseParallel(
+                        "moe.shared_experts.w1": LoraColwiseParallel(),
+                        "moe.shared_experts.w2": LoraRowwiseParallel(
                             output_layouts=Partial()
                         ),
-                        "moe.shared_experts.w3": ColwiseParallel(),
+                        "moe.shared_experts.w3": LoraColwiseParallel(),
                     }
                 )
             parallelize_module(
@@ -512,7 +556,13 @@ def apply_moe_ep_tp(
         elif tp_mesh is None or not etp_enabled:
             experts_mesh = ep_mesh
             # input / output sharding on the batch / tokens dim
-            experts_plan = ExpertParallel()
+            experts_plan = (
+                ExpertParallelDeepEP() if use_deepep is True else ExpertParallel()
+            )
+            if use_deepep is True:
+                logger.info(
+                    "Enabling deep_ep and fused all-to-all communication for expert parallelism"
+                )
         else:
             experts_mesh = ep_tp_mesh
             experts_plan = ExpertTensorParallel()
@@ -533,14 +583,28 @@ def old_apply_compile(model: nn.Module, compile_config: CompileConfig):
     # but it is experimental.
     # torch._dynamo.config.capture_scalar_outputs = True
     for layer_id, transformer_block in model.layers.named_children():
-        # TODO: remove when torch.compile supports fullgraph=True for MoE
-        fullgraph = True
+        # IMPORTANT: MoE layers MUST use fullgraph=False, non-MoE layers SHOULD use fullgraph=True.
+        #
+        # Why MoE needs fullgraph=False:
+        #   DeepEP's PrimusTurboDeepepManager.setup_metadata() mutates instance state
+        #   (self.token_probs, self.token_indices) inside activation checkpointing regions.
+        #   When fullgraph=True, torch.compile wraps these in HigherOrderOperator which
+        #   raises "Mutating a variable not in the current scope (SideEffects)" error.
+        #   fullgraph=False allows graph breaks, permitting these state mutations.
+        #
+        # Why non-MoE layers should use fullgraph=True:
+        #   fullgraph=False on attention/FFN layers causes unnecessary graph breaks,
+        #   which interferes with activation checkpointing and retains more intermediate
+        #   tensors during backward pass, leading to OOM on memory-constrained setups.
+        #
+        # Respect user config for non-MoE layers, but MoE layers MUST use False
+        fullgraph = compile_config.fullgraph
         if transformer_block.moe_enabled:
             fullgraph = False
         transformer_block = torch.compile(
             transformer_block,
             backend=compile_config.backend,
-            fullgraph=compile_config.fullgraph,
+            fullgraph=fullgraph,
         )
         model.layers.register_module(layer_id, transformer_block)
 

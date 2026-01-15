@@ -143,7 +143,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             torch.device("meta"),
             utils.set_default_dtype(TORCH_DTYPE_MAP[job_config.training.dtype]),
         ):
-            model = self.train_spec.model_cls(model_args)
+            # Still converting models to (job_config, peft) instead of just (job_config)
+            # so need to handle older models that don't have peft_config
+            try:
+                model = self.train_spec.model_cls(model_args, job_config.peft)
+            except Exception as e:
+                model = self.train_spec.model_cls(model_args)
 
         # Build the collection of model converters. No-op if `model.converters` empty
         model_converters = build_model_converters(job_config, parallel_dims)
@@ -293,6 +298,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.optimizers = self.train_spec.build_optimizers_fn(
             self.model_parts, job_config.optimizer, parallel_dims, self.ft_manager
         )
+        # check params in optimizers
+        for model_part in self.model_parts:
+            for name, param in model_part.named_parameters():
+                if param.requires_grad:
+                    logger.debug(f"Param {name}: {param.shape} is in optimizer")
+                else:
+                    logger.debug(f"Param {name}: {param.shape} is not in optimizer")
+
         self.lr_schedulers = self.train_spec.build_lr_schedulers_fn(
             self.optimizers, job_config.lr_scheduler, job_config.training.steps
         )
@@ -388,6 +401,24 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             f"sequence length {job_config.training.seq_len}, "
             f"total steps {job_config.training.steps} "
             f"(warmup {job_config.lr_scheduler.warmup_steps})"
+        )
+
+        # Calculate global batch size in tokens
+        global_batch_size_tokens = global_batch_size * job_config.training.seq_len
+
+        # TODO(phuc): move to appropriate place
+        def format_tokens(num):
+            """Format token counts in human-readable format (e.g., 220K, 2M)"""
+            if num >= 1_000_000:
+                return f"{num / 1_000_000:.1f}M"
+            elif num >= 1_000:
+                return f"{num / 1_000:.0f}K"
+            else:
+                return str(num)
+
+        logger.info(
+            "[Global training] "
+            f"global batch size {global_batch_size} ({format_tokens(global_batch_size_tokens)} tokens), "
         )
 
     def init_distributed(self) -> ParallelDims:
@@ -778,6 +809,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 ),
             ),
         ):
+            first_step_save = (
+                self.step == 0 and job_config.checkpoint.enable_first_step_checkpoint
+            )
+            if first_step_save:
+                self.checkpointer.save(1, False)
+
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
@@ -788,9 +825,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                self.checkpointer.save(
-                    self.step, last_step=(self.step == job_config.training.steps)
-                )
+                if not first_step_save:
+                    self.checkpointer.save(
+                        self.step, last_step=(self.step == job_config.training.steps)
+                    )
 
                 # Run lm-evaluation-harness if enabled and at eval interval
                 if self.lm_evaluator is not None and self.lm_evaluator.should_evaluate(
@@ -864,6 +902,7 @@ def main(trainer_class: type[Trainer]) -> None:
     init_logger()
     config_manager = ConfigManager()
     config = config_manager.parse_args()
+
     trainer: Trainer | None = None
 
     try:
