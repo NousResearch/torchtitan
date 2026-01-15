@@ -1,0 +1,48 @@
+# Batch Size Scheduler Test Config - Checkpoint Resume Test
+#
+# Tests that batch size scheduler state is correctly restored from checkpoint.
+# Run twice: first to create checkpoint, second to resume and verify batch size.
+#
+# Usage (create checkpoint):
+#   torchrun --nproc_per_node=1 -m torchtitan.train --job.config_file docs/batch_size_scheduler/debug_checkpoint_resume.toml --training.steps 30
+#
+# Usage (resume from checkpoint):
+#   torchrun --nproc_per_node=1 -m torchtitan.train --job.config_file docs/batch_size_scheduler/debug_checkpoint_resume.toml --checkpoint.initial_load_path ./outputs/batch_size_scheduler_ckpt/step-30
+
+[job]
+description = "Batch size scheduler test - checkpoint resume"
+dump_folder = "./outputs/batch_size_scheduler_ckpt"
+
+[batch_size_scheduler]
+mode = "linear"
+start_batch_size = 8
+rampup_samples = 1000
+
+[training]
+dataset = "c4_test"
+local_batch_size = 4
+global_batch_size = 32
+seq_len = 256
+steps = 60
+max_norm = 1.0
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-4
+
+[lr_scheduler]
+warmup_steps = 10
+
+[metrics]
+log_freq = 5
+enable_tensorboard = false
+
+[checkpoint]
+enable = true
+interval = 30
+folder = "checkpoints"

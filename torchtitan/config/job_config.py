@@ -291,6 +291,44 @@ class LRScheduler:
 
 
 @dataclass
+class BatchSizeScheduler:
+    """
+    Batch size scheduling configuration.
+
+    Orthogonal to data stages and LR scheduler - only controls batch size
+    based on consumed_samples. When mode is 'constant' or start_batch_size is 0,
+    uses fixed global_batch_size (backward compatible with existing configs).
+    """
+
+    mode: Literal["constant", "linear", "increment"] = "constant"
+    """
+    Schedule mode:
+    - 'constant': Fixed batch size (default, backward compatible)
+    - 'linear': Smooth interpolation from start to end (DeepSeek-V3 style)
+    - 'increment': Step-wise increments at regular intervals (Megatron style)
+    """
+
+    start_batch_size: int = 0
+    """
+    Starting batch size for rampup. 0 means use global_batch_size (no rampup).
+    Must be divisible by local_batch_size * data_parallel_degree.
+    """
+
+    rampup_samples: int = 0
+    """
+    Number of samples over which to ramp up to global_batch_size.
+    0 means no rampup (constant batch size).
+    """
+
+    increment: int = 0
+    """
+    Batch size increment for 'increment' mode.
+    0 means auto-compute (use start_batch_size as increment).
+    Must be divisible by local_batch_size * data_parallel_degree.
+    """
+
+
+@dataclass
 class Training:
     dataset: str = "c4_test"
     """Dataset to use"""
@@ -1204,6 +1242,7 @@ class JobConfig:
     model: Model = field(default_factory=Model)
     optimizer: Optimizer = field(default_factory=Optimizer)
     lr_scheduler: LRScheduler = field(default_factory=LRScheduler)
+    batch_size_scheduler: BatchSizeScheduler = field(default_factory=BatchSizeScheduler)
     training: Training = field(default_factory=Training)
     parallelism: Parallelism = field(default_factory=Parallelism)
     deepep: DeepEP = field(default_factory=DeepEP)
