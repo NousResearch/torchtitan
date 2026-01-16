@@ -21,17 +21,15 @@ from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 # Lazy import DeepEP - only required when use_deepep=True in config
 try:
     from torchtitan.distributed.deepep.utils import DeepEPTokenDispatcher
+
+    DEEPEP_AVAILABLE = True
 except ImportError:
     DeepEPTokenDispatcher = None
     logger.warning(
         "DeepEP is not installed, using default token dispatcher. "
         "Please install DeepEP to use DeepEP token dispatcher."
     )
-
-    DEEPEP_AVAILABLE = True
-except ImportError:
     DEEPEP_AVAILABLE = False
-    DeepEPTokenDispatcher = None
 
 
 @dataclass
