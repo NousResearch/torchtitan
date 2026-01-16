@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import contextlib
 import importlib
 import os
 import time
@@ -25,6 +26,7 @@ from torchtitan.components.metrics import (
 )
 from torchtitan.config import ConfigManager, JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
+from torchtitan.distributed.activation_checkpoint import get_act_offloading_ctx_manager
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
 from torchtitan.tools.logging import init_logger, logger
@@ -381,6 +383,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 pp_has_last_stage=pp_has_last_stage,
             )
 
+        if job_config.activation_checkpoint.cpu_activation_checkpoint:
+            self.maybe_actvation_offload_context = get_act_offloading_ctx_manager(
+                self.model_parts
+            )
+        else:
+            self.maybe_actvation_offload_context = contextlib.nullcontext()
+
         logger.info(
             "Trainer is initialized with "
             f"local batch size {job_config.training.local_batch_size}, "
@@ -642,25 +651,26 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if parallel_dims.pp_enabled:
             # Pipeline Parallel forward / backward inside step() call
             with self.train_context(optional_context_parallel_ctx):
-                targets, losses = (
-                    (labels, []) if self.pp_has_last_stage else (None, None)
-                )
-                if self.pp_has_first_stage:
-                    self.pp_schedule.step(
-                        inputs,
-                        **extra_inputs,
-                        **extra_kwargs,
-                        target=targets,
-                        losses=losses,
-                        return_outputs=False,
+                with self.maybe_actvation_offload_context:
+                    targets, losses = (
+                        (labels, []) if self.pp_has_last_stage else (None, None)
                     )
-                else:
-                    self.pp_schedule.step(
-                        **extra_kwargs,
-                        target=targets,
-                        losses=losses,
-                        return_outputs=False,
-                    )
+                    if self.pp_has_first_stage:
+                        self.pp_schedule.step(
+                            inputs,
+                            **extra_inputs,
+                            **extra_kwargs,
+                            target=targets,
+                            losses=losses,
+                            return_outputs=False,
+                        )
+                    else:
+                        self.pp_schedule.step(
+                            **extra_kwargs,
+                            target=targets,
+                            losses=losses,
+                            return_outputs=False,
+                        )
 
             # accumulate losses across pipeline microbatches
             # TODO: PP+FSDP unexpectedly puts the loss back to the CPU
@@ -675,13 +685,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         else:
             # Non-PP forward / backward
             with self.train_context(optional_context_parallel_ctx):
-                assert len(model_parts) == 1
-                with self.maybe_enable_amp:
-                    pred = model_parts[0](inputs, **extra_inputs, **extra_kwargs)
-                    loss = self.loss_fn(pred, labels)
-                # need to free pred before bwd to avoid peaking memory
-                del pred
-                loss.backward()
+                with self.maybe_actvation_offload_context:
+                    assert len(model_parts) == 1
+                    with self.maybe_enable_amp:
+                        pred = model_parts[0](inputs, **extra_inputs, **extra_kwargs)
+                        loss = self.loss_fn(pred, labels)
+                    # need to free pred before bwd to avoid peaking memory
+                    del pred
+                    loss.backward()
 
         return loss
 

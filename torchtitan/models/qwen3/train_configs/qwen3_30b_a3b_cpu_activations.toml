@@ -1,7 +1,7 @@
 # NOTE: this toml config is a preset for 8 H100 GPUs (with 96GiB memory).
 
 [job]
-dump_folder = "/home/dakota/testing/qwen3_30b_a3b_normal_c4"
+dump_folder = "/home/dakota/testing/qwen3_30b_a3b_cpu_activations_c4"
 description = "Qwen3 30B a3B training"
 
 [profiling]
@@ -57,9 +57,11 @@ async_mode = "disabled" # ["disabled", "async", "async_with_pinned_mem"]
 initial_load_in_hf = true
 initial_load_path = "./assets/hf/Qwen3-30B-A3B-Instruct-2507"
 
+
 [activation_checkpoint]
 mode = "full"  # ["none", "selective", "full"]
 selective_ac_option = "op"  # "int" = ac every positive int layer or 'op', ac based on ops policy
+cpu_activation_checkpoint = true
 
 [compile]
 enable=false

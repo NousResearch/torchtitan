@@ -846,6 +846,11 @@ class ActivationCheckpoint:
     https://docs.pytorch.org/docs/stable/checkpoint.html for details.
     """
 
+    cpu_activation_checkpoint: bool = False
+    """
+    Whether to use CPU activation checkpointing.
+    """
+
 
 @dataclass
 class Compile:
