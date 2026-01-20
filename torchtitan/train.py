@@ -25,7 +25,6 @@ from torchtitan.components.metrics import (
 )
 from torchtitan.config import ConfigManager, JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
-from torchtitan.memory_defrag import MemoryDefragManager
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
 from torchtitan.tools.cuda_memory_tracker import CUDAMemoryTracker
@@ -106,13 +105,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # take control of garbage collection to avoid stragglers
         self.gc_handler = utils.GarbageCollection(
             gc_freq=job_config.training.gc_freq, debug=job_config.training.gc_debug
-        )
-
-        # Initialize memory defragmentation manager
-        self.defrag_manager = MemoryDefragManager(
-            enabled=getattr(job_config.training, "enable_memory_defrag", False),
-            defrag_freq=getattr(job_config.training, "defrag_freq", 1),
-            aggressive=getattr(job_config.training, "aggressive_defrag", False),
         )
 
         # Initialize detailed memory tracker
@@ -899,9 +891,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     torch_profiler.step()
                 if memory_profiler:
                     memory_profiler.step()
-
-                # Run memory defragmentation if enabled
-                self.defrag_manager.step(self.step)
 
                 # Track memory at step end and optionally clear cache
                 self.detailed_memory_tracker.step_complete(self.step)
