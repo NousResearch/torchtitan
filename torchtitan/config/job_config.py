@@ -861,14 +861,6 @@ class ActivationCheckpoint:
     https://docs.pytorch.org/docs/stable/checkpoint.html for details.
     """
 
-    cpu_offload: bool = False
-    """
-    Enable CPU offloading for activation checkpoints. When enabled, saved activations
-    are moved to CPU RAM during forward pass and brought back to GPU during backward pass.
-    This trades memory for PCIe bandwidth, saving GPU memory at the cost of data transfer time.
-    Only applies when mode is 'full' or 'selective'.
-    """
-
 
 @dataclass
 class Compile:
