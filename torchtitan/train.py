@@ -768,7 +768,25 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # Skip optimizer step if configured (for memory profiling)
         if not self.job_config.training.skip_optimizer_step:
+            import datetime
+            import time as _time
+
+            # Log step start with timestamp for correlation with vmstat
+            if self.device.index == 0:
+                _ts = datetime.datetime.now().strftime("%H:%M:%S")
+                logger.info(f"[STEP {self.step}] optimizer.step() START @ {_ts}")
+
+            _optim_start = _time.time()
             self.optimizers.step()
+            _optim_elapsed = _time.time() - _optim_start
+
+            # Log step end with timing
+            if self.device.index == 0:
+                _ts = datetime.datetime.now().strftime("%H:%M:%S")
+                logger.info(
+                    f"[STEP {self.step}] optimizer.step() END @ {_ts} | Duration: {_optim_elapsed:.2f}s"
+                )
+
             self.lr_schedulers.step()
         else:
             logger.info("Skipping optimizer step (skip_optimizer_step=True)")
@@ -820,6 +838,16 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         job_config = self.job_config
 
         self.checkpointer.load(step=job_config.checkpoint.load_step)
+
+        # Pre-initialize bf16 optimizer states if configured
+        # This must happen BEFORE training to avoid rank skew during first step
+        if hasattr(self.optimizers, "init_bf16_states"):
+            self.optimizers.init_bf16_states()
+            # Barrier to ensure all ranks finish before training starts
+            if torch.distributed.is_initialized():
+                torch.distributed.barrier()
+                logger.info("All ranks synchronized after bf16 optimizer state init")
+
         logger.info(f"Training starts at step {self.step + 1}")
 
         leaf_folder = (

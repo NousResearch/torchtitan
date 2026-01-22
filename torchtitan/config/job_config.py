@@ -287,6 +287,13 @@ class Optimizer:
     use_triton: bool = False
     """Whether to use Triton kernel for Newton-Schulz in Muon optimizer."""
 
+    state_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Dtype for optimizer states (exp_avg, exp_avg_sq for Adam/AdamW).
+    Using bfloat16 reduces memory by ~50% but may affect training stability.
+    Only applies to Adam/AdamW optimizers.
+    """
+
 
 @dataclass
 class LRScheduler:
@@ -378,6 +385,13 @@ class Training:
     clear_cache_between_steps: bool = False
     """
     Whether to clear CUDA cache between training steps to measure minimum memory requirements
+    """
+
+    drop_page_cache_before_training: bool = False
+    """
+    Whether to drop Linux page cache before training starts (after model/optimizer init).
+    This helps when using FSDP2 CPU offload with mmap'd model weights that fill page cache.
+    Requires root/sudo or appropriate permissions to write to /proc/sys/vm/drop_caches.
     """
 
     skip_optimizer_step: bool = False
