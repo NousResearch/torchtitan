@@ -470,6 +470,7 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
             self.freqs_cis = precompute_freqs_cis(self.model_args)
         if self.tok_embeddings is not None:
             fast_init_normal_(self.tok_embeddings.weight)
+            fast_init_normal_(self.tok_embeddings.weight)
         for layer in self.layers.values():
             if layer is not None:
                 layer.init_weights(buffer_device=buffer_device)
