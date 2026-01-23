@@ -88,6 +88,10 @@ class PreprocessedDataset(IterableDataset, Stateful):
                     args["sequence_lengths"] = torch.LongTensor(
                         sample["sequence_lengths"]
                     )
+                if "tin" in keys:
+                    args["tin"] = torch.LongTensor(sample["tin"])
+                if "tout" in keys:
+                    args["tout"] = torch.LongTensor(sample["tout"])
 
                 yield args, labels
 
@@ -150,6 +154,10 @@ def collate_fn(batch):
         args["position_ids"] = torch.stack([x["position_ids"] for x in inputs])
     if "sequence_lengths" in inputs[0]:
         args["sequence_lengths"] = [x["sequence_lengths"] for x in inputs]
+    if "tin" in inputs[0]:
+        args["tin"] = torch.stack([x["tin"] for x in inputs])
+    if "tout" in inputs[0]:
+        args["tout"] = torch.stack([x["tout"] for x in inputs])
 
     labels_tensor = torch.stack(list(labels))
 

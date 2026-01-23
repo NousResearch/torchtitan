@@ -21,6 +21,7 @@ from torchtitan.models.attention import (
     get_block_causal_mask_mod_by_seq_lens,
     get_causal_mask_mod,
     get_document_mask_mod,
+    get_trie_causal_mask_mod,
     ScaledDotProductAttentionWrapper,
 )
 from torchtitan.models.moe import MoE
@@ -554,6 +555,16 @@ class Qwen3Model(nn.Module, ModelProtocol):
                 mask_mods.append(
                     get_block_causal_mask_mod_by_seq_lens(sequence_lengths)
                 )
+            case "trie_causal":
+                tin = extra_inputs.pop("tin", None)
+                tout = extra_inputs.pop("tout", None)
+                if tin is None or tout is None:
+                    raise RuntimeError(
+                        "`tin` and `tout` required for `trie_causal` attention mask"
+                    )
+                B = input_batch.shape[0]
+                # Trie mask combines ancestor check with causal ordering
+                mask_mods = [get_trie_causal_mask_mod(tin, tout)]
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"

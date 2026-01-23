@@ -72,3 +72,7 @@ That's it! Your custom dataset is now ready to use with `torchtitan`.
 - Use `streaming=True` for large datasets to manage memory efficiently
 
 Now you can start training with your custom dataset!
+
+## See Also
+
+- [Trie Attention](trie_attention.md) - For tree-structured data (MCTS rollouts, branching conversations) with custom attention masking

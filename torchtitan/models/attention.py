@@ -29,6 +29,7 @@ __all__ = [
     "get_sliding_window_mask_mod",
     "get_fixed_block_mask_mod",
     "get_block_causal_mask_mod_by_seq_lens",
+    "get_trie_causal_mask_mod",
     "create_attention_mask",
 ]
 
@@ -232,6 +233,46 @@ def get_block_causal_mask_mod_by_seq_lens(
         return causal_mask & document_mask
 
     return mask_mod
+
+
+def get_trie_causal_mask_mod(
+    tin: torch.Tensor,  # [B, S] DFS entry times
+    tout: torch.Tensor,  # [B, S] DFS exit times
+) -> _mask_mod_signature:
+    """Trie-based causal mask: attend only to ancestors (via DFS interval containment).
+
+    In a trie/tree structure, token at position q can attend to token at position kv
+    if and only if:
+    1. kv is an ancestor of q (DFS interval containment), AND
+    2. kv comes before or at q in sequence order (causal within same node)
+
+    The ancestor check uses DFS interval containment:
+    kv is ancestor of q iff tin[kv] <= tin[q] AND tout[q] <= tout[kv]
+
+    We also need causal ordering (q_idx >= kv_idx) because within the same node,
+    all tokens share the same tin/tout, but we still need to prevent attending
+    to future tokens within that node.
+
+    Args:
+        tin: DFS entry times tensor of shape [B, S] where B is batch size and S is seq length.
+        tout: DFS exit times tensor of shape [B, S].
+
+    Returns:
+        A mask modifier function that implements trie-based causal masking.
+    """
+
+    def trie_causal_mask(
+        b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+    ) -> torch.Tensor:
+        # Ancestor check: kv is ancestor of q iff tin[kv] <= tin[q] AND tout[q] <= tout[kv]
+        is_ancestor = (tin[b, kv_idx] <= tin[b, q_idx]) & (
+            tout[b, q_idx] <= tout[b, kv_idx]
+        )
+        # Causal ordering: within same node (same tin/tout), enforce sequence order
+        is_causal = q_idx >= kv_idx
+        return is_ancestor & is_causal
+
+    return trie_causal_mask
 
 
 def get_sliding_window_mask_mod(window_size: int) -> _mask_mod_signature:
