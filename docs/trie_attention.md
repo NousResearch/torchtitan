@@ -1,23 +1,23 @@
 # Trie Attention in TorchTitan
 
-Trie attention enables efficient training on tree-structured conversation data (e.g., MCTS rollouts, branching dialogues). Instead of duplicating shared prefixes across training samples, trie attention uses a custom attention mask that allows tokens to attend only to their ancestors in the tree.
+Trie attention is a method for training on tree-structured conversation data (e.g., MCTS rollouts, branching dialogues). Instead of duplicating shared prefixes across training samples, trie attention packs nodes once and uses a custom attention mask that allows tokens to attend only to their ancestors in the tree.
 
 ## Overview
 
 ### The Problem
 
-When training on tree-structured data like MCTS rollouts, the naive approach duplicates shared prefixes:
+When training on tree-structured data like MCTS rollouts, the standard approach duplicates shared prefixes:
 
 ```
-Tree:           Naive packing (wasteful):
+Tree:           Standard packing:
     root            Sample 1: root → A → C
-   /    \           Sample 2: root → A → D  (root, A duplicated!)
+   /    \           Sample 2: root → A → D  (root, A duplicated)
   A      B          Sample 3: root → B → E
- / \    / \         Sample 4: root → B → F  (root, B duplicated!)
+ / \    / \         Sample 4: root → B → F  (root, B duplicated)
 C   D  E   F
 ```
 
-### The Solution: Zero-Redundancy Packing
+### Zero-Redundancy Packing
 
 Trie attention packs all nodes once in DFS order and uses attention masking to enforce the tree structure:
 
@@ -142,15 +142,46 @@ python scripts/generate_trie_data.py \
     --max_branches 4
 ```
 
-## Benchmarking
+## Performance
 
-Compare trie attention vs standard causal:
+### Benchmark Results (NVIDIA B200, seq_len=2048, batch_size=1)
+
+| Model | Forward | Backward | Total | Trie Overhead |
+|-------|---------|----------|-------|---------------|
+| Qwen3 4B | 34.78 ms → 35.25 ms | 60.42 ms → 60.69 ms | 95.19 ms → 95.94 ms | +0.8% |
+| Qwen3 30B-A3B MoE | 121.47 ms → 105.27 ms | 189.50 ms → 190.16 ms | 310.97 ms → 295.43 ms | -5.0% |
+
+*Format: Causal → Trie*
+
+### Throughput
+
+The main benefit of trie attention is processing fewer tokens due to zero-redundancy packing.
+
+With tree-structured data having a 6.8x duplication ratio (measured on MCTS rollout data):
+
+| Model | Trie Overhead | Token Reduction | Effective Throughput |
+|-------|---------------|-----------------|----------------------|
+| Qwen3 4B | +0.8% | 6.8x | 6.75x |
+| Qwen3 30B-A3B MoE | -5.0% | 6.8x | 7.16x |
+
+On 30B-A3B, trie attention runs faster than causal at the same sequence length because FlexAttention skips fully-masked blocks where sibling branches don't attend to each other.
+
+### Notes
+
+- Token reduction: each unique token is processed once through attention and MLP
+- FlexAttention can skip masked blocks, reducing compute for sparse trie patterns
+- Actual throughput depends on tree structure (branching factor, depth)
+
+### Running Benchmarks
 
 ```bash
-python benchmarks/trie_attention_benchmark.py \
-    --batch_size 4 \
+# Simple single-GPU benchmark
+python benchmarks/trie_attention_simple_benchmark.py \
+    --model 4B \
     --seq_len 2048 \
-    --prefix_ratio 0.5
+    --batch_size 1
+
+# Available models: debugmodel, 0.6B, 1.7B, 4B, 8B, 30B-A3B
 ```
 
 ## Implementation Details
@@ -163,7 +194,8 @@ python benchmarks/trie_attention_benchmark.py \
 - `torchtitan/hf_datasets/preprocessed.py` - Dataloader handling for tin/tout/position_ids
 - `scripts/preprocess_trie_data.py` - Preprocessing with tree splitting
 - `scripts/generate_trie_data.py` - Synthetic data generation
-- `benchmarks/trie_attention_benchmark.py` - Performance benchmarking
+- `benchmarks/trie_attention_simple_benchmark.py` - Single-GPU performance benchmarking
+- `benchmarks/trie_attention_benchmark.py` - Original benchmark script
 
 ### Data Format
 
