@@ -39,6 +39,8 @@ cleanup() {
     echo "Force-killing any remaining vLLM processes..."
     pkill -9 -f "vllm.entrypoints.openai.api_server" 2>/dev/null || true
     pkill -9 -f "vllm serve" 2>/dev/null || true
+    pkill -9 -f "torchtitan.grpo.vllm_handling.vllm_runner" 2>/dev/null || true
+    lsof -ti:9001 | xargs kill -9 2>/dev/null || true
 
     if [ ! -z "$ENV_PID" ]; then
         echo "Stopping GSM8k environment (PID: $ENV_PID)"
@@ -80,7 +82,7 @@ sleep 35
 # Check if vLLM server is running
 VLLM_READY=true
 PORT=9001
-if ! curl -s "http://localhost:${PORT}/v1/models" > /dev/null; then
+if ! curl -s "http://localhost:${PORT}/health" > /dev/null; then
     echo "WARNING: vLLM server on port $PORT is not responding"
     VLLM_READY=false
 fi
@@ -88,6 +90,8 @@ fi
 if [ "$VLLM_READY" = false ]; then
     echo "WARNING: vLLM server may not be ready"
     echo "Check log at: /tmp/vllm_server_${PORT}.log"
+    echo "Last 30 lines of log:"
+    tail -30 /tmp/vllm_server_${PORT}.log 2>/dev/null || echo "Log file not found"
     echo "Continuing anyway..."
 else
     echo "vLLM server is ready"

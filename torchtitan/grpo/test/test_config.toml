@@ -14,7 +14,7 @@ profile_freq = 100
 log_freq = 1
 enable_tensorboard = false
 save_tb_folder = "tb"
-enable_wandb = false
+enable_wandb = true
 
 [model]
 name = "qwen3"
@@ -55,7 +55,7 @@ pipeline_parallel_degree = 1
 [grpo]
 sglang_tp = 1
 sglang_urls = ["localhost:9001"]
-sglang_slurm_num_nodes = 1
+sglang_slurm_num_nodes = 0
 sglang_port = 26756
 
 # GRPO hyperparameters
