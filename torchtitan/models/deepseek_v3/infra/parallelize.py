@@ -154,6 +154,8 @@ def parallelize_deepseekv3(
                 else None
             ),
             gradient_divide_factor=parallel_dims.fsdp_gradient_divide_factor,
+            bucket_cap_mb=job_config.parallelism.fsdp_bucket_cap_mb,
+            disable_prefetch=job_config.parallelism.fsdp_disable_prefetch,
         )
 
         if parallel_dims.dp_replicate_enabled:

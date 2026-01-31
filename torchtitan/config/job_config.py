@@ -457,19 +457,22 @@ class Parallelism:
     only `data_parallel_shard_degree` can be negative. 1 means disabled.
     """
 
-    fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default"
+    fsdp_reshard_after_forward: Literal["default", "always", "never"] | int = "default"
     """
     `reshard_after_forward` specifies the policy for applying `reshard_after_forward`
     within an FSDP setup. `reshard_after_forward` controls parameter behavior after forward,
     trading off memory and communication. See torch's `fully_shard` API for more documentation
     on `reshard_after_forward`.
 
-    The supported policies include "default", "always" and "never":
+    The supported policies include "default", "always", "never", or an integer:
 
     - "default" applies default resharding behavior, implementing "smart defaults" for known optimal
       scenarios.
     - "always" will enable `reshard_after_forward` for all forward passes.
     - "never" will disable `reshard_after_forward` for all forward passes.
+    - integer N: Partially reshard to groups of N GPUs after forward. Must be a factor of
+      the FSDP shard world size. Use N=8 for intra-node resharding (reduces memory while
+      keeping communication fast via NVLink). This trades memory for communication.
     """
 
     tensor_parallel_degree: int = 1
@@ -582,6 +585,18 @@ class Parallelism:
     - [partial dp -> ep] etp = tp
     - [partial dp + all tp -> ep] etp = 1
     Note that this is still an experimental feature.
+    """
+
+    fsdp_bucket_cap_mb: int | None = None
+    """
+    FSDP bucket size in MB for gradient reduction. None means use PyTorch default (25MB).
+    Smaller values (e.g., 20) can reduce peak memory at the cost of more communication overhead.
+    """
+
+    fsdp_disable_prefetch: bool = False
+    """
+    Whether to disable FSDP forward/backward prefetching. Disabling prefetch can reduce memory
+    at the cost of performance (less overlap of communication and computation).
     """
 
 
