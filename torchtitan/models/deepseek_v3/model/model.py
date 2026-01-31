@@ -521,7 +521,9 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         H = self.model_args.n_heads  # Number of attention heads
 
         # Use CP-aware block mask when Context Parallel is enabled
-        if cp_mesh is not None and create_cp_block_mask is not None:
+        if cp_mesh is not None:
+            if create_cp_block_mask is None:
+                raise RuntimeError("Cannot do context parallel without a PyTorch that supports `create_cp_block_mask`")
             return create_cp_block_mask(
                 mask_mod=combined_mask_mod,
                 B=B,
