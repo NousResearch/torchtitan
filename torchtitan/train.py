@@ -27,6 +27,7 @@ from torchtitan.config import ConfigManager, JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims, utils as dist_utils
 from torchtitan.protocols.model_converter import build_model_converters
 from torchtitan.tools import utils
+from torchtitan.tools.aggressive_memory_manager import create_aggressive_memory_manager
 from torchtitan.tools.cuda_memory_tracker import CUDAMemoryTracker
 from torchtitan.tools.detailed_memory_tracker import DetailedMemoryTracker
 from torchtitan.tools.logging import init_logger, logger
@@ -123,6 +124,24 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 job_config.training, "enable_detailed_memory_tracking", False
             ),
         )
+
+        # Initialize aggressive memory manager to reduce CUDA fragmentation
+        # This clears cache after backward/optimizer to prevent allocation retries
+        aggressive_mem_mode = getattr(
+            job_config.training, "aggressive_memory_mode", None
+        )
+        if aggressive_mem_mode:
+            self.aggressive_mem_manager = create_aggressive_memory_manager(
+                mode=aggressive_mem_mode,
+                verbose=getattr(
+                    job_config.training, "aggressive_memory_verbose", False
+                ),
+            )
+            logger.info(
+                f"Aggressive memory manager enabled (mode={aggressive_mem_mode})"
+            )
+        else:
+            self.aggressive_mem_manager = None
 
         # Set random seed, and maybe enable deterministic mode
         # (mainly for debugging, expect perf loss).
@@ -719,11 +738,37 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 del pred
                 loss.backward()
 
+        # Aggressive memory clearing after backward to reduce fragmentation
+        if self.aggressive_mem_manager is not None:
+            self.aggressive_mem_manager.post_backward()
+
         return loss
 
     def train_step(
         self, data_iterator: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
     ):
+        # AGGRESSIVE cache clearing before step for accurate memory measurements
+        # Without this, cached memory from previous steps inflates readings
+        if self.job_config.training.aggressive_memory_mode:
+            import gc
+
+            # 1. Synchronize all CUDA streams
+            torch.cuda.synchronize()
+            # 2. Python garbage collection (all generations for thorough cleanup)
+            gc.collect(0)
+            gc.collect(1)
+            gc.collect(2)
+            # 3. Clear CUDA cache (releases cached memory back to GPU)
+            torch.cuda.empty_cache()
+            # 4. Synchronize again to ensure cache clear completed
+            torch.cuda.synchronize()
+            # 5. Second round of clearing (catches any stragglers)
+            gc.collect(2)
+            torch.cuda.empty_cache()
+            # 6. Reset peak stats so we measure THIS step's peak only
+            torch.cuda.reset_peak_memory_stats()
+            self.metrics_processor.device_memory_monitor.reset_peak_stats()
+
         self.optimizers.zero_grad()
         # Save the current step learning rate for logging
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
@@ -780,6 +825,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self.optimizers.step()
             _optim_elapsed = _time.time() - _optim_start
 
+            # Aggressive memory clearing after optimizer to reduce fragmentation
+            if self.aggressive_mem_manager is not None:
+                self.aggressive_mem_manager.post_optimizer()
+
             # Log step end with timing
             if self.device.index == 0:
                 _ts = datetime.datetime.now().strftime("%H:%M:%S")
@@ -832,6 +881,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             grad_norm.item(),
             extra_metrics=extra_metrics,
         )
+
+        # Signal step complete to aggressive memory manager (triggers defrag check)
+        if self.aggressive_mem_manager is not None:
+            self.aggressive_mem_manager.step_complete()
 
     @record
     def train(self):

@@ -431,6 +431,26 @@ class Training:
     many temporary files.
     """
 
+    aggressive_memory_mode: Literal[
+        "minimal", "balanced", "aggressive", "maximum"
+    ] | None = None
+    """
+    Enable aggressive memory management to reduce CUDA memory fragmentation.
+    This clears CUDA cache and Python GC at strategic points (post-backward, post-optimizer).
+    Modes:
+    - None: Disabled (default)
+    - "minimal": Only clear on high fragmentation (<1% overhead)
+    - "balanced": Clear after backward and optimizer (2-3% overhead)
+    - "aggressive": Clear frequently with sync (5-8% overhead)
+    - "maximum": Clear after every operation (10-15% overhead, for debugging)
+    """
+
+    aggressive_memory_verbose: bool = False
+    """
+    Enable verbose logging for aggressive memory manager.
+    Logs detailed memory stats after each clear operation.
+    """
+
 
 @dataclass
 class Parallelism:
