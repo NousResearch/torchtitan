@@ -31,7 +31,10 @@ except ImportError:
     sys.exit(1)
 
 # Import from DeepEP tests
-sys.path.insert(0, "/home/phuc/workspace/moe/DeepEP/tests")
+DEEPEP_TESTS_PATH = os.environ.get(
+    "DEEPEP_TESTS_PATH", "/home/phuc/kimi_1t/deepep/tests"
+)
+sys.path.insert(0, DEEPEP_TESTS_PATH)
 from utils import bench, init_dist, inplace_unique
 
 
