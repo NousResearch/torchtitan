@@ -76,6 +76,7 @@ def maybe_enable_profiling(
             schedule=torch.profiler.schedule(wait=wait, warmup=warmup, active=active),
             on_trace_ready=trace_handler,
             record_shapes=True,
+            profile_memory=True,  # Track memory allocations per operation
             with_stack=profiling_config.with_stack,
             with_modules=profiling_config.with_modules,
         ) as torch_profiler:
