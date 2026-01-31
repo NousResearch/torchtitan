@@ -538,6 +538,8 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
         position_ids: torch.Tensor | None = None,
+        return_outputs: bool = False,  # For pipeline parallelism compatibility
+        **kwargs,  # Accept additional kwargs for PP compatibility
     ):
         """
         Forward pass for the Transformer model.
