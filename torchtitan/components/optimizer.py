@@ -106,7 +106,9 @@ def preinit_optimizer_states_bf16(optimizers_container: "OptimizersContainer") -
                     # Initialize state dict for this parameter
                     state = optimizer.state[p]
                     if len(state) == 0:  # Only initialize if not already initialized
-                        state["step"] = torch.tensor(0, dtype=torch.float32)
+                        state["step"] = torch.tensor(
+                            0, dtype=torch.float32, device=p.device
+                        )
                         # Allocate exp_avg and exp_avg_sq in SAME dtype as param for fused Adam compatibility
                         state["exp_avg"] = torch.zeros_like(
                             p, dtype=p.dtype, device=p.device
