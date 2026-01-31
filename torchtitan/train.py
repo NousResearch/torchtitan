@@ -31,6 +31,7 @@ from torchtitan.tools.aggressive_memory_manager import create_aggressive_memory_
 from torchtitan.tools.cuda_memory_tracker import CUDAMemoryTracker
 from torchtitan.tools.detailed_memory_tracker import DetailedMemoryTracker
 from torchtitan.tools.logging import init_logger, logger
+from torchtitan.tools.mesh_visualizer import log_mesh_visualization
 from torchtitan.tools.profiling import (
     maybe_enable_memory_snapshot,
     maybe_enable_profiling,
@@ -94,6 +95,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.parallel_dims = parallel_dims = self.init_distributed()
 
         world_mesh = parallel_dims.world_mesh
+
+        # Log mesh visualization for debugging distributed setup (rank 0 only)
+        log_mesh_visualization(world_mesh, parallel_dims)
+
         if parallel_dims.dp_enabled:
             dp_mesh = world_mesh["dp"]
             dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
