@@ -1,0 +1,55 @@
+# DEBUG: Test optimizer step with comprehensive monitoring
+# Purpose: Verify CPU memory exhaustion hypothesis for optimizer.step() hang
+#
+# Expected behavior:
+# - With skip_optimizer_step=true: ~800GB RAM used, runs fine
+# - With skip_optimizer_step=false: ~1.9TB RAM used, may hang/thrash
+#
+# Run with: sbatch debug_optimizer_memory.slurm
+
+[job]
+dump_folder = "./outputs/kimi_1t_debug_optimizer_memory"
+description = "Debug optimizer memory - verify CPU OOM hypothesis"
+
+[profiling]
+enable_profiling = false
+enable_memory_snapshot = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2"
+hf_assets_path = "./assets/hf/DeepSeek-V3-Base"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 512  # Small seq_len to reduce GPU memory, focus on CPU memory
+steps = 10     # Run 10 steps to test fast_init bf16 feature
+
+# KEY: Test WITH optimizer step to trigger memory allocation
+enable_cpu_offload = true
+skip_optimizer_step = false  # <-- THIS IS WHAT WE'RE TESTING
+
+# Memory tracking
+enable_detailed_memory_tracking = false  # Don't add overhead
+clear_cache_between_steps = false
+
+[parallelism]
+data_parallel_shard_degree = -1
+expert_parallel_degree = 64  # Full EP to match production config
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = false  # Disable to simplify debugging

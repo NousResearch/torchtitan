@@ -1,0 +1,49 @@
+# exp1be13 with bf16 optimizer states + page cache drop before training
+# Testing if dropping mmap'd model cache before training prevents OOM
+[job]
+dump_folder = "./outputs/exp1be13_bf16_drop_cache"
+description = "exp1be13_bf16_drop_cache"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2"
+hf_assets_path = "./assets/hf/DeepSeek-V3-Base"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+state_dtype = "bfloat16"
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 4
+seq_len = 32768
+steps = 10
+dataset = "c4_test"
+enable_cpu_offload = true
+clear_cache_between_steps = true
+skip_optimizer_step = false
+drop_page_cache_before_training = true  # KEY: Drop mmap cache before training
+
+[parallelism]
+data_parallel_shard_degree = -1
+expert_parallel_degree = 64
+context_parallel_degree = 8
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true

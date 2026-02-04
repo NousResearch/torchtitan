@@ -1,0 +1,58 @@
+# Test 1B model with CP=2 but WITHOUT cpu_offload
+# To check if cpu_offload is what prevents the crash
+
+[job]
+dump_folder = "./outputs/debug_cp_nan/1b_cp2_no_offload"
+description = "Test 1B CP=2 WITHOUT cpu_offload"
+print_config = false
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "debugmodel_1b_flex_attn"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 4096
+max_norm = 1.0
+steps = 5
+dataset = "c4_test"
+dtype = "bfloat16"
+enable_cpu_offload = false  # NO cpu offload
+clear_cache_between_steps = true
+skip_optimizer_step = false  # Enable optimizer step
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 2
+expert_parallel_degree = 1
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "full"
+cpu_offload = false
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true

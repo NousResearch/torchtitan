@@ -1,0 +1,55 @@
+# PROFILING: EP=64, 16 nodes, CPU offload + cache clear
+# Purpose: Deep profiling to identify bottleneck operations for DP scaling
+# Configuration: 16 nodes, 128 GPUs, EP=64, CP=8, seq=32768, batch=6 (same as exp2a0)
+
+[job]
+dump_folder = "./outputs/kimi_1t_profiling_ep64_16n"
+description = "Deep Profiling - 16 nodes DP scaling bottleneck analysis"
+
+[profiling]
+enable_profiling = true
+profile_freq = 5  # Must be >= warmup + active
+profiler_warmup = 1
+profiler_active = 2
+with_stack = true
+with_modules = true
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2"
+hf_assets_path = "/home/phuc/kimi_1t/torchtitan/assets/hf/DeepSeek-V3-Base"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 6
+seq_len = 32768
+steps = 5  # Enough steps for profiling warmup + active
+dataset = "c4_test"
+enable_cpu_offload = true
+enable_detailed_memory_tracking = false
+clear_cache_between_steps = true
+skip_optimizer_step = true
+
+[parallelism]
+data_parallel_shard_degree = -1
+expert_parallel_degree = 64
+context_parallel_degree = 8
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true

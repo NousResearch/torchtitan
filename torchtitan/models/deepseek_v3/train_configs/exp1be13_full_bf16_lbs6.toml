@@ -1,0 +1,57 @@
+# exp1be13_8n_EP64_CP8_LBS6_ctx32k with FULL BF16 fixes
+# Based on original exp1be13 config, with:
+#   - [training].dtype = "bfloat16" (store params in bf16)
+#   - [optimizer].state_dtype = "bfloat16" (bf16 optimizer states)
+#   - [comm] long timeouts
+#   - skip_optimizer_step = false (actually run optimizer)
+[job]
+dump_folder = "./outputs/exp1b/exp1be13_full_bf16_lbs6"
+description = "exp1be13_full_bf16_lbs6"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2"
+hf_assets_path = "./assets/hf/DeepSeek-V3-Base"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+state_dtype = "bfloat16"
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+dtype = "bfloat16"
+local_batch_size = 6
+seq_len = 32768
+steps = 5
+dataset = "c4_test"
+enable_cpu_offload = true
+clear_cache_between_steps = true
+skip_optimizer_step = false
+
+[parallelism]
+data_parallel_shard_degree = -1
+expert_parallel_degree = 64
+context_parallel_degree = 8
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true
+
+[comm]
+init_timeout_seconds = 1800
+train_timeout_seconds = 1800

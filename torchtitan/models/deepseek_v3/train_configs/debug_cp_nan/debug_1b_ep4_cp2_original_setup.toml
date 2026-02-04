@@ -1,0 +1,58 @@
+# Config to reproduce NaN - matches original exp1aa0 setup as closely as possible
+# Original: 8 nodes, EP=64, CP=2, seq_len=16384, skip_optimizer_step=true
+# This: 8 GPUs, EP=4, CP=2, seq_len=16384, skip_optimizer_step=true
+
+[job]
+dump_folder = "./outputs/debug_cp_nan/1b_ep4_cp2_original"
+description = "Reproduce NaN: EP=4 CP=2 (matches original setup)"
+print_config = false
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "debugmodel_1b_flex_attn"  # 1B model with FlexAttention, 8 experts
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4  # Same as original
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 16384  # Same as original (16k)
+max_norm = 1.0
+steps = 5
+dataset = "c4_test"
+dtype = "bfloat16"
+enable_cpu_offload = true  # Same as original
+clear_cache_between_steps = true  # Same as original
+skip_optimizer_step = true  # Same as original
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1  # Auto FSDP (should be 4 with 8 GPUs and CP=2)
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 2  # Same as original
+expert_parallel_degree = 4  # EP=4 (model has 8 experts, so EP=4 works)
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "full"  # Same as original
+
+[compile]
+enable = false  # Same as original
+
+[debug]
+moe_force_load_balance = true  # Same as original

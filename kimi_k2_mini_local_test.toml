@@ -1,0 +1,71 @@
+# Kimi K2 Mini - Local 8-GPU test version
+#
+# Based on: kimi_k2_12n_ep96_cp16_32k_ctx_lbs11.toml
+# Modified for single-node testing with reduced memory footprint
+#
+# Changes from production config:
+#   - Model: debugmodel_1b (instead of kimi_k2)
+#   - Seq Length: 128 (instead of 32768)
+#   - EP: 1 (instead of 96) - disabled for 8 GPUs
+#   - CP: 1 (instead of 16) - disabled for simplicity
+#   - Local Batch Size: 1 (instead of 11)
+#   - CPU Offload: false (not needed for small model)
+#   - Compile: false (faster iteration)
+#
+
+[job]
+dump_folder = "./outputs/kimi_k2_mini_local_test"
+description = "Kimi K2 Mini - Local 8-GPU test"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "debugmodel_1b"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+state_dtype = "bfloat16"
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+dtype = "bfloat16"
+local_batch_size = 1
+seq_len = 128
+steps = 5
+dataset = "c4"
+enable_cpu_offload = false
+clear_cache_between_steps = true
+# Same aggressive memory management as production
+aggressive_memory_mode = "maximum"
+aggressive_memory_verbose = true
+enable_detailed_memory_tracking = true
+
+[parallelism]
+data_parallel_shard_degree = -1
+# EP=8 to test expert parallelism (production uses EP=96)
+expert_parallel_degree = 8
+# CP=8 to test context parallelism (production uses CP=16)
+context_parallel_degree = 8
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true
+
+[comm]
+init_timeout_seconds = 300
+train_timeout_seconds = 300

@@ -1,0 +1,58 @@
+# Config to reproduce NaN with CP=2 + FlexAttention
+# Mirrors original exp1aa0 setup but with smaller model
+
+[job]
+dump_folder = "./outputs/debug_cp_nan/1b_cp2_flex_attn_original"
+description = "Reproduce CP=2 NaN with 1B FlexAttention model (original setup)"
+print_config = false
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "debugmodel_1b_flex_attn"  # 1B model with FlexAttention
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 4096  # Longer sequence like original
+max_norm = 1.0
+steps = 5
+dataset = "c4_test"
+dtype = "bfloat16"
+enable_cpu_offload = true  # Same as original
+clear_cache_between_steps = true  # Same as original
+skip_optimizer_step = true  # Same as original - no weight updates
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1  # FSDP
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 2  # CP=2
+expert_parallel_degree = 1
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "full"  # Same as original
+cpu_offload = false
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true

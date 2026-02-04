@@ -1,0 +1,57 @@
+# Minimal test: FlexAttention + CP=2, no FSDP, no EP
+# This tests pure attention + CP interaction
+
+[job]
+dump_folder = "./outputs/debug_cp_nan/flex_attn_cp2_minimal"
+description = "Minimal FlexAttention + CP=2 test (no FSDP, no EP)"
+print_config = false
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+
+[model]
+name = "deepseek_v3"
+flavor = "debugmodel_flex_attn_causal"  # Simple causal mask
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-4
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 256
+max_norm = 1.0
+steps = 3
+dataset = "c4_test"
+dtype = "bfloat16"
+enable_cpu_offload = false
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = 1  # No FSDP sharding
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 2  # CP=2
+expert_parallel_degree = 1   # No EP
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "none"  # No activation checkpointing
+cpu_offload = false
+
+[compile]
+enable = false
+
+[debug]
+moe_force_load_balance = true

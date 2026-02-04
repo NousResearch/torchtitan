@@ -1,0 +1,30 @@
+{
+  "timestamp": "20260123_071026",
+  "hardware": "B200",
+  "model": "Qwen3-30B-A3B (dim=2048, 128 experts, top-k=8)",
+  "ep_size": 64,
+  "optimal_config": {
+    "dispatch": [
+      8,
+      512,
+      8,
+      128
+    ],
+    "combine": [
+      2,
+      512,
+      8,
+      128
+    ]
+  },
+  "improvement": {
+    "dispatch": "19.0%",
+    "combine": "8.8%"
+  },
+  "best_performance": {
+    "dispatch_us": 44948.0,
+    "combine_us": 45607.0
+  }
+}9999
+  }
+}

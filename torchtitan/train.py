@@ -99,6 +99,81 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # Log mesh visualization for debugging distributed setup (rank 0 only)
         log_mesh_visualization(world_mesh, parallel_dims)
 
+        # LOG ALL PROCESS GROUP RANKS FOR DEBUGGING - FROM ALL RANKS
+        import torch.distributed as dist
+
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+
+        # Log EP group membership from ALL ranks
+        if parallel_dims.ep_enabled:
+            try:
+                ep_mesh = world_mesh["ep"]
+                ep_group = ep_mesh.get_group()
+                my_ep_ranks = dist.get_process_group_ranks(ep_group)
+                my_ep_group_rank = ep_mesh.get_local_rank()
+
+                # Each rank reports its EP group membership
+                logger.info(
+                    f"[RANK {rank}] EP group: size={len(my_ep_ranks)}, my_group_rank={my_ep_group_rank}, global_ranks={my_ep_ranks[:20]}...{my_ep_ranks[-10:]}"
+                )
+
+            except Exception as e:
+                logger.warning(f"[RANK {rank}] Could not log EP group: {e}")
+
+        dist.barrier()
+
+        # Rank 0 logs summary
+        if rank == 0:
+            logger.info("=" * 100)
+            logger.info("ALL PROCESS GROUP RANK ASSIGNMENTS (REFERENCE)")
+            logger.info("=" * 100)
+
+            # Log EP group if enabled
+            if parallel_dims.ep_enabled:
+                try:
+                    ep_mesh = world_mesh["ep"]
+                    ep_group = ep_mesh.get_group()
+                    ep_ranks = dist.get_process_group_ranks(ep_group)
+                    is_contiguous = ep_ranks == list(range(len(ep_ranks)))
+
+                    # Calculate cross-node hops
+                    gpus_per_node = 8
+                    cross_node_hops = 0
+                    if len(ep_ranks) > 1:
+                        for i in range(len(ep_ranks)):
+                            r1, r2 = ep_ranks[i], ep_ranks[(i + 1) % len(ep_ranks)]
+                            if (r1 // gpus_per_node) != (r2 // gpus_per_node):
+                                cross_node_hops += 1
+
+                    logger.info(f"EP Process Group (from rank 0's view):")
+                    logger.info(f"  Size: {len(ep_ranks)}")
+                    logger.info(f"  ALL ranks: {ep_ranks}")
+                    logger.info(f"  Contiguous: {is_contiguous}")
+                    if len(ep_ranks) > 1:
+                        logger.info(
+                            f"  Cross-node hops: {cross_node_hops}/{len(ep_ranks)} ({cross_node_hops/len(ep_ranks)*100:.1f}%)"
+                        )
+                    logger.info("")
+                except Exception as e:
+                    logger.warning(f"Could not log EP ranks: {e}")
+
+            # Log other common meshes
+            for mesh_name in ["dp", "dp_cp", "tp", "pp"]:
+                try:
+                    if mesh_name in world_mesh.mesh_dim_names:
+                        mesh = world_mesh[mesh_name]
+                        group = mesh.get_group()
+                        ranks = dist.get_process_group_ranks(group)
+                        logger.info(f"{mesh_name.upper()} Process Group:")
+                        logger.info(f"  Size: {len(ranks)}")
+                        logger.info(f"  ALL ranks: {ranks}")
+                        logger.info("")
+                except Exception as e:
+                    pass
+
+            logger.info("=" * 100)
+
         if parallel_dims.dp_enabled:
             dp_mesh = world_mesh["dp"]
             dp_degree, dp_rank = dp_mesh.size(), dp_mesh.get_local_rank()
