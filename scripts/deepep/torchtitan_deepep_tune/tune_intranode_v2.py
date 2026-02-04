@@ -40,7 +40,7 @@ def init_dist(local_rank: int, num_local_ranks: int):
     os.environ["RANK"] = str(local_rank)
     os.environ["WORLD_SIZE"] = str(num_local_ranks)
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = str(29500 + local_rank)
+    os.environ["MASTER_PORT"] = "29500"
 
     dist.init_process_group(backend="nccl", rank=local_rank, world_size=num_local_ranks)
     torch.cuda.set_device(local_rank)

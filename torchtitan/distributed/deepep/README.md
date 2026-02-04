@@ -214,6 +214,49 @@ The default DeepEP configuration is optimized for **B200 GPUs with EP=8**. If yo
 
 **How to tune**: See [scripts/deepep/torchtitan_deepep_tune/README.md](../../../scripts/deepep/torchtitan_deepep_tune/README.md)
 
+#### Tuned Configurations
+
+Pre-tuned configurations for various hardware setups:
+
+| Hardware | EP Size | Model | Dispatch Config | Combine Config | Dispatch BW | Combine BW | Notes |
+|----------|---------|-------|-----------------|----------------|-------------|------------|-------|
+| **B200** | 8 | Qwen3-30B-A3B | `(24, 8, 256)` | `(24, 8, 256)` | ~153 GB/s | ~158 GB/s | Default config |
+| **H100** | 2 | Qwen3-30B-A3B | `(32, 512, 8, 128)` | `(16, 512, 8, 128)` | 170.65 GB/s | 203.84 GB/s | Largest chunks for 2 GPUs |
+| **H100** | 4 | Qwen3-30B-A3B | `(16, 512, 8, 128)` | `(16, 512, 8, 128)` | 237.11 GB/s | 294.31 GB/s | Single-node intranode |
+| **H100** | 8 | Qwen3-30B-A3B | `(12, 512, 8, 128)` | `(15, 512, 8, 128)` | 303.06 GB/s | 290.29 GB/s | **Recommended for H100** |
+
+**Configuration format**: `(num_sms, nvl_chunk, nvl_buffer, rdma_chunk, rdma_buffer)`
+
+**Model parameters used for tuning**: `hidden_dim=2048, num_experts=128, num_topk=8, num_tokens=4096`
+
+**To apply tuned configs**, edit `torchtitan/distributed/deepep/utils.py`:
+
+```python
+@dataclass
+class DeepEPTokenDispatcher:
+    turbo_deepep_backend: str = "deepep"
+    turbo_deepep_num_cus: int = 24
+    turbo_sync_free_moe: bool = False
+    turbo_deepep_num_worst_tokens: int = 0
+    # For H100 8-GPU configuration (recommended):
+    turbo_deepep_dispatch_tuned_config: Optional[tuple] = (12, 512, 8, 128)
+    turbo_deepep_combine_tuned_config: Optional[tuple] = (15, 512, 8, 128)
+    # For H100 4-GPU configuration:
+    # turbo_deepep_dispatch_tuned_config: Optional[tuple] = (16, 512, 8, 128)
+    # turbo_deepep_combine_tuned_config: Optional[tuple] = (16, 512, 8, 128)
+    # For H100 2-GPU configuration:
+    # turbo_deepep_dispatch_tuned_config: Optional[tuple] = (32, 512, 8, 128)
+    # turbo_deepep_combine_tuned_config: Optional[tuple] = (16, 512, 8, 128)
+    use_turbo_grouped_mlp: bool = False
+```
+
+**Key findings for H100**:
+- Larger NVLink buffer (512 vs 256) significantly improves performance across all EP sizes
+- Dispatch bandwidth scales with GPU count: 170 GB/s (EP=2) → 237 GB/s (EP=4) → 303 GB/s (EP=8)
+- Optimal chunk sizes inversely correlate with EP size: 32 (EP=2), 16 (EP=4), 12-15 (EP=8)
+- Fewer GPUs = larger optimal chunks due to less contention
+- Buffer size 512 is optimal for all H100 configurations
+
 ---
 
 ## ⚡ Kernel Optimizations
