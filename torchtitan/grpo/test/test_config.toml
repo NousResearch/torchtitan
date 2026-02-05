@@ -17,9 +17,9 @@ save_tb_folder = "tb"
 enable_wandb = true
 
 [model]
-name = "qwen3"
-flavor = "1.7B"
-tokenizer_path = "Qwen/Qwen3-1.7B"
+name = "qwen2"
+flavor = "7B"
+tokenizer_path = "Qwen/Qwen2.5-7B"
 
 [optimizer]
 name = "AdamW"
@@ -54,8 +54,8 @@ pipeline_parallel_degree = 1
 
 [grpo]
 sglang_tp = 1
-sglang_urls = ["localhost:9001"]
-sglang_slurm_num_nodes = 0
+sglang_urls = []
+sglang_slurm_num_nodes = 1
 sglang_port = 26756
 
 # GRPO hyperparameters
@@ -85,7 +85,7 @@ ptx_scale_by_tokens = false
 enable = true
 folder = "checkpoints"
 # Update this path to point to your Qwen3-1.7B checkpoint
-initial_load_path = "/home/shared/torchtitan-conversions/qwen3_1.7b"
+initial_load_path = "/home/shared/torchtitan-conversions/qwen_2-5_7b"
 initial_load_legacy = true
 interval = 50
 export_dtype = "float32"

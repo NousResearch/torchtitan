@@ -20,7 +20,7 @@ echo "SLURM nodes: $SLURM_JOB_NODELIST"
 
 # Basic config stuff - pointing to test setup
 export CONFIG_FILE="$(pwd)/torchtitan/grpo/test/test_config.toml"
-export MODEL_NAME="/home/nightwing/Projects/torchtitan/tmp/qwen3-1.7b-hf"
+export MODEL_NAME="/home/nightwing/Projects/torchtitan/tmp/qwen2.5-7b"
 export PYTHON_SCRIPT="$(pwd)/torchtitan/grpo/test/gsm8k_server.py"
 export PYTHON_ARGS=""
 export TRAINING_ARGS=""
@@ -38,8 +38,8 @@ export NCCL_IGNORE_CPU_AFFINITY=1
 
 # Define environment paths
 export TRAIN_PATH="$(pwd)"
-export TRAIN_ENV="${TRAIN_PATH}/.venv"
-export VLLM_ENV="/home/nightwing/envs/vllm/.venv"
+export TRAIN_ENV="/home/nightwing/miniconda3/envs/torchtitan/"
+export VLLM_ENV="/home/nightwing/miniconda3/envs/vllm/"
 export API_ENV="${TRAIN_ENV}"
 
 # Get head node info

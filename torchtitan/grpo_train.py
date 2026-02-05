@@ -522,16 +522,17 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 time.sleep(1)
             with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "r") as f:
                 self.weight_dtypes = json.load(f)
-            logger.debug(
-                f"Setting up SGlang process groups, dp_shard_degree: {self.dp_shard_degree}, tp_degree: {self.tp_degree}"
-            )
-            hostname = "localhost" if local_rank < 8 else get_hostname_url()
-            logger.debug(
-                f"total: {self.total_group_size}, rank: {self.dp_shard_rank * self.tp_degree + self.tp_rank}, pg_server: {hostname}"
-            )
-            self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
-                hostname, job_config.grpo.sglang_port, self.total_group_size, local_rank
-            )
+        # All ranks must join the process group (collective operation)
+        logger.debug(
+            f"Setting up SGlang process groups, dp_shard_degree: {self.dp_shard_degree}, tp_degree: {self.tp_degree}"
+        )
+        hostname = get_hostname_url()
+        logger.debug(
+            f"total: {self.total_group_size}, rank: {self.dp_shard_rank * self.tp_degree + self.tp_rank}, pg_server: {hostname}"
+        )
+        self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
+            hostname, job_config.grpo.sglang_port, self.total_group_size, local_rank
+        )
         if job_config.grpo.ptx_mixin_batchsize > 0:
             self.dataloader = self.train_spec.build_dataloader_fn(
                 dp_world_size=dp_degree,

@@ -435,8 +435,7 @@ class OnlineDataHandler:
 
                     flag = flag + 1
                     torch.distributed.broadcast(flag, 0)
-                    if dp_replicate_rank == 0:
-                        send_wait(sglang_nccl_group, device)
+                    send_wait(sglang_nccl_group, device)
                     max_token_len = torch.tensor(max_token_len).to(device)
                     torch.distributed.all_reduce(max_token_len)
                     # back to int
@@ -456,13 +455,11 @@ class OnlineDataHandler:
                 else:
                     logger.debug("No batch yet, retrying...")
                     torch.distributed.broadcast(flag, 0)
-                    if dp_replicate_rank == 0:
-                        send_wait(sglang_nccl_group, device)
+                    send_wait(sglang_nccl_group, device)
             else:
                 logger.debug("Waiting for batch from server...")
                 torch.distributed.broadcast(flag, 0)
-                if dp_replicate_rank == 0:
-                    send_wait(sglang_nccl_group, device)
+                send_wait(sglang_nccl_group, device)
                 if flag.item() > 0:
                     # Got the batch
                     max_token_len = torch.tensor(0).to(device)

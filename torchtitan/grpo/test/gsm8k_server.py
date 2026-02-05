@@ -48,6 +48,10 @@ class GSM8kEnv(BaseEnv):
         testing=False,
     ):
         super().__init__(config, server_configs, slurm, testing)
+        print(f"DEBUG: GSM8kEnv initialized with {len(self.server.servers)} servers")
+        for i, server in enumerate(self.server.servers):
+            if hasattr(server, 'config'):
+                print(f"DEBUG: Server {i}: {server.config.base_url}")
         self.percent_correct_buffer = list()
         self.eval_metrics = list()
         # Add tracking for wandb visualizations
@@ -57,7 +61,7 @@ class GSM8kEnv(BaseEnv):
     @classmethod
     def config_init(cls) -> Tuple[BaseEnvConfig, List[APIServerConfig]]:
         env_config = BaseEnvConfig(
-            tokenizer_name="Qwen/Qwen3-1.7B",
+            tokenizer_name="Qwen/Qwen2.5-7B",
             group_size=8,
             use_wandb=True,
             rollout_server_url="http://localhost:8000",
@@ -69,7 +73,7 @@ class GSM8kEnv(BaseEnv):
         )
         server_configs = [
             APIServerConfig(
-                model_name="Qwen/Qwen3-1.7B",
+                model_name="Qwen/Qwen2.5-7B",
                 base_url="http://localhost:9001/v1",
                 api_key="x",
                 num_requests_for_eval=256,
@@ -227,22 +231,33 @@ class GSM8kEnv(BaseEnv):
     async def collect_trajectories(
         self, item: GSM8kRow
     ) -> Tuple[ScoredDataGroup, list[Item]]:
-        user_message = {"role": "user", "content": item["question"]}
-        gold_answer = (
-            "\\boxed{" + item["answer"].split("#")[-1].strip().replace(",", "") + "}"
-        )
-
-        async with self.server.managed_server(tokenizer=self.tokenizer) as managed:
-
-            chat_completions = await managed.chat_completion(
-                messages=[{"role": "system", "content": system_prompt}, user_message],
-                n=self.config.group_size,
-                max_tokens=self.config.max_token_length,
-                temperature=1.0,
+        print(f"DEBUG: collect_trajectories() called for question: {item['question'][:80]}...")
+        try:
+            user_message = {"role": "user", "content": item["question"]}
+            gold_answer = (
+                "\\boxed{" + item["answer"].split("#")[-1].strip().replace(",", "") + "}"
             )
 
-            state = managed.get_state()
-            nodes = state["nodes"]
+            print(f"DEBUG: About to call managed_server...")
+            async with self.server.managed_server(tokenizer=self.tokenizer) as managed:
+                print(f"DEBUG: Inside managed_server context, about to call chat_completion...")
+
+                chat_completions = await managed.chat_completion(
+                    messages=[{"role": "system", "content": system_prompt}, user_message],
+                    n=self.config.group_size,
+                    max_tokens=self.config.max_token_length,
+                    temperature=1.0,
+                )
+                print(f"DEBUG: chat_completion returned, got {len(chat_completions.choices)} completions")
+
+                state = managed.get_state()
+                nodes = state["nodes"]
+                print(f"DEBUG: Got state with {len(nodes)} nodes")
+        except Exception as e:
+            print(f"ERROR in collect_trajectories: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, []
 
         to_score = list()
         to_backlog = list()
@@ -268,6 +283,7 @@ class GSM8kEnv(BaseEnv):
     async def score(
         self, rollout_group_data
     ) -> Union[Optional[ScoredDataGroup], List[Optional[ScoredDataGroup]]]:
+        print(f"DEBUG: score() called with {len(rollout_group_data)} rollouts")
         scores = ScoredDataGroup()
         scores["tokens"] = list()
         scores["masks"] = list()
@@ -278,6 +294,7 @@ class GSM8kEnv(BaseEnv):
             extraction_mode="first_match",
             extraction_config=[LatexExtractionConfig()],
         )
+        print(f"DEBUG: Gold answer parsed: {len(gold_parsed)} elements")
         if len(gold_parsed) != 0:
             # We require the answer to be provided in correct latex (no malformed operators)
             random.shuffle(rollout_group_data)
@@ -310,7 +327,9 @@ class GSM8kEnv(BaseEnv):
                 logprobs = item["logprobs"]
 
                 # remove obviously bad examples
-                if len([1 for i in masks if i != -100]) < 10:
+                num_valid_tokens = len([1 for i in masks if i != -100])
+                if num_valid_tokens < 5:  # Lowered from 10 to 5 to be less strict
+                    print(f"Filtering out sample with only {num_valid_tokens} valid tokens")
                     continue
                 scores["tokens"].append(tokens)
                 scores["masks"].append(masks)
@@ -319,6 +338,11 @@ class GSM8kEnv(BaseEnv):
 
                 if len(scores["tokens"]) >= self.config.group_size:
                     break
+
+            # Check if we have enough valid samples after filtering
+            if len(scores["tokens"]) < self.config.group_size:
+                print(f"Warning: Only got {len(scores['tokens'])} samples after filtering, need {self.config.group_size}")
+                return None
 
             for score in scores["scores"]:
                 self.percent_correct_buffer.append(max(score, 0))
@@ -352,11 +376,14 @@ class GSM8kEnv(BaseEnv):
                         percentage_of_range = min(percentage_of_range, 1.0)
                         # Apply linear penalty scaling from 1.0 down to 0.0
                         scores["scores"].append(1.0 - percentage_of_range)
-            if all([scores["scores"][0] == score for score in scores["scores"]]):
-                return None  # If all the same, we return None
+            # allow training even when all scores are identical
+            # if all([scores["scores"][0] == score for score in scores["scores"]]):
+            #     return None  # If all the same, we return None
+            print(f"DEBUG: Returning scores with {len(scores['tokens'])} samples, scores: {scores['scores']}")
             return scores
         else:
             # If the gold solution is not parseable, we return None
+            print("DEBUG: Gold solution not parseable, returning None")
             return None
 
     async def get_next_item(self) -> GSM8kRow:
