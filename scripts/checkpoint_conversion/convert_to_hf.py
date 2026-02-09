@@ -31,7 +31,6 @@ def load_model(train_spec, model_args, peft_config: PEFT):
     model = ModelWrapper(model)
     return model
 
-
 # Config files to copy from source HF model
 HF_CONFIG_FILES = [
     "config.json",

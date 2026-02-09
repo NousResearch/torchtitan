@@ -37,7 +37,6 @@ def convert_from_hf(
     # initialize model to allocate memory for state dict
     train_spec = train_spec_module.get_train_spec(model_name)
     model_args = train_spec.model_args[model_flavor]
-
     sd_adapter = train_spec.state_dict_adapter(model_args, None)
     assert (
         sd_adapter is not None

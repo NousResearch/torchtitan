@@ -14,23 +14,18 @@ from torch.distributed.tensor import DTensor
 
 from torchtitan.components.peft.lora import lora_or_linear
 from torchtitan.config.job_config import PEFT
-from torchtitan.distributed.deepep.fused_activation import fused_silu_gate_prob
 from torchtitan.tools.logging import logger
 from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 # Lazy import DeepEP - only required when use_deepep=True in config
 try:
+    from torchtitan.distributed.deepep.fused_activation import fused_silu_gate_prob
     from torchtitan.distributed.deepep.utils import DeepEPTokenDispatcher
-except ImportError:
-    DeepEPTokenDispatcher = None
-    logger.warning(
-        "DeepEP is not installed, using default token dispatcher. "
-        "Please install DeepEP to use DeepEP token dispatcher."
-    )
 
     DEEPEP_AVAILABLE = True
 except ImportError:
     DEEPEP_AVAILABLE = False
+    fused_silu_gate_prob = None
     DeepEPTokenDispatcher = None
 
 
@@ -733,14 +728,22 @@ class TokenChoiceTopKRouter(nn.Module):
         return top_scores, selected_experts_indices, num_tokens_per_expert
 
     def init_weights(self, init_std: float, n_layers: int):
-        temp_weight = torch.empty_like(self.gate.weight)
-        nn.init.normal_(temp_weight, mean=0.0, std=1.0)
+        # NOTE: Must use in-place operations here. When FSDP wraps parameters as
+        # DTensor, direct .data assignment (e.g., self.gate.weight.data = x) is
+        # silently ignored, leaving weights uninitialized. This causes NaN loss
+        # when CPU offload is enabled with 3+ GPUs.
+        nn.init.normal_(self.gate.weight, mean=0.0, std=1.0)
 
-        row_norms = torch.norm(temp_weight, dim=1, keepdim=True)  # noqa: TOR101
-        temp_weight = temp_weight / row_norms.clamp(min=1e-6)  # avoid divide by 0
+        # Normalize rows in-place
+        with torch.no_grad():
+            row_norms = torch.norm(  # noqa: TOR101
+                self.gate.weight, dim=1, keepdim=True
+            )
+            self.gate.weight.div_(row_norms.clamp(min=1e-6))
 
-        std = moe_init_std(self.gate.weight.shape[1], n_layers)
-        self.gate.weight.data = temp_weight * std
+            # Scale by initialization std
+            std = moe_init_std(self.gate.weight.shape[1], n_layers)
+            self.gate.weight.mul_(std)
 
 
 # NOTE: the reason we make this a stateless module is to support
