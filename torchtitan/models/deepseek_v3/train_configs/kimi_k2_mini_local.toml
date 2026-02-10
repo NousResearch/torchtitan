@@ -1,0 +1,79 @@
+# Mini Kimi K2 Config for Local Testing
+# This config uses a smaller version of Kimi K2 for quick local testing
+# Designed to run on 1-8 H100 GPUs
+
+[job]
+dump_folder = "./outputs/kimi_k2_mini_local"
+description = "Mini Kimi K2 - Local Testing"
+print_config = true
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+
+[metrics]
+log_freq = 1
+disable_color_printing = false
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = false
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2_mini"
+# You may need to update this path to point to your tokenizer
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2e-4
+eps = 1e-8
+state_dtype = "bfloat16"
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+decay_type = "linear"
+min_lr_factor = 0.0
+
+[training]
+dtype = "bfloat16"
+local_batch_size = 2
+seq_len = 2048
+max_norm = 1.0
+steps = 10
+dataset = "c4_test"
+enable_cpu_offload = false
+clear_cache_between_steps = false
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+pipeline_parallel_degree = 1
+context_parallel_degree = 1
+expert_parallel_degree = 8
+expert_tensor_parallel_degree = 1
+
+[checkpoint]
+enable = false
+folder = "checkpoint"
+interval = 10
+
+[activation_checkpoint]
+mode = "selective"
+selective_ac_option = "op"
+
+[compile]
+enable = false
+components = ["loss"]
+
+[debug]
+moe_force_load_balance = false
+
+[comm]
+init_timeout_seconds = 600
+train_timeout_seconds = 600

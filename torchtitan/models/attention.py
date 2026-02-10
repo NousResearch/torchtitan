@@ -127,10 +127,9 @@ class FlexAttentionWrapper(torch.nn.Module):
 
     def forward(
         self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-        *,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
         score_mod: _score_mod_signature | None = None,
         block_mask: BlockMask | None = None,
         scale: float | None = None,
@@ -143,10 +142,12 @@ class FlexAttentionWrapper(torch.nn.Module):
         #    `FlexAttentionWrapper._compiled_flex_attn` is correct.
         # 3. Used `return_lse` instead of `return_aux` because of easier TP module notation
         #    to convert `lse` to be DTensor.
+        # 4. CP compatibility: Parameter names must be query/key/value (not q/k/v)
+        #    and args after value must allow positional passing (no '*,').
         return FlexAttentionWrapper._compiled_flex_attn(
-            q,
-            k,
-            v,
+            query,
+            key,
+            value,
             block_mask=block_mask,
             scale=scale,
             return_lse=return_lse,
