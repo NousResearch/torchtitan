@@ -13,9 +13,26 @@ from torch.distributed.tensor.parallel import ParallelStyle
 from torch.distributed.tensor.placement_types import Placement
 
 from torchtitan.distributed.parallel_dims import ParallelDims
+from torchtitan.distributed.varlen_context_parallel import (
+    prepare_cu_seqlens_for_cp,
+    varlen_attention_with_cp,
+    VarlenContextParallelAttention,
+    reset_varlen_cp_timing_stats,
+    get_varlen_cp_timing_summary,
+    print_varlen_cp_timing_stats,
+)
 
 
-__all__ = ["ParallelDims", "NoParallel"]
+__all__ = [
+    "ParallelDims",
+    "NoParallel",
+    "prepare_cu_seqlens_for_cp",
+    "varlen_attention_with_cp",
+    "VarlenContextParallelAttention",
+    "reset_varlen_cp_timing_stats",
+    "get_varlen_cp_timing_summary",
+    "print_varlen_cp_timing_stats",
+]
 
 
 # NOTE: This is to achieve replicate computation on the gate module in the MoE router.

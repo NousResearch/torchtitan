@@ -559,8 +559,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # extra_kwargs are.
         extra_kwargs: dict[str, Any] = {}
 
-        if getattr(self.model_args, "use_flex_attn", False):
-            # Pass CP mesh for Context Parallel + FlexAttention support
+        # Check if we need attention masks (FlexAttention or varlen)
+        attn_mask_type = getattr(self.model_args, "attn_mask_type", "causal")
+        use_flex_attn = getattr(self.model_args, "use_flex_attn", False)
+        use_varlen = attn_mask_type.startswith("varlen_")
+
+        if use_flex_attn or use_varlen:
+            # Pass CP mesh for Context Parallel support
             cp_mesh = None
             if self.parallel_dims.cp_enabled:
                 cp_mesh = self.parallel_dims.world_mesh["cp"]

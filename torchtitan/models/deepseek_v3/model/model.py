@@ -24,11 +24,15 @@ from torchtitan.components.tokenizer import BaseTokenizer
 from torchtitan.config.job_config import PEFT
 from torchtitan.models.attention import (
     create_attention_mask,
+    create_varlen_metadata_for_document,
+    create_varlen_metadata_from_sequence_lengths,
     FlexAttentionWrapper,
     get_block_causal_mask_mod_by_seq_lens,
     get_causal_mask_mod,
     get_document_mask_mod,
     ScaledDotProductAttentionWrapper,
+    VarlenAttentionWrapper,
+    VarlenMetadata,
 )
 from torchtitan.models.moe import (
     fast_init_normal_,
@@ -249,7 +253,13 @@ class Attention(nn.Module):
             )
 
         self.use_flex_attn = model_args.use_flex_attn
-        if self.use_flex_attn:
+        self._use_varlen = model_args.attn_mask_type.startswith("varlen_")
+
+        if self._use_varlen:
+            # VarlenAttentionWrapper handles CP internally via all_gather
+            # cp_mesh will be set by set_cp_mesh() after model parallelization
+            self.inner_attention = VarlenAttentionWrapper(cp_mesh=None)
+        elif self.use_flex_attn:
             self.inner_attention = FlexAttentionWrapper()
         else:
             self.inner_attention = ScaledDotProductAttentionWrapper()
@@ -311,20 +321,39 @@ class Attention(nn.Module):
         k = k.transpose(1, 2)  # (bsz, n_heads, seqlen, qk_head_dim)
         v = v.transpose(1, 2)  # (bsz, n_heads, seqlen, v_head_dim)
 
-        if self.use_flex_attn:
+        if self._use_varlen:
+            assert isinstance(attention_masks, VarlenMetadata)
+            # VarlenAttentionWrapper returns packed output: [B*S, H, v_head_dim]
+            output = self.inner_attention(
+                q, k, v,
+                head_dim=self.v_head_dim,
+                attention_masks=attention_masks,
+                scale=self.softmax_scale,
+            )
+            # Get local heads from output shape (may be sharded by TP)
+            n_local_heads = output.shape[1]
+            # Reshape from [B*S, H, v_head_dim] to [B, S, H * v_head_dim]
+            output = output.view(bsz, seqlen, n_local_heads, self.v_head_dim)
+            output = output.view(bsz, seqlen, -1)
+        elif self.use_flex_attn:
             assert isinstance(attention_masks, BlockMask)
             output = self.inner_attention(
                 q, k, v, block_mask=attention_masks, scale=self.softmax_scale
             )
+            # Reshape and project output
+            output = output.transpose(
+                1, 2
+            ).contiguous()  # (bsz, seqlen, n_heads, v_head_dim)
+            output = output.view(bsz, seqlen, -1)  # (bsz, seqlen, n_heads * v_head_dim)
         else:
             assert attention_masks is None
             output = self.inner_attention(q, k, v, scale=self.softmax_scale)
+            # Reshape and project output
+            output = output.transpose(
+                1, 2
+            ).contiguous()  # (bsz, seqlen, n_heads, v_head_dim)
+            output = output.view(bsz, seqlen, -1)  # (bsz, seqlen, n_heads * v_head_dim)
 
-        # Reshape and project output
-        output = output.transpose(
-            1, 2
-        ).contiguous()  # (bsz, seqlen, n_heads, v_head_dim)
-        output = output.view(bsz, seqlen, -1)  # (bsz, seqlen, n_heads * v_head_dim)
         return self.wo(output)  # (bsz, seqlen, dim)
 
     def init_weights(self, init_std: float):
@@ -487,6 +516,14 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
                 b=cutoff_factor * final_out_std,
             )
 
+    def set_cp_mesh(self, cp_mesh: Optional[DeviceMesh]) -> None:
+        """Set the context parallel mesh for varlen attention layers."""
+        for layer in self.layers.values():
+            attention = layer.attention
+            if hasattr(attention, '_use_varlen') and attention._use_varlen:
+                if isinstance(attention.inner_attention, VarlenAttentionWrapper):
+                    attention.inner_attention.cp_mesh = cp_mesh
+
     def get_attention_masks(
         self,
         input_batch: torch.Tensor,
@@ -494,6 +531,32 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         extra_inputs: dict[str, torch.Tensor] | None = None,
         cp_mesh: Optional[DeviceMesh] = None,
     ) -> AttentionMasksType:
+        # Handle varlen attention types (they manage CP internally)
+        match self.model_args.attn_mask_type:
+            case "varlen_block_causal":
+                # For varlen, we set the cp_mesh on the attention layers directly
+                # The varlen attention handles CP via all_gather internally
+                self.set_cp_mesh(cp_mesh)
+                return create_varlen_metadata_for_document(
+                    input_batch, tokenizer.eos_id
+                )
+            case "varlen_block_causal_by_sequence_lengths":
+                sequence_lengths = extra_inputs.pop("sequence_lengths", None)
+                if sequence_lengths is None:
+                    raise RuntimeError(
+                        "`sequence_lengths` required for `varlen_block_causal_by_sequence_lengths`"
+                    )
+                self.set_cp_mesh(cp_mesh)
+                return create_varlen_metadata_from_sequence_lengths(
+                    sequence_lengths,
+                    seq_len=input_batch.shape[1],
+                    device=input_batch.device,
+                )
+            case _:
+                # Non-varlen attention types use BlockMask
+                pass
+
+        # For FlexAttention-based mask types
         mask_mods = [get_causal_mask_mod()]
         match self.model_args.attn_mask_type:
             case "causal":

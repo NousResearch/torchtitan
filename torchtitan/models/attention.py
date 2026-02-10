@@ -8,7 +8,7 @@
 
 import functools
 from collections.abc import Callable
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import torch
 import torch.nn.functional as F
@@ -20,17 +20,170 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 
+try:
+    from torch.nn.attention.varlen import varlen_attn
+except ImportError:
+    varlen_attn = None  # type: ignore[assignment]
+
+from torch.types import Number
+
 
 __all__ = [
     "FlexAttentionWrapper",
     "ScaledDotProductAttentionWrapper",
+    "VarlenAttentionWrapper",
+    "VarlenMetadata",
     "get_causal_mask_mod",
     "get_document_mask_mod",
     "get_sliding_window_mask_mod",
     "get_fixed_block_mask_mod",
     "get_block_causal_mask_mod_by_seq_lens",
     "create_attention_mask",
+    "create_varlen_metadata_for_document",
+    "create_varlen_metadata_from_sequence_lengths",
 ]
+
+
+class VarlenMetadata(NamedTuple):
+    """
+    Cumulative sequence positions for queries and keys/values.
+    Used for variable-length attention with document masking.
+    """
+
+    cu_seq_q: torch.Tensor
+    cu_seq_k: torch.Tensor
+    max_q: Number
+    max_k: Number
+
+
+class VarlenAttentionWrapper(torch.nn.Module):
+    """Wrapper for varlen attention with optional Context Parallelism support.
+
+    When cp_mesh is provided, this uses all_gather to collect K/V across CP ranks
+    and computes attention with proper document masking via cu_seqlens.
+    """
+
+    _compiled_varlen_attn: ClassVar[Callable] = None
+
+    @classmethod
+    def _get_compiled_varlen_attn(cls):
+        if cls._compiled_varlen_attn is None and varlen_attn is not None:
+            cls._compiled_varlen_attn = torch.compile(
+                varlen_attn, mode="max-autotune-no-cudagraphs"
+            )
+        return cls._compiled_varlen_attn
+
+    def __init__(self, cp_mesh=None):
+        super().__init__()
+        self.cp_mesh = cp_mesh
+        self._cp_group = None
+        self._cp_rank = None
+        self._cp_world_size = None
+
+    def _get_cp_info(self):
+        """Lazily initialize CP info from mesh."""
+        if self._cp_group is None and self.cp_mesh is not None:
+            import torch.distributed as dist
+            self._cp_group = self.cp_mesh.get_group()
+            self._cp_rank = dist.get_rank(self._cp_group)
+            self._cp_world_size = dist.get_world_size(self._cp_group)
+        return self._cp_group, self._cp_rank, self._cp_world_size
+
+    def forward(
+        self,
+        xq: torch.Tensor,
+        xk: torch.Tensor,
+        xv: torch.Tensor,
+        head_dim: int,  # This is v_head_dim for output reshaping
+        attention_masks: VarlenMetadata,
+        scale: float | None = None,
+    ) -> torch.Tensor:
+        """
+        Forward pass for varlen attention.
+
+        Note: Q, K may have different head_dim than V (e.g., DeepSeek MLA uses
+        qk_head_dim=192 vs v_head_dim=128). We infer dimensions from tensor shapes.
+        The `head_dim` parameter is used for output reshaping (should be v_head_dim).
+        """
+        cu_seq_q = attention_masks.cu_seq_q
+        cu_seq_k = attention_masks.cu_seq_k
+        max_q = attention_masks.max_q
+        max_k = attention_masks.max_k
+
+        # Get actual head dimensions from input tensors
+        # xq: [B, H, S, qk_head_dim], xv: [B, H, S, v_head_dim]
+        n_local_heads = xq.shape[1]
+        qk_head_dim = xq.shape[-1]  # Q and K have same head_dim
+        v_head_dim = xv.shape[-1]
+
+        # Reshape to varlen format: [B*S, H, head_dim]
+        xq_packed = xq.transpose(1, 2).reshape(-1, n_local_heads, qk_head_dim)
+        xk_packed = xk.transpose(1, 2).reshape(-1, n_local_heads, qk_head_dim)
+        xv_packed = xv.transpose(1, 2).reshape(-1, n_local_heads, v_head_dim)
+
+        cp_group, cp_rank, cp_world_size = self._get_cp_info()
+
+        if cp_group is not None and cp_world_size > 1:
+            # Use CP-aware varlen attention with all_gather
+            from torchtitan.distributed.varlen_context_parallel import (
+                prepare_cu_seqlens_for_cp,
+                varlen_attention_with_cp,
+            )
+
+            # Prepare cu_seqlens for this CP rank
+            cu_seqlens_q_cp, cu_seqlens_k_cp, max_q_cp, max_k_cp, local_k_slice = (
+                prepare_cu_seqlens_for_cp(cu_seq_q, cp_rank, cp_world_size, causal=True)
+            )
+
+            output_packed = varlen_attention_with_cp(
+                xq_packed,
+                xk_packed,
+                xv_packed,
+                cu_seqlens_q_cp,
+                cu_seqlens_k_cp,
+                max_q_cp,
+                max_k_cp,
+                local_k_slice,
+                cp_group,
+                softmax_scale=scale,
+                causal=True,
+            )
+        else:
+            # No CP, use regular varlen attention
+            # PyTorch varlen_attn requires K and V to have the same head dimension.
+            # If they differ (e.g., DeepSeek MLA), pad V to match K's dimension.
+            need_v_padding = v_head_dim != qk_head_dim
+            if need_v_padding:
+                xv_packed = torch.nn.functional.pad(
+                    xv_packed, (0, qk_head_dim - v_head_dim), mode='constant', value=0
+                )
+
+            compiled_attn = self._get_compiled_varlen_attn()
+            if compiled_attn is None:
+                raise ImportError(
+                    "varlen_attn not available. Requires PyTorch >= 2.5"
+                )
+
+            # PyTorch varlen_attn uses window_size for causal attention:
+            # (-1, -1) for full attention, (-1, 0) for causal attention
+            output_packed = compiled_attn(
+                xq_packed,
+                xk_packed,
+                xv_packed,
+                cu_seq_q,
+                cu_seq_k,
+                max_q,
+                max_k,
+                scale=scale,
+                window_size=(-1, 0),  # Causal attention
+            )
+
+            # Unpad output if V was padded
+            if need_v_padding:
+                output_packed = output_packed[..., :v_head_dim].contiguous()
+
+        # Output has shape [B*S, H, v_head_dim]
+        return output_packed
 
 
 class FlexAttentionWrapper(torch.nn.Module):
@@ -277,3 +430,122 @@ def create_attention_mask(*args, **kwargs):
     arguments.
     """
     return _compiled_create_block_mask(*args, **kwargs)
+
+
+def create_varlen_metadata_for_document(
+    input_batch: torch.Tensor, eos_id: int
+) -> VarlenMetadata:
+    """
+    Creates cumulative sequence length indices needed for variable length attention.
+
+    Args:
+        input_batch: Input batch tensor with shape [batch_size, seq_len]
+        eos_id: the EOS id marker
+
+    Returns:
+        VarlenMetadata containing cumulative sequence length indices for q, k, and max_seq_len
+    """
+    batch_size, seq_len = input_batch.shape
+    device = input_batch.device
+    cu_seqlens_list, all_seq_lengths = [], []
+    offset = 0
+
+    for b in range(batch_size):
+        tokens = input_batch[b]
+        eos_positions = (tokens == eos_id).nonzero(as_tuple=True)[0].to(torch.int32)
+        sample_cu_seqlens = torch.cat(
+            [
+                torch.tensor([0], dtype=torch.int32, device=device),
+                eos_positions + 1,
+                torch.tensor([seq_len], dtype=torch.int32, device=device),
+            ]
+        )
+        sample_cu_seqlens = torch.unique_consecutive(sample_cu_seqlens)
+
+        seq_lengths = torch.diff(sample_cu_seqlens)
+        all_seq_lengths.append(seq_lengths)
+
+        cu_seqlens_adjusted = sample_cu_seqlens[:-1] + offset
+        cu_seqlens_list.append(cu_seqlens_adjusted)
+
+        offset += seq_len
+
+    packed_cu_seqlens = torch.cat(
+        cu_seqlens_list + [torch.tensor([offset], dtype=torch.int32, device=device)]
+    )
+
+    max_seqlen = 0
+    if len(all_seq_lengths) > 0:
+        all_seq_lengths = torch.cat(all_seq_lengths)
+        # device to host sync but only done once per model forward
+        max_seqlen = all_seq_lengths.max().item()
+
+    return VarlenMetadata(
+        cu_seq_q=packed_cu_seqlens,
+        cu_seq_k=packed_cu_seqlens,
+        max_q=max_seqlen,
+        max_k=max_seqlen,
+    )
+
+
+def create_varlen_metadata_from_sequence_lengths(
+    sequence_lengths: list[torch.Tensor],
+    seq_len: int,
+    device: torch.device,
+) -> VarlenMetadata:
+    """
+    Creates cumulative sequence length indices needed for variable length attention
+    from explicit sequence lengths provided by the data loader.
+
+    This is an alternative to `create_varlen_metadata_for_document` that doesn't
+    rely on EOS token detection, making it suitable for multi-turn chat data
+    that has multiple EOS tokens per sample.
+
+    Args:
+        sequence_lengths: List of tensors, one per batch element, containing
+            the lengths of each document/turn within that batch element.
+        seq_len: The sequence length dimension of the batch.
+        device: The device to place the output tensors on.
+
+    Returns:
+        VarlenMetadata containing cumulative sequence length indices for q, k, and max_seq_len
+    """
+    batch_size = len(sequence_lengths)
+    cu_seqlens_list = []
+    all_seq_lengths = []
+    offset = 0
+
+    for b in range(batch_size):
+        sample_seq_lens = sequence_lengths[b]
+        # Compute cumulative sequence lengths for this sample
+        sample_cu_seqlens = torch.cat(
+            [
+                torch.tensor([0], dtype=torch.int32, device=device),
+                torch.cumsum(sample_seq_lens.to(torch.int32), dim=0),
+            ]
+        )
+
+        all_seq_lengths.append(sample_seq_lens)
+
+        # Adjust for batch offset (excluding the final cumulative sum)
+        cu_seqlens_adjusted = (sample_cu_seqlens[:-1] + offset).to(torch.int32)
+        cu_seqlens_list.append(cu_seqlens_adjusted)
+
+        offset += seq_len
+
+    packed_cu_seqlens = torch.cat(
+        cu_seqlens_list + [torch.tensor([offset], dtype=torch.int32, device=device)]
+    ).to(torch.int32)
+
+    max_seqlen = 0
+    if len(all_seq_lengths) > 0:
+        all_seq_lengths_cat = torch.cat(all_seq_lengths)
+        # device to host sync but only done once per model forward
+        max_seqlen = all_seq_lengths_cat.max().item()
+
+    return VarlenMetadata(
+        cu_seq_q=packed_cu_seqlens,
+        cu_seq_k=packed_cu_seqlens,
+        max_q=max_seqlen,
+        max_k=max_seqlen,
+    )
