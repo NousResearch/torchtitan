@@ -55,18 +55,18 @@ We look forward to your contributions!
 
 1. Multi-dimensional composable parallelisms
    - [FSDP2](docs/fsdp.md) with per-parameter sharding
-   - [Tensor Parallel](https://pytorch.org/docs/stable/distributed.tensor.parallel.html) (including [async TP](https://discuss.pytorch.org/t/distributed-w-torchtitan-introducing-async-tensor-parallelism-in-pytorch/209487))
+   - [Tensor Parallel](https://docs.pytorch.org/docs/stable/distributed.tensor.parallel.html) (including [async TP](https://discuss.pytorch.org/t/distributed-w-torchtitan-introducing-async-tensor-parallelism-in-pytorch/209487))
    - [Pipeline Parallel](https://discuss.pytorch.org/t/distributed-w-torchtitan-training-with-zero-bubble-pipeline-parallelism/214420)
    - [Context Parallel](https://discuss.pytorch.org/t/distributed-w-torchtitan-breaking-barriers-training-long-context-llms-with-1m-sequence-length-in-pytorch-using-context-parallel/215082)
-2. [Meta device](https://pytorch.org/docs/stable/meta.html) initialization
+2. [Meta device](https://docs.pytorch.org/docs/stable/meta.html) initialization
 3. Selective (layer or operator) and full activation checkpointing
 4. [Distributed checkpointing](https://discuss.pytorch.org/t/distributed-w-torchtitan-optimizing-checkpointing-efficiency-with-pytorch-dcp/211250) (including async checkpointing)
-   - [Interoperable checkpoints](docs/checkpoint.md) which can be loaded directly into [`torchtune`](https://github.com/pytorch/torchtune) for fine-tuning
+   - [Interoperable checkpoints](docs/checkpoint.md) which can be loaded directly into [`torchtune`](https://github.com/meta-pytorch/torchtune) for fine-tuning
 5. `torch.compile` support
 6. [Float8](https://discuss.pytorch.org/t/distributed-w-torchtitan-enabling-float8-all-gather-in-fsdp2/209323) support ([how-to](docs/float8.md))
 7. [MXFP8 training for dense and MoE models](docs/mxfp8.md) on Blackwell GPUs.
 7. DDP and HSDP
-8. [TorchFT](https://github.com/pytorch/torchft) integration
+8. [TorchFT](https://github.com/meta-pytorch/torchft) integration
 9. Checkpointable data-loading, with the C4 dataset pre-configured (144M entries) and support for [custom datasets](docs/datasets.md)
 10. Gradient accumulation, enabled by giving an additional `--training.global_batch_size` argument in configuration
 11. Flexible learning rate scheduler (warmup-stable-decay)
