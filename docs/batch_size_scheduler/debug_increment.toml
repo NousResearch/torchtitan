@@ -1,0 +1,44 @@
+# Batch Size Scheduler Test Config - Increment Rampup (Debug Model)
+#
+# Tests Megatron-style increment batch size rampup with a small debug model.
+# Batch size ramps from 8 to 32 in increments of 8 over 400 samples.
+#
+# Usage:
+#   torchrun --nproc_per_node=1 -m torchtitan.train --job.config_file docs/batch_size_scheduler/debug_increment.toml
+
+[job]
+description = "Batch size scheduler test - increment rampup"
+dump_folder = "./outputs/batch_size_scheduler_increment"
+
+[batch_size_scheduler]
+mode = "increment"
+start_batch_size = 8
+increment = 8
+rampup_samples = 400
+
+[training]
+dataset = "c4_test"
+local_batch_size = 4
+global_batch_size = 32
+seq_len = 256
+steps = 100
+max_norm = 1.0
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-4
+
+[lr_scheduler]
+warmup_steps = 10
+
+[metrics]
+log_freq = 10
+enable_tensorboard = false
+
+[checkpoint]
+enable = false

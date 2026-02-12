@@ -15,6 +15,11 @@ import torch
 from torch.distributed.elastic.multiprocessing.errors import record
 
 import torchtitan.protocols.train_spec as train_spec_module
+from torchtitan.components.batch_size_scheduler import (
+    BatchSizeManager,
+    BatchSizeState,
+    build_batch_size_manager,
+)
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.dataloader import DataloaderExhaustedError
 from torchtitan.components.ft import FTManager, maybe_semi_sync_training
@@ -54,6 +59,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # non-swappable training components
     checkpointer: CheckpointManager
     ft_manager: FTManager
+    batch_size_manager: BatchSizeManager
 
     # runtime utilities
     device: torch.device
@@ -66,6 +72,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # additional training states
     step: int
     ntokens_seen: int
+    consumed_samples: int
 
     # Enable debug tracing on failure: https://pytorch.org/docs/stable/elastic/errors.html
     @record
@@ -189,24 +196,29 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             job_config, parallel_dims=parallel_dims, ft_manager=self.ft_manager
         )
 
-        # verify batch sizes
-        global_batch_size = job_config.training.global_batch_size
-        if global_batch_size < 0:
-            # This global batch size results in 1 gradient accumulation
-            # step.
-            global_batch_size = job_config.training.local_batch_size * dp_degree
-        assert global_batch_size > 0
+        # Build batch size manager for dynamic batch size scheduling
+        self.batch_size_manager = build_batch_size_manager(job_config, dp_degree)
+
+        # Get initial batch size and validate
+        initial_state = BatchSizeState(consumed_samples=0)
+        global_batch_size = self.batch_size_manager.get_batch_size(initial_state)
+
+        # Validate final (target) batch size from config
+        target_batch_size = job_config.training.global_batch_size
+        if target_batch_size < 0:
+            target_batch_size = job_config.training.local_batch_size * dp_degree
+        assert target_batch_size > 0
         assert (
-            global_batch_size % (job_config.training.local_batch_size * dp_degree) == 0
+            target_batch_size % (job_config.training.local_batch_size * dp_degree) == 0
         ), (
             f"global batch size must be multiple of local batch size times "
-            f"data-parallel degree ({global_batch_size} "
+            f"data-parallel degree ({target_batch_size} "
             f"% ({job_config.training.local_batch_size} * {dp_degree}) != 0)"
         )
 
-        # calculate gradient accumulation steps
-        self.gradient_accumulation_steps = global_batch_size // (
-            job_config.training.local_batch_size * dp_degree
+        # Calculate initial gradient accumulation steps
+        self.gradient_accumulation_steps = self.batch_size_manager.get_grad_accum_steps(
+            initial_state
         )
         assert self.gradient_accumulation_steps > 0
         self.loss_fn = rescale_accumulated_loss(
@@ -322,6 +334,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # These attributes must be initialized before checkpoint loading.
         self.step = 0
         self.ntokens_seen = 0
+        self.consumed_samples = 0
 
         self.checkpointer = CheckpointManager(
             dataloader=self.dataloader,
@@ -688,6 +701,20 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     def train_step(
         self, data_iterator: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
     ):
+        # Check for batch size changes (dynamic batch size scheduling)
+        bs_state = BatchSizeState(consumed_samples=self.consumed_samples)
+        changed, old_bs, new_bs = self.batch_size_manager.did_change(bs_state)
+        if changed:
+            self.gradient_accumulation_steps = (
+                self.batch_size_manager.get_grad_accum_steps(bs_state)
+            )
+            # Update loss rescaling for new accumulation steps
+            self.loss_fn.accumulation_steps = self.gradient_accumulation_steps
+            logger.info(
+                f"Batch size changed: {old_bs} -> {new_bs}, "
+                f"grad_accum_steps={self.gradient_accumulation_steps}"
+            )
+
         self.optimizers.zero_grad()
         # Save the current step learning rate for logging
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
@@ -716,6 +743,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.checkpointer.maybe_wait_for_staging()
         self.optimizers.step()
         self.lr_schedulers.step()
+
+        # Update consumed samples for batch size scheduler
+        self.consumed_samples += self.batch_size_manager.get_batch_size(bs_state)
 
         # Reduce the data collected over gradient accumulation steps.
         loss = torch.sum(torch.stack(accumulated_losses))
@@ -852,11 +882,29 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         return self.step < self.job_config.training.steps
 
     def state_dict(self) -> dict[str, Any]:
-        return {"step": self.step, "ntokens_seen": self.ntokens_seen}
+        return {
+            "step": self.step,
+            "ntokens_seen": self.ntokens_seen,
+            "consumed_samples": self.consumed_samples,
+        }
 
     def load_state_dict(self, state_dict: dict[str, Any]):
         self.step = state_dict["step"]
         self.ntokens_seen = state_dict["ntokens_seen"]
+        # Backward compatible: old checkpoints may not have consumed_samples
+        self.consumed_samples = state_dict.get("consumed_samples", 0)
+
+        # Sync batch size state with restored consumed_samples
+        bs_state = BatchSizeState(consumed_samples=self.consumed_samples)
+        self.gradient_accumulation_steps = self.batch_size_manager.get_grad_accum_steps(
+            bs_state
+        )
+        # Update loss rescaling to match current batch size
+        self.loss_fn.accumulation_steps = self.gradient_accumulation_steps
+        # Initialize batch size manager's last_batch_size to prevent spurious change detection
+        self.batch_size_manager._last_batch_size = (
+            self.batch_size_manager.get_batch_size(bs_state)
+        )
 
     def close(self) -> None:
         if self.checkpointer:
