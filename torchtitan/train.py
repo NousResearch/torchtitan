@@ -16,6 +16,10 @@ from torch.distributed.elastic.multiprocessing.errors import record
 
 import torchtitan.protocols.train_spec as train_spec_module
 from torchtitan.components.checkpoint import CheckpointManager
+from torchtitan.components.data_stages import (
+    build_stage_aware_dataloader,
+    DataStageManager,
+)
 from torchtitan.components.dataloader import DataloaderExhaustedError
 from torchtitan.components.ft import FTManager, maybe_semi_sync_training
 from torchtitan.components.loss import rescale_accumulated_loss
@@ -54,6 +58,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     # non-swappable training components
     checkpointer: CheckpointManager
     ft_manager: FTManager
+    data_stage_manager: DataStageManager
 
     # runtime utilities
     device: torch.device
@@ -121,11 +126,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             else None
         )
 
-        self.dataloader = self.train_spec.build_dataloader_fn(
+        # Build dataloader with data stage support
+        self.dataloader, self.data_stage_manager = build_stage_aware_dataloader(
+            job_config=job_config,
+            build_dataloader_fn=self.train_spec.build_dataloader_fn,
             dp_world_size=dp_degree,
             dp_rank=dp_rank,
             tokenizer=self.tokenizer,
-            job_config=job_config,
         )
 
         # build model (using meta init)
@@ -806,6 +813,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             data_iterator = self.batch_generator(self.dataloader)
             while self.should_continue_training():
                 self.step += 1
+
+                # Check for data stage transition
+                if self.dataloader.maybe_transition(self.step):
+                    # Rebuild iterator after stage transition
+                    data_iterator = self.batch_generator(self.dataloader)
+
                 self.gc_handler.run(self.step)
                 try:
                     self.train_step(data_iterator)

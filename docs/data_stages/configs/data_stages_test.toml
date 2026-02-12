@@ -1,0 +1,102 @@
+# Copyright (c) Nous Research.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Test config for multi-stage data training
+# Tests: stage transitions, checkpoint save/resume, reproducibility
+#
+# Test scenarios:
+#   1. Full run: steps 0->15 with 3 stage transitions
+#   2. Resume test: run 0->7, resume 7->15, compare with full run
+#
+# Usage:
+#   # Full run
+#   CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+#       -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml
+#
+#   # Resume from step 7
+#   CUDA_VISIBLE_DEVICES=0 torchrun --nproc_per_node=1 --standalone \
+#       -m torchtitan.train --job.config_file torchtitan/models/llama3/train_configs/data_stages_test.toml \
+#       --checkpoint.load_step 7
+
+[job]
+dump_folder = "./outputs/data_stages_test"
+description = "Data stages test - verify transitions and checkpoint resume"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = false
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-4
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 2
+
+[training]
+local_batch_size = 2
+max_norm = 1.0
+steps = 15
+
+# 3 stages: transitions at step 5 and step 10
+# Each stage is fully self-contained with all data configuration
+[[training.data_stages]]
+name = "stage_1_general"
+start_step = 0
+end_step = 5
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+dataset_random_seed = 1111
+
+[[training.data_stages]]
+name = "stage_2_reasoning"
+start_step = 5
+end_step = 10
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+dataset_random_seed = 2222
+
+[[training.data_stages]]
+name = "stage_3_final"
+start_step = 10
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+dataset_random_seed = 3333
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 1  # Save every step for testing resume at any point
+last_save_model_only = false
+async_mode = "disabled"
+
+[activation_checkpoint]
+mode = "none"
+
+[compile]
+enable = false
+
+[debug]
+seed = 42  # Fixed seed for reproducibility

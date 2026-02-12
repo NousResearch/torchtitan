@@ -1,0 +1,63 @@
+# Copyright (c) Nous Research.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Backward compatibility test config
+# No [[training.data_stages]] defined - should auto-create single "default" stage
+#
+# This tests that existing configs without data_stages still work.
+
+[job]
+dump_folder = "./outputs/data_stages_backcompat_test"
+description = "Backward compatibility test - no data_stages"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = false
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-4
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 2
+
+[training]
+local_batch_size = 2
+max_norm = 1.0
+steps = 5
+
+# Old-style data config (no data_stages)
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "none"
+
+[compile]
+enable = false
+
+[debug]
+seed = 42

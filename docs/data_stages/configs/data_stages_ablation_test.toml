@@ -1,0 +1,79 @@
+# Copyright (c) Nous Research.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+# Test config for dmayhem's ablation use case
+# [training] data fields cover steps 0-5 (auto-created as "default")
+# [[training.data_stages]] starts at step 5 with different seed (ablation)
+#
+# This tests the scenario where a user:
+#   1. Trained with [training] only to step 5
+#   2. Now wants to resume with different data mixture from step 5
+
+[job]
+dump_folder = "./outputs/data_stages_ablation_test"
+description = "Ablation test - stages start mid-training"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = false
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-4
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 2
+
+[training]
+local_batch_size = 2
+max_norm = 1.0
+steps = 10
+
+# These fields cover steps 0-5 (auto-created as "default")
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+
+# Ablation stage starts at step 5 with different random seed
+[[training.data_stages]]
+name = "ablation_stage"
+start_step = 5
+dataset = "c4_test"
+dataset_type = "huggingface"
+seq_len = 512
+dataset_random_seed = 9999
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 1
+last_save_model_only = false
+async_mode = "disabled"
+
+[activation_checkpoint]
+mode = "none"
+
+[compile]
+enable = false
+
+[debug]
+seed = 42
