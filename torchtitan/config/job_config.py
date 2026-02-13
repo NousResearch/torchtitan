@@ -1223,6 +1223,180 @@ class Debug:
 
 
 @dataclass
+class LMEvalSlurmConfig:
+    """SLURM configuration for lm-evaluation-harness jobs."""
+
+    partition: str = "batch"
+    """SLURM partition to submit eval jobs to"""
+
+    gpus_per_node: int = 1
+    """Number of GPUs per node for evaluation"""
+
+    cpus_per_task: int = 16
+    """Number of CPUs per task"""
+
+    time: str = "02:00:00"
+    """Time limit for eval job"""
+
+    qos: str | None = None
+    """Quality of service (optional, uses cluster default if not specified)"""
+
+    account: str | None = None
+    """SLURM account to charge"""
+
+    reservation: str | None = None
+    """SLURM reservation to use"""
+
+    hf_cache: str = "/home/shared/huggingface-cache"
+    """HuggingFace cache directory on compute nodes"""
+
+    venv_path: str | None = None
+    """Path to Python virtual environment (e.g., /path/to/env)"""
+
+    conda_env: str | None = None
+    """Conda environment to activate (if any)"""
+
+    extra_sbatch_args: str = ""
+    """Additional sbatch arguments (e.g., '--exclusive')"""
+
+
+@dataclass
+class LMEvalConfig:
+    """
+    Configuration for automatic lm-evaluation-harness during training.
+
+    This enables running standardized evaluations at checkpoint intervals,
+    with full reproducibility through seed control and config logging.
+    """
+
+    enable: bool = False
+    """Enable automatic evaluation during training"""
+
+    eval_interval: int = 500
+    """
+    Run evaluation every N steps. Must be a multiple of checkpoint.interval.
+    Evaluation runs after checkpoint is saved at this step.
+    """
+
+    tasks: str = "hellaswag,arc_easy"
+    """Comma-separated list of lm-evaluation-harness tasks to run"""
+
+    num_fewshot: int = 0
+    """Number of few-shot examples for evaluation"""
+
+    limit: int | None = None
+    """
+    Limit number of samples per task. None = full evaluation.
+    Use smaller values (e.g., 100) during training for faster feedback.
+    """
+
+    batch_size: int = 4
+    """Batch size for evaluation"""
+
+    max_seq_len: int = 2048
+    """Maximum sequence length for evaluation"""
+
+    # Seeds for reproducibility
+    seed: int = 42
+    """Base random seed for all random number generators"""
+
+    random_seed: int | None = None
+    """Override Python random seed (defaults to seed if None)"""
+
+    numpy_seed: int | None = None
+    """Override NumPy random seed (defaults to seed if None)"""
+
+    torch_seed: int | None = None
+    """Override PyTorch random seed (defaults to seed if None)"""
+
+    fewshot_seed: int | None = None
+    """Override fewshot sampler seed (defaults to seed if None)"""
+
+    # Execution mode
+    mode: Literal["inline", "subprocess", "slurm"] = "inline"
+    """
+    Execution mode for evaluation:
+    - 'inline': Run in same process (blocks training, simplest)
+    - 'subprocess': Run in background subprocess (non-blocking)
+    - 'slurm': Submit as SLURM job (fully async, separate resources)
+    """
+
+    job_name_prefix: str = "lm_eval"
+    """
+    Prefix for SLURM job names. Final job name will be {prefix}_step_{step}.
+    Use this to identify eval jobs for a specific training run.
+    Example: 'lm_eval_my_experiment' -> 'lm_eval_my_experiment_step_100'
+    """
+
+    # Output configuration
+    output_dir: str = "eval_results"
+    """Directory to save evaluation results (relative to job.dump_folder)"""
+
+    log_samples: bool = True
+    """Whether to log individual sample predictions"""
+
+    # SLURM configuration (only used when mode='slurm')
+    slurm: LMEvalSlurmConfig = field(default_factory=LMEvalSlurmConfig)
+    """SLURM configuration for eval jobs"""
+
+    slurm_script_dir: str = "eval_slurm_scripts"
+    """Directory to save generated SLURM scripts (relative to job.dump_folder)"""
+
+    slurm_logs_dir: str = "eval_slurm_logs"
+    """Directory for SLURM job logs (relative to job.dump_folder)"""
+
+    # Path configuration
+    torchtitan_path: str | None = None
+    """
+    Path to torchtitan installation. If None, auto-detected.
+    Used for PYTHONPATH in subprocess/slurm modes.
+    """
+
+    lm_eval_path: str | None = None
+    """
+    Path to lm-evaluation-harness installation. If None, uses installed package.
+    """
+
+    # WandB integration
+    log_to_wandb: bool = True
+    """
+    Log evaluation results to WandB. Results are logged to the same run as training,
+    allowing you to track eval metrics alongside training metrics over time.
+    Requires wandb to be enabled in metrics config and initialized during training.
+    """
+
+    wandb_project: str | None = None
+    """
+    WandB project name. If None, auto-detected from the training run.
+    Falls back to WANDB_PROJECT env var or 'torchtitan' if not set.
+    """
+
+    wandb_entity: str | None = None
+    """
+    WandB entity/team name. If None, auto-detected from the training run.
+    Falls back to WANDB_TEAM env var if not set.
+    """
+
+    def __post_init__(self):
+        if self.enable and self.eval_interval <= 0:
+            raise ValueError("eval_interval must be positive when lm_eval is enabled")
+
+    def get_seeds(self) -> tuple[int, int, int, int]:
+        """Return (random_seed, numpy_seed, torch_seed, fewshot_seed)."""
+        return (
+            self.random_seed if self.random_seed is not None else self.seed,
+            self.numpy_seed if self.numpy_seed is not None else self.seed,
+            self.torch_seed if self.torch_seed is not None else self.seed,
+            self.fewshot_seed if self.fewshot_seed is not None else self.seed,
+        )
+
+    def get_seed_string(self) -> str:
+        """Return seed string for CLI: 'random,numpy,torch,fewshot'."""
+        seeds = self.get_seeds()
+        return f"{seeds[0]},{seeds[1]},{seeds[2]},{seeds[3]}"
+
+
+@dataclass
 class JobConfig:
     """
     Default container for training configuration.
@@ -1250,6 +1424,7 @@ class JobConfig:
     validation: Validation = field(default_factory=Validation)
     grpo: GRPO = field(default_factory=GRPO)
     debug: Debug = field(default_factory=Debug)
+    lm_eval: LMEvalConfig = field(default_factory=LMEvalConfig)
     peft: PEFT = field(default_factory=PEFT)
 
     def to_dict(self) -> dict[str, Any]:
