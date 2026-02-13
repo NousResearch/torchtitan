@@ -58,6 +58,7 @@ class Qwen3ModelArgs(BaseModelArgs):
         self.moe_args._debug_force_load_balance = (
             job_config.debug.moe_force_load_balance
         )
+        self.moe_args.routing_noise_std = job_config.debug.moe_routing_noise_std
 
     def get_nparams_and_flops(self, model: nn.Module, seq_len: int) -> tuple[int, int]:
         return get_moe_model_nparams_and_flops(self, model, 2 * self.head_dim, seq_len)

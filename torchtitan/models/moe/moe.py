@@ -85,6 +85,7 @@ class MoEArgs:
     num_limited_groups: int | None = None
     use_grouped_mm: bool = True  # grouped mm or for-loop for the experts computation
     load_balance_coeff: float | None = 1e-3
+    routing_noise_std: float = 0.0
 
     _debug_force_load_balance: bool = False
 
@@ -610,6 +611,7 @@ class TokenChoiceTopKRouter(nn.Module):
         route_norm: bool,
         route_scale: float,
         _debug_force_load_balance: bool = False,
+        routing_noise_std: float = 0.0,
     ):
         super().__init__()
         self.gate = nn.Linear(dim, num_experts, bias=False)
@@ -621,6 +623,7 @@ class TokenChoiceTopKRouter(nn.Module):
         self.route_norm = route_norm
         self.route_scale = route_scale
         self._debug_force_load_balance = _debug_force_load_balance
+        self.routing_noise_std = routing_noise_std
 
     def _debug_force_load_balance_routing(
         self, scores: torch.Tensor
@@ -714,6 +717,11 @@ class TokenChoiceTopKRouter(nn.Module):
         # Apply node-limited routing if configured
         if self.num_expert_groups is not None:
             scores_for_choice = self._get_node_limited_routing_scores(scores_for_choice)
+        if self.training and self.routing_noise_std > 0.0:
+            scores_for_choice = (
+                scores_for_choice
+                + torch.randn_like(scores_for_choice) * self.routing_noise_std
+            )
         _, selected_experts_indices = torch.topk(
             scores_for_choice, k=self.top_k, dim=-1, sorted=False
         )
@@ -878,6 +886,7 @@ class MoE(nn.Module):
             route_norm=moe_args.route_norm,
             route_scale=moe_args.route_scale,
             _debug_force_load_balance=moe_args._debug_force_load_balance,
+            routing_noise_std=moe_args.routing_noise_std,
         )
         if peft_config is not None and peft_config.enable_peft:
             self.router.gate.weight.requires_grad = False
@@ -1055,7 +1064,11 @@ class MoE(nn.Module):
 
 
 def build_moe(
-    args: MoEArgs, dim: int, hidden_dim: int, peft_config: PEFT, moe_impl: str = "standard",
+    args: MoEArgs,
+    dim: int,
+    hidden_dim: int,
+    peft_config: PEFT,
+    moe_impl: str = "standard",
 ) -> nn.Module:
     """Factory for MoE with different backends: 'standard' (all-to-all) or 'deepep' (DeepEP)."""
     if moe_impl == "deepep":

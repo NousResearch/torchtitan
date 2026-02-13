@@ -1410,13 +1410,18 @@ class Debug:
     """Only warns about ops without deterministic implementations rather than erroring out  """
 
     moe_force_load_balance: bool = False
-    """If True, we force each experts to get the same amount of tokens via round-robin. This option is for debugging usage only."""
+    """If True, we force each experts to get the same amount of tokens via round-robin.
+       This option is for debugging usage only."""
 
     enable_nan_tracker: bool = False
     """If True, enable lightweight NaN/Inf tracking to find where NaN first appears in the model."""
 
     nan_tracker_verbose: bool = False
     """If True, print stats for every layer (very verbose output)."""
+
+    moe_routing_noise_std: float = 0.0
+    """Standard deviation of Gaussian noise added to MoE routing scores before top-k selection during training.
+       0.0 disables noise."""
 
 
 @dataclass
