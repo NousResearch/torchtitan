@@ -177,6 +177,8 @@ def parallelize_llama(
                 else None
             ),
             gradient_divide_factor=parallel_dims.fsdp_gradient_divide_factor,
+            bucket_cap_mb=job_config.parallelism.fsdp_bucket_cap_mb,
+            disable_prefetch=job_config.parallelism.fsdp_disable_prefetch,
         )
 
         if parallel_dims.dp_replicate_enabled:
@@ -298,10 +300,12 @@ def apply_fsdp(
     reduce_dtype: torch.dtype,
     pp_enabled: bool,
     cpu_offload: bool = False,
-    reshard_after_forward_policy: str = "default",
+    reshard_after_forward_policy: str | int = "default",
     ep_degree: int = 1,
     dp_mod_ep_mesh: DeviceMesh | None = None,
     gradient_divide_factor: int | None = None,
+    bucket_cap_mb: int | None = None,
+    disable_prefetch: bool = False,
 ):
     """
     Apply data parallelism (via FSDP2) to the model.
@@ -313,31 +317,50 @@ def apply_fsdp(
         reduce_dtype (torch.dtype): The data type to use for reduction operations.
         pp_enabled (bool): Whether pipeline parallelism is enabled.
         cpu_offload (bool, optional): Whether to offload model parameters to CPU. Defaults to False.
-        reshard_after_forward_policy (str, optional): The policy to use for resharding after forward pass. Defaults to "default".
-            Other options: "never", "always".
+        reshard_after_forward_policy (str | int, optional): The policy to use for
+            resharding after forward pass. Defaults to "default".
+            String options: "never", "always", "default".
             - "default" applies default resharding behavior, implementing "smart defaults" for known optimal scenarios.
             - "always" will enable `reshard_after_forward` for all forward passes.
             - "never" will disable `reshard_after_forward` for all forward passes.
+            Integer option: N (e.g., 8) for partial resharding to N-GPU groups.
+            - Reduces peak memory by limiting all-gather buffer size to N GPUs instead of full DP world.
+            - Use N=8 for intra-node resharding (fast NVLink communication).
+            - N must be a factor of the FSDP shard world size.
+        bucket_cap_mb (int | None, optional): FSDP bucket size in MB for gradient
+            reduction. None means use PyTorch default (25MB). Defaults to None.
+        disable_prefetch (bool, optional): Whether to disable FSDP forward/backward prefetching. Defaults to False.
 
     """
     mp_policy = MixedPrecisionPolicy(param_dtype=param_dtype, reduce_dtype=reduce_dtype)
     fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
     if cpu_offload:
         fsdp_config["offload_policy"] = CPUOffloadPolicy()
+    if bucket_cap_mb is not None:
+        logger.warning(
+            f"bucket_cap_mb={bucket_cap_mb} requested but not supported by FSDP2 fully_shard() API - ignoring"
+        )
 
-    match reshard_after_forward_policy:
-        case "always":
-            reshard_after_forward = True
-        case "never":
-            reshard_after_forward = False
-        case "default":
-            # For PP, by default do not reshard after forward to avoid per-microbatch
-            # all-gathers, which can be expensive and non-overlapped
-            reshard_after_forward = not pp_enabled
-        case _:
-            raise ValueError(
-                f"Invalid reshard_after_forward_policy: {reshard_after_forward_policy}."
-            )
+    # Handle integer reshard_after_forward (partial resharding to N-GPU groups)
+    if isinstance(reshard_after_forward_policy, int):
+        reshard_after_forward = reshard_after_forward_policy
+        logger.info(
+            f"Using partial reshard_after_forward={reshard_after_forward} (resharding to {reshard_after_forward}-GPU groups)"
+        )
+    else:
+        match reshard_after_forward_policy:
+            case "always":
+                reshard_after_forward = True
+            case "never":
+                reshard_after_forward = False
+            case "default":
+                # For PP, by default do not reshard after forward to avoid per-microbatch
+                # all-gathers, which can be expensive and non-overlapped
+                reshard_after_forward = not pp_enabled
+            case _:
+                raise ValueError(
+                    f"Invalid reshard_after_forward_policy: {reshard_after_forward_policy}."
+                )
 
     if model.tok_embeddings is not None:
         fully_shard(
@@ -459,6 +482,11 @@ def apply_fsdp(
     # NOTE: set up explicit prefetching when EP is enabled, as D2H syncs
     # in EP could interfere with implicit prefetching in FSDP
     if ep_degree == 1:
+        return
+
+    # Skip prefetch setup if disabled
+    if disable_prefetch:
+        logger.info("FSDP prefetching is disabled")
         return
 
     # forward

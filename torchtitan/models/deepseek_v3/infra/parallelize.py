@@ -62,8 +62,6 @@ def parallelize_deepseekv3(
         """
 
     use_flex_attn = getattr(model.model_args, "use_flex_attn", False)
-    if job_config.parallelism.context_parallel_degree > 1 and use_flex_attn:
-        raise NotImplementedError("CP support for FlexAttention is still in progress.")
 
     if parallel_dims.tp_enabled:
         enable_float8_linear = "float8" in job_config.model.converters
@@ -108,7 +106,11 @@ def parallelize_deepseekv3(
         job_config.compile.enable and "model" in job_config.compile.components
     )
 
-    if job_config.activation_checkpoint.mode != "none":
+    # Apply activation checkpointing or CPU offloading
+    if (
+        job_config.activation_checkpoint.mode != "none"
+        or job_config.activation_checkpoint.cpu_offload
+    ):
         apply_ac(
             model,
             job_config.activation_checkpoint,
@@ -152,6 +154,8 @@ def parallelize_deepseekv3(
                 else None
             ),
             gradient_divide_factor=parallel_dims.fsdp_gradient_divide_factor,
+            bucket_cap_mb=job_config.parallelism.fsdp_bucket_cap_mb,
+            disable_prefetch=job_config.parallelism.fsdp_disable_prefetch,
         )
 
         if parallel_dims.dp_replicate_enabled:

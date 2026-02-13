@@ -287,6 +287,13 @@ class Optimizer:
     use_triton: bool = False
     """Whether to use Triton kernel for Newton-Schulz in Muon optimizer."""
 
+    state_dtype: Literal["float32", "bfloat16"] = "float32"
+    """
+    Dtype for optimizer states (exp_avg, exp_avg_sq for Adam/AdamW).
+    Using bfloat16 reduces memory by ~50% but may affect training stability.
+    Only applies to Adam/AdamW optimizers.
+    """
+
 
 @dataclass
 class LRScheduler:
@@ -370,6 +377,28 @@ class Training:
     Whether to apply CPU offloading of parameters, gradients, and optimizer states in FSDP
     """
 
+    enable_detailed_memory_tracking: bool = False
+    """
+    Whether to enable detailed memory tracking at every training phase
+    """
+
+    clear_cache_between_steps: bool = False
+    """
+    Whether to clear CUDA cache between training steps to measure minimum memory requirements
+    """
+
+    drop_page_cache_before_training: bool = False
+    """
+    Whether to drop Linux page cache before training starts (after model/optimizer init).
+    This helps when using FSDP2 CPU offload with mmap'd model weights that fill page cache.
+    Requires root/sudo or appropriate permissions to write to /proc/sys/vm/drop_caches.
+    """
+
+    skip_optimizer_step: bool = False
+    """
+    Whether to skip the optimizer step (for memory profiling purposes only)
+    """
+
     dtype: Literal["bfloat16", "float32"] = "float32"
     """
     torch dtype for training. In contrast to mixed precision training, setting training_dtype=bfloat16 will
@@ -402,6 +431,26 @@ class Training:
     many temporary files.
     """
 
+    aggressive_memory_mode: Literal[
+        "minimal", "balanced", "aggressive", "maximum"
+    ] | None = None
+    """
+    Enable aggressive memory management to reduce CUDA memory fragmentation.
+    This clears CUDA cache and Python GC at strategic points (post-backward, post-optimizer).
+    Modes:
+    - None: Disabled (default)
+    - "minimal": Only clear on high fragmentation (<1% overhead)
+    - "balanced": Clear after backward and optimizer (2-3% overhead)
+    - "aggressive": Clear frequently with sync (5-8% overhead)
+    - "maximum": Clear after every operation (10-15% overhead, for debugging)
+    """
+
+    aggressive_memory_verbose: bool = False
+    """
+    Enable verbose logging for aggressive memory manager.
+    Logs detailed memory stats after each clear operation.
+    """
+
 
 @dataclass
 class Parallelism:
@@ -428,19 +477,22 @@ class Parallelism:
     only `data_parallel_shard_degree` can be negative. 1 means disabled.
     """
 
-    fsdp_reshard_after_forward: Literal["default", "always", "never"] = "default"
+    fsdp_reshard_after_forward: Literal["default", "always", "never"] | int = "default"
     """
     `reshard_after_forward` specifies the policy for applying `reshard_after_forward`
     within an FSDP setup. `reshard_after_forward` controls parameter behavior after forward,
     trading off memory and communication. See torch's `fully_shard` API for more documentation
     on `reshard_after_forward`.
 
-    The supported policies include "default", "always" and "never":
+    The supported policies include "default", "always", "never", or an integer:
 
     - "default" applies default resharding behavior, implementing "smart defaults" for known optimal
       scenarios.
     - "always" will enable `reshard_after_forward` for all forward passes.
     - "never" will disable `reshard_after_forward` for all forward passes.
+    - integer N: Partially reshard to groups of N GPUs after forward. Must be a factor of
+      the FSDP shard world size. Use N=8 for intra-node resharding (reduces memory while
+      keeping communication fast via NVLink). This trades memory for communication.
     """
 
     tensor_parallel_degree: int = 1
@@ -553,6 +605,18 @@ class Parallelism:
     - [partial dp -> ep] etp = tp
     - [partial dp + all tp -> ep] etp = 1
     Note that this is still an experimental feature.
+    """
+
+    fsdp_bucket_cap_mb: int | None = None
+    """
+    FSDP bucket size in MB for gradient reduction. None means use PyTorch default (25MB).
+    Smaller values (e.g., 20) can reduce peak memory at the cost of more communication overhead.
+    """
+
+    fsdp_disable_prefetch: bool = False
+    """
+    Whether to disable FSDP forward/backward prefetching. Disabling prefetch can reduce memory
+    at the cost of performance (less overlap of communication and computation).
     """
 
 
@@ -1220,6 +1284,12 @@ class Debug:
 
     moe_force_load_balance: bool = False
     """If True, we force each experts to get the same amount of tokens via round-robin. This option is for debugging usage only."""
+
+    enable_nan_tracker: bool = False
+    """If True, enable lightweight NaN/Inf tracking to find where NaN first appears in the model."""
+
+    nan_tracker_verbose: bool = False
+    """If True, print stats for every layer (very verbose output)."""
 
 
 @dataclass

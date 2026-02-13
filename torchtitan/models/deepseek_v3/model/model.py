@@ -5,11 +5,19 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+from typing import Optional
 
 import torch
 from torch import nn
+from torch.distributed.device_mesh import DeviceMesh
 
 from torch.nn.attention.flex_attention import and_masks, BlockMask
+
+# Import CP block mask creator for Context Parallel + FlexAttention
+try:
+    from torch.distributed.tensor.experimental._attention import create_cp_block_mask
+except ImportError:
+    create_cp_block_mask = None
 
 from torchtitan.components.peft.lora import lora_or_linear, per_layer_config
 from torchtitan.components.tokenizer import BaseTokenizer
@@ -22,7 +30,12 @@ from torchtitan.models.attention import (
     get_document_mask_mod,
     ScaledDotProductAttentionWrapper,
 )
-from torchtitan.models.moe import FeedForward, MoE
+from torchtitan.models.moe import (
+    fast_init_normal_,
+    fast_init_trunc_normal_,
+    FeedForward,
+    MoE,
+)
 from torchtitan.protocols.model import AttentionMasksType
 from torchtitan.protocols.train_spec import ModelProtocol
 
@@ -325,8 +338,8 @@ class Attention(nn.Module):
             linear_list.append(self.wq)
 
         for linear in linear_list:
-            nn.init.trunc_normal_(linear.weight, mean=0.0, std=0.02)
-        nn.init.trunc_normal_(self.wo.weight, mean=0.0, std=init_std)
+            fast_init_trunc_normal_(linear.weight, mean=0.0, std=0.02)
+        fast_init_trunc_normal_(self.wo.weight, mean=0.0, std=init_std)
 
         self.kv_norm.reset_parameters()
         if self.q_lora_rank > 0:
@@ -456,7 +469,8 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         with torch.device(buffer_device):
             self.freqs_cis = precompute_freqs_cis(self.model_args)
         if self.tok_embeddings is not None:
-            nn.init.normal_(self.tok_embeddings.weight)
+            fast_init_normal_(self.tok_embeddings.weight)
+            fast_init_normal_(self.tok_embeddings.weight)
         for layer in self.layers.values():
             if layer is not None:
                 layer.init_weights(buffer_device=buffer_device)
@@ -465,7 +479,7 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         final_out_std = self.model_args.dim**-0.5
         cutoff_factor = 3
         if self.output is not None:
-            nn.init.trunc_normal_(
+            fast_init_trunc_normal_(
                 self.output.weight,
                 mean=0.0,
                 std=final_out_std,
@@ -478,6 +492,7 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
         input_batch: torch.Tensor,
         tokenizer: BaseTokenizer,
         extra_inputs: dict[str, torch.Tensor] | None = None,
+        cp_mesh: Optional[DeviceMesh] = None,
     ) -> AttentionMasksType:
         mask_mods = [get_causal_mask_mod()]
         match self.model_args.attn_mask_type:
@@ -500,15 +515,33 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
                 )
-        return create_attention_mask(
-            and_masks(*mask_mods), B, None, input_batch.shape[1], input_batch.shape[1]
-        )
+
+        combined_mask_mod = and_masks(*mask_mods)
+        seq_len = input_batch.shape[1]
+        H = self.model_args.n_heads  # Number of attention heads
+
+        # Use CP-aware block mask when Context Parallel is enabled
+        if cp_mesh is not None:
+            if create_cp_block_mask is None:
+                raise RuntimeError("Cannot do context parallel without a PyTorch that supports `create_cp_block_mask`")
+            return create_cp_block_mask(
+                mask_mod=combined_mask_mod,
+                B=B,
+                H=H,
+                Q_LEN=seq_len,
+                KV_LEN=seq_len,
+                device_mesh=cp_mesh,
+            )
+        else:
+            return create_attention_mask(combined_mask_mod, B, None, seq_len, seq_len)
 
     def forward(
         self,
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
         position_ids: torch.Tensor | None = None,
+        return_outputs: bool = False,  # For pipeline parallelism compatibility
+        **kwargs,  # Accept additional kwargs for PP compatibility
     ):
         """
         Forward pass for the Transformer model.

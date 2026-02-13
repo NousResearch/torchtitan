@@ -36,6 +36,8 @@ DeviceMemStats = namedtuple(
         "max_reserved_pct",
         "num_alloc_retries",
         "num_ooms",
+        "nvidia_smi_used_gib",  # nvidia-smi reported memory for verification
+        "nvidia_smi_used_pct",
     ],
 )
 
@@ -62,6 +64,49 @@ class DeviceMemoryMonitor:
     def _to_pct(self, memory):
         return 100 * memory / self.device_capacity
 
+    def _get_nvidia_smi_memory(self):
+        """Get GPU memory usage from nvidia-smi for verification."""
+        try:
+            import os
+            import subprocess
+
+            # In SLURM with CUDA_VISIBLE_DEVICES, PyTorch device index 0-7 maps to
+            # physical GPUs listed in CUDA_VISIBLE_DEVICES. We need the physical GPU index.
+            cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES", "")
+            if cuda_visible:
+                # CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" means device 0 is physical GPU 0
+                # But it could also be "4,5,6,7,0,1,2,3" meaning device 0 is physical GPU 4
+                visible_gpus = [
+                    int(x.strip()) for x in cuda_visible.split(",") if x.strip()
+                ]
+                if self.device_index < len(visible_gpus):
+                    physical_gpu_index = visible_gpus[self.device_index]
+                else:
+                    physical_gpu_index = self.device_index
+            else:
+                physical_gpu_index = self.device_index
+
+            result = subprocess.run(
+                [
+                    "nvidia-smi",
+                    "--query-gpu=memory.used",
+                    "--format=csv,noheader,nounits",
+                    f"--id={physical_gpu_index}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                # nvidia-smi reports in MiB
+                used_mib = float(result.stdout.strip())
+                used_gib = used_mib / 1024
+                used_pct = (used_mib * 1024 * 1024) / self.device_capacity * 100
+                return used_gib, used_pct
+        except Exception:
+            pass
+        return -1.0, -1.0
+
     def get_peak_stats(self):
         device_info = device_module.memory_stats(self.device)
 
@@ -83,6 +128,9 @@ class DeviceMemoryMonitor:
         if num_ooms > 0:
             logger.warning(f"{num_ooms} {device_type.upper()} OOM errors thrown.")
 
+        # Get nvidia-smi memory for verification
+        nvidia_smi_gib, nvidia_smi_pct = self._get_nvidia_smi_memory()
+
         return DeviceMemStats(
             max_active_gib,
             max_active_pct,
@@ -90,6 +138,8 @@ class DeviceMemoryMonitor:
             max_reserved_pct,
             num_retries,
             num_ooms,
+            nvidia_smi_gib,
+            nvidia_smi_pct,
         )
 
     def reset_peak_stats(self):
@@ -480,16 +530,26 @@ class MetricsProcessor:
         self.logger.log(metrics, step)
 
         color = self.color
+        # Show ACTIVE memory (actual tensor usage) as primary, with reserved and nvidia-smi for verification
+        # active = actual tensors, reserved = active + cached, nvidia-smi = OS-level GPU memory
         logger.info(
             f"{color.red}step: {step:2}  "
             f"{color.green}loss: {global_avg_loss:7.4f}  "
             f"{color.orange}grad_norm: {grad_norm:7.4f}  "
-            f"{color.turquoise}memory: {device_mem_stats.max_reserved_gib:5.2f}GiB"
-            f"({device_mem_stats.max_reserved_pct:.2f}%)  "
+            f"{color.turquoise}memory: {device_mem_stats.max_active_gib:5.2f}GiB"
+            f"({device_mem_stats.max_active_pct:.2f}%)  "
             f"{color.blue}tps: {round(tps):,}  "
             f"{color.cyan}tflops: {tflops:,.2f}  "
             f"{color.magenta}mfu: {mfu:.2f}%{color.reset}"
         )
+        # Log detailed memory breakdown for verification (only on rank 0, step 2+)
+        if step >= 2 and torch.distributed.get_rank() == 0:
+            logger.info(
+                f"  [Memory Detail] active={device_mem_stats.max_active_gib:.2f}GiB "
+                f"reserved={device_mem_stats.max_reserved_gib:.2f}GiB "
+                f"nvidia-smi={device_mem_stats.nvidia_smi_used_gib:.2f}GiB "
+                f"retries={device_mem_stats.num_alloc_retries}"
+            )
 
         self.ntokens_since_last_log = 0
         self.data_loading_times.clear()

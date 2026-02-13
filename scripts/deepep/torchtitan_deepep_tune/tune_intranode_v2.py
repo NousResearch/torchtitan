@@ -40,7 +40,7 @@ def init_dist(local_rank: int, num_local_ranks: int):
     os.environ["RANK"] = str(local_rank)
     os.environ["WORLD_SIZE"] = str(num_local_ranks)
     os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = str(29500 + local_rank)
+    os.environ["MASTER_PORT"] = "29500"  # Same port for all ranks
 
     dist.init_process_group(backend="nccl", rank=local_rank, world_size=num_local_ranks)
     torch.cuda.set_device(local_rank)
@@ -426,6 +426,13 @@ def test_loop(local_rank: int, num_local_ranks: int, args: argparse.Namespace):
     dist.destroy_process_group()
 
 
+# Model presets
+MODEL_CONFIGS = {
+    "qwen3": {"hidden": 2048, "num_experts": 128, "num_topk": 8},
+    "kimi_k2": {"hidden": 7168, "num_experts": 384, "num_topk": 8},
+}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Tune DeepEP intranode configs for TorchTitan"
@@ -437,24 +444,56 @@ if __name__ == "__main__":
         "--num-tokens", type=int, default=4096, help="Number of tokens (default: 4096)"
     )
     parser.add_argument(
-        "--hidden",
-        type=int,
-        default=2048,
-        help="Hidden dimension - Qwen3-30B (default: 2048)",
+        "--model",
+        type=str,
+        choices=["qwen3", "kimi_k2", "custom"],
+        default="qwen3",
+        help="Model preset: qwen3 (dim=2048, 128 experts), kimi_k2 (dim=7168, 384 experts)",
     )
     parser.add_argument(
-        "--num-topk", type=int, default=8, help="Number of top-k experts (default: 8)"
+        "--hidden",
+        type=int,
+        default=None,
+        help="Hidden dimension (overrides model preset)",
+    )
+    parser.add_argument(
+        "--num-topk",
+        type=int,
+        default=None,
+        help="Number of top-k experts (overrides model preset)",
     )
     parser.add_argument(
         "--num-experts",
         type=int,
-        default=128,
-        help="Number of experts - Qwen3-30B-A3B (default: 128)",
+        default=None,
+        help="Number of experts (overrides model preset)",
     )
     parser.add_argument(
         "--output-dir", type=str, default="results", help="Output directory for results"
     )
     args = parser.parse_args()
+
+    # Apply model preset, allow overrides
+    if args.model in MODEL_CONFIGS:
+        preset = MODEL_CONFIGS[args.model]
+        if args.hidden is None:
+            args.hidden = preset["hidden"]
+        if args.num_experts is None:
+            args.num_experts = preset["num_experts"]
+        if args.num_topk is None:
+            args.num_topk = preset["num_topk"]
+    else:
+        # Custom mode - require explicit values
+        if args.hidden is None:
+            args.hidden = 2048
+        if args.num_experts is None:
+            args.num_experts = 128
+        if args.num_topk is None:
+            args.num_topk = 8
+
+    print(
+        f"Model: {args.model}, hidden={args.hidden}, experts={args.num_experts}, topk={args.num_topk}"
+    )
 
     num_processes = args.num_processes
     torch.multiprocessing.spawn(
