@@ -637,11 +637,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         tokens_per_expert_by_layer = torch.stack(moe_counts)
 
-        dp_group = None
-        if self.parallel_dims.dp_cp_enabled:
-            dp_group = self.parallel_dims.world_mesh["dp_cp"].get_group()
-        elif self.parallel_dims.dp_enabled:
-            dp_group = self.parallel_dims.world_mesh["dp"].get_group()
+        dp_group = self.parallel_dims.get_optional_mesh("loss")
 
         if dp_group is not None:
             torch.distributed.all_reduce(

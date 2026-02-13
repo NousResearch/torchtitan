@@ -83,7 +83,9 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     beta_fast: int = 32
     beta_slow: int = 1
     mscale: float = 1.0
-    mscale_all_dim: float = 1.0  # When mscale == mscale_all_dim, effective mscale is 1.0
+    mscale_all_dim: float = (
+        1.0  # When mscale == mscale_all_dim, effective mscale is 1.0
+    )
 
     def update_from_config(self, job_config: JobConfig, **kwargs) -> None:
         seq_len = job_config.training.seq_len
@@ -102,6 +104,7 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
         self.moe_args._debug_force_load_balance = (
             job_config.debug.moe_force_load_balance
         )
+        self.moe_args.routing_noise_std = job_config.debug.moe_routing_noise_std
 
         # Configure expert parallel communication backend from config (defaults to "standard")
         self.moe_impl = job_config.parallelism.expert_parallel_comm_backend
