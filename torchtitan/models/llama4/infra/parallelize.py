@@ -42,6 +42,7 @@ from torchtitan.distributed.activation_checkpoint import apply_ac
 from torchtitan.distributed.expert_parallel import (
     ExpertParallel,
     ExpertParallelDeepEP,
+    ExpertParallelLLEP,
     ExpertTensorParallel,
     ReordererSequenceParallel,
     TensorParallel,
@@ -563,6 +564,9 @@ def apply_moe_ep_tp(
                 parallelize_plan=moe_layer_plan,
             )
 
+        # Check if LLEP is enabled on this MoE layer
+        use_llep = getattr(transformer_block.moe, "use_llep", False)
+
         experts_mesh, experts_plan = None, None
         if ep_mesh is None:
             experts_mesh = tp_mesh
@@ -570,14 +574,23 @@ def apply_moe_ep_tp(
             experts_plan = TensorParallel()
         elif tp_mesh is None or not etp_enabled:
             experts_mesh = ep_mesh
-            # input / output sharding on the batch / tokens dim
-            experts_plan = (
-                ExpertParallelDeepEP() if use_deepep is True else ExpertParallel()
-            )
-            if use_deepep is True:
+            if use_llep:
+                # LLEP: only shard weights, no dispatch/combine hooks
+                experts_plan = ExpertParallelLLEP()
+                # Store EP group on the MoE module for LLEP forward
+                transformer_block.moe._llep_enabled = True
+                transformer_block.moe._ep_group = ep_mesh.get_group()
+                logger.info(
+                    "Enabling Least-Loaded Expert Parallelism (LLEP) for expert parallelism"
+                )
+            elif use_deepep is True:
+                # input / output sharding on the batch / tokens dim
+                experts_plan = ExpertParallelDeepEP()
                 logger.info(
                     "Enabling deep_ep and fused all-to-all communication for expert parallelism"
                 )
+            else:
+                experts_plan = ExpertParallel()
         else:
             experts_mesh = ep_tp_mesh
             experts_plan = ExpertTensorParallel()

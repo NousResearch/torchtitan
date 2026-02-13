@@ -64,6 +64,12 @@ class MoEArgs:
     # Type is Any to avoid import cycle, runtime type is DeepEP | None
     deepep_config: Any = None
 
+    # Least-Loaded Expert Parallelism (LLEP)
+    use_llep: bool = False
+    llep_max_tokens_factor: float = 1.1  # alpha: max GPU capacity factor
+    llep_min_tokens_per_gemm: int = 1024  # min tokens per GEMM to spill
+    llep_adaptive_threshold: float = 0.0  # lambda: 0 = always use LPT
+
     def validate_deepep_config(self) -> None:
         """Validate DeepEP configuration consistency.
 
@@ -832,6 +838,12 @@ class MoE(nn.Module):
         num_experts = moe_args.num_experts
 
         self.use_deepep = moe_args.use_deepep
+        self.use_llep = moe_args.use_llep
+        self._llep_enabled = False  # Set to True by apply_moe_ep_tp when EP is active
+        self._ep_group = None  # Set by apply_moe_ep_tp when LLEP is active
+        self._llep_max_tokens_factor = moe_args.llep_max_tokens_factor
+        self._llep_min_tokens_per_gemm = moe_args.llep_min_tokens_per_gemm
+        self._llep_adaptive_threshold = moe_args.llep_adaptive_threshold
 
         # Validate DeepEP availability when use_deepep=True
         if self.use_deepep and not DEEPEP_AVAILABLE:
@@ -985,7 +997,27 @@ class MoE(nn.Module):
         else:
             shared_expert_out = torch.zeros_like(x)
 
-        if self.use_deepep:
+        if self._llep_enabled and self._ep_group is not None:
+            from torchtitan.distributed.llep import llep_moe_forward
+
+            routed_output = llep_moe_forward(
+                hidden_states=x,
+                top_scores=top_scores,
+                selected_experts_indices=selected_experts_indices,
+                w1=self.experts.w1,
+                w2=self.experts.w2,
+                w3=self.experts.w3,
+                ep_group=self._ep_group,
+                num_experts=self.experts.num_experts,
+                score_before_experts=self.score_before_experts,
+                max_tokens_factor=self._llep_max_tokens_factor,
+                min_tokens_per_gemm=self._llep_min_tokens_per_gemm,
+                adaptive_threshold=self._llep_adaptive_threshold,
+            )
+            out = shared_expert_out + routed_output
+            out = out.reshape(bs, slen, dim)
+            return out
+        elif self.use_deepep:
             top_scores = top_scores.float()
             self.experts.deepep_dispatcher.dispatch_preprocess(
                 top_scores, selected_experts_indices

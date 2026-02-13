@@ -371,3 +371,30 @@ class ExpertParallelDeepEP(ParallelStyle):
             input_fn=self._token_dispatch,
             output_fn=self._token_combine,
         )
+
+
+class ExpertParallelLLEP(ParallelStyle):
+    """Expert Parallelism with Least-Loaded Expert Parallelism (LLEP).
+
+    Only shards expert weights across EP ranks (Shard(0)).
+    Does NOT install dispatch/combine hooks because LLEP handles
+    token routing in MoE.forward() via the llep_moe_forward() function.
+    """
+
+    @staticmethod
+    def _partition_fn(name, mod, device_mesh):
+        # Same as ExpertParallel: shard on the expert dimension
+        for name, param in mod.named_parameters(recurse=False):
+            dist_param = nn.Parameter(
+                distribute_tensor(param, device_mesh, [Shard(0)])
+            )
+            mod.register_parameter(name, dist_param)
+
+    def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
+        return distribute_module(
+            module,
+            device_mesh,
+            partition_fn=ExpertParallelLLEP._partition_fn,
+            input_fn=None,  # No dispatch hook - LLEP handles routing
+            output_fn=None,  # No combine hook - LLEP handles routing
+        )
