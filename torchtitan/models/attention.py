@@ -239,6 +239,37 @@ def get_document_mask_mod(batch: torch.Tensor, eos_id: int) -> _mask_mod_signatu
     return document_mask
 
 
+def get_document_mask_mod_by_seq_lens(
+    seq_lens: torch.Tensor,
+) -> _mask_mod_signature:
+    """
+    seq_lens: [batch_size, num_docs]
+              each row sums to packed sequence length
+    """
+
+    device = seq_lens.device
+    seq_lens = seq_lens.to(torch.long)
+    bsz, num_docs = seq_lens.shape
+
+    # create doc id labels like:
+    # [[0,1,2,...],
+    #  [0,1,2,...]]
+    doc_ids = torch.arange(num_docs, device=device).expand(bsz, num_docs)
+
+    # expand into per-token ownership
+    # example:
+    # seq_lens = [[2,3,1]]
+    # → document_ids = [[0,0,1,1,1,2]]
+    doc_ids = torch.repeat_interleave(doc_ids, seq_lens, dim=1)
+
+    def document_seq_len_mask(
+        b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
+    ) -> torch.Tensor:
+        return doc_ids[b, q_idx] == doc_ids[b, kv_idx]
+
+    return document_seq_len_mask
+
+
 def get_fixed_block_mask_mod(fixed_block_size: int) -> _mask_mod_signature:
     """
     Divide the input sequence into blocks and only allow attention within the same block.

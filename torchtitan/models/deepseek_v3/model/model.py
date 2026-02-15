@@ -16,6 +16,7 @@ from torchtitan.models.attention import (
     FlexAttentionWrapper,
     get_causal_mask_mod,
     get_document_mask_mod,
+    get_document_mask_mod_by_seq_lens,
     ScaledDotProductAttentionWrapper,
 )
 from torchtitan.models.moe import build_moe, FeedForward, MoE
@@ -467,6 +468,12 @@ class DeepSeekV3Model(ModelProtocol):
                 B = input_batch.shape[0]
                 assert tokenizer.eos_id is not None
                 mask_mods.append(get_document_mask_mod(input_batch, tokenizer.eos_id))
+            case "block_causal_by_sequence_lengths":
+                assert extra_inputs is not None and "sequence_lengths" in extra_inputs
+                B = input_batch.shape[0]
+                mask_mods.append(
+                    get_document_mask_mod_by_seq_lens(extra_inputs["sequence_lengths"])
+                )
             case _:
                 raise ValueError(
                     f"Unknown attention mask type: {self.model_args.attn_mask_type}"
