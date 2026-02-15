@@ -6,7 +6,9 @@
 
 import importlib
 import os
+import shutil
 import time
+from pathlib import Path
 from datetime import timedelta
 from typing import Any, Generator, Iterable
 
@@ -88,6 +90,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         # init distributed and build meshes
         self.parallel_dims = parallel_dims = self.init_distributed()
+        self._maybe_copy_config_file()
 
         world_mesh = parallel_dims.world_mesh
         if parallel_dims.dp_enabled:
@@ -399,6 +402,28 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             etp=parallelism_config.expert_tensor_parallel_degree,
             world_size=world_size,
         )
+
+    def _maybe_copy_config_file(self) -> None:
+        config_file = self.job_config.job.config_file
+        if not config_file:
+            return
+
+        if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+            return
+
+        src = Path(config_file).expanduser().resolve()
+        if not src.exists():
+            logger.warning(f"Config file not found, skipping copy: {src}")
+            return
+
+        dst_dir = Path(self.job_config.job.dump_folder).expanduser().resolve()
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / src.name
+        try:
+            shutil.copy2(src, dst)
+            logger.info(f"Copied config file to {dst}")
+        except OSError as exc:
+            logger.warning(f"Failed to copy config file to {dst}: {exc}")
 
     def batch_generator(
         self, data_iterable: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]

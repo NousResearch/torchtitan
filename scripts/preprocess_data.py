@@ -657,7 +657,8 @@ def main(args):
                     raise RuntimeError(f"Unknown chat format, keys are {keys}")
 
             tokens = tokenizer.apply_chat_template(
-                conversation, tokenize=True, add_generation_prompt=False
+                conversation, tokenize=True, add_generation_prompt=False,
+                return_dict=False,
             )
             label = []
 
@@ -665,7 +666,8 @@ def main(args):
             for i in range(len(conversation)):
                 if i + 1 == len(conversation):
                     next_tokens = tokenizer.apply_chat_template(
-                        conversation, tokenize=True, add_generation_prompt=False
+                        conversation, tokenize=True, add_generation_prompt=False,
+                        return_dict=False,
                     )[current_len:]
                 else:
                     if "assistant" == conversation[i + 1]["role"]:
@@ -673,12 +675,14 @@ def main(args):
                             conversation[: i + 1],
                             add_generation_prompt=True,
                             tokenize=True,
+                            return_dict=False,
                         )[current_len:]
                     else:
                         next_tokens = tokenizer.apply_chat_template(
                             conversation[: i + 1],
                             tokenize=True,
                             add_generation_prompt=False,
+                            return_dict=False,
                         )[current_len:]
 
                 if conversation[i]["role"] == "assistant":
