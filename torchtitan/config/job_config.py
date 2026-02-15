@@ -245,10 +245,21 @@ class Training:
     """Dataset to use"""
 
     dataset_path: str | None = None
-    """
-    Path to the dataset in the file system. If provided, data will be
-    loaded from this path instead of downloaded.
-    """
+    """Path to the dataset, used when loading from local files instead of HF."""
+
+    dataset_type: Literal[
+        "huggingface", "nanoset", "preprocessed", "packed_memmap"
+    ] = "huggingface"
+    """Type of dataset to use ['huggingface', 'nanoset', 'preprocessed', 'packed_memmap']"""
+
+    dataset_folders: list[str] = field(default_factory=list)
+    """List of folders containing tokenized datasets for Nanoset"""
+
+    dataset_weights: list[float] | None = None
+    """Optional list of weights for weighted sampling from datasets"""
+
+    dataset_random_seed: int = 1234
+    """Random seed for dataset shuffling"""
 
     local_batch_size: int = 8
     """Local batch size (i.e., per-device batch size)"""

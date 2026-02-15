@@ -43,6 +43,10 @@ dev = [
     "tomli_w", # test_job_config
     "expecttest", # test_tokenizer
 ]
+nanosets = [
+    'numba',
+    'datatrove',
+]
 
 [tool.setuptools.dynamic]
 version = {file = "assets/version.txt"}
