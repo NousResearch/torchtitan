@@ -358,6 +358,10 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
     # state_dict is in standard TorchTitan format (w1, w2, w3)
     state_dict = load_file(checkpoint_path)
 
+    # Create default PEFT config (disabled)
+    from torchtitan.config.job_config import PEFT
+    peft_config = PEFT()
+
     if use_vllm_compat:
         # Create and load model (using vLLM-compat for bitwise determinism)
         from torchtitan.experiments.deterministic_vllm_rl.models.qwen3 import (
@@ -372,7 +376,7 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
         # Use standard TorchTitan model
         from torchtitan.models.qwen3 import Qwen3Model
 
-        model = Qwen3Model(model_args)
+        model = Qwen3Model(model_args, peft_config)
         # Load standard TorchTitan format directly
         model.load_state_dict(state_dict, strict=False)
 
