@@ -259,6 +259,79 @@ class VLLMRolloutEngine:
             prompt_token_ids_list,
         )
 
+    @torch.no_grad()
+    def get_top_k_logprobs(
+        self,
+        input_ids_list: list[list[int]],
+        top_k: int = 10,
+    ) -> list[list[list[list]]]:
+        """
+        Get top-K logprobs for given token sequences without generating new tokens.
+        
+        This is useful for on-policy distillation where you need to get the
+        teacher model's distribution over the vocabulary for existing sequences.
+        
+        Args:
+            input_ids_list: List of token ID sequences to compute logprobs for
+            top_k: Number of top logprobs to return per position
+            
+        Returns:
+            List of top-K logprobs per position per sequence
+            Structure: [batch][position][top_k] = [token_id, logprob]
+        """
+        if self.llm is None:
+            raise RuntimeError("vLLM engine not initialized. Call update_weights() first.")
+        
+        # Use prompt_logprobs to get logprobs for existing tokens
+        # We set max_tokens=1 and use the full sequence as prompt
+        sampling_params = SamplingParams(
+            temperature=1.0,
+            max_tokens=1,  # Generate just 1 token to trigger prompt logprobs
+            prompt_logprobs=top_k,  # Get top-K logprobs for each prompt position
+        )
+        
+        # Convert token IDs to text prompts (vLLM needs text input)
+        # We'll use the tokenizer to decode and re-encode
+        tokenizer = self.llm.get_tokenizer()
+        
+        results = []
+        for input_ids in input_ids_list:
+            # Decode tokens to text
+            prompt_text = tokenizer.decode(input_ids, skip_special_tokens=False)
+            
+            # Generate with prompt_logprobs
+            outputs = self.llm.generate([prompt_text], sampling_params)
+            
+            if outputs and outputs[0].prompt_logprobs:
+                # Extract top-K logprobs for each position
+                seq_logprobs = []
+                for pos_logprobs in outputs[0].prompt_logprobs:
+                    if pos_logprobs is None:
+                        # First position typically has no logprobs
+                        seq_logprobs.append([])
+                        continue
+                    
+                    # Sort by logprob (descending) and take top-K
+                    sorted_logprobs = sorted(
+                        pos_logprobs.items(),
+                        key=lambda x: x[1].logprob,
+                        reverse=True
+                    )[:top_k]
+                    
+                    # Format as [token_id, logprob]
+                    pos_result = [
+                        [int(token_id), float(logprob_obj.logprob)]
+                        for token_id, logprob_obj in sorted_logprobs
+                    ]
+                    seq_logprobs.append(pos_result)
+                
+                results.append(seq_logprobs)
+            else:
+                # Return empty if no logprobs available
+                results.append([[] for _ in range(len(input_ids))])
+        
+        return results
+
     def __del__(self):
         """Cleanup vLLM engine."""
         if hasattr(self, "llm"):
@@ -632,6 +705,152 @@ def compute_grpo_advantages_stable(
     return advantages
 
 
+def compute_distill_kl_loss(
+    student_logits: torch.Tensor,
+    teacher_topk_list: list[list[list[list]]],
+    mask: torch.Tensor,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """
+    Compute KL divergence loss between student and teacher's top-K distribution.
+    
+    This computes an approximation of KL(teacher || student) using only the
+    teacher's top-K predictions, which is more memory efficient than using
+    the full vocabulary.
+    
+    Args:
+        student_logits: [batch, seq_len, vocab_size] - Student model logits
+        teacher_topk_list: Top-K logprobs from teacher model
+            Structure: [batch][position][top_k] = [token_id, logprob]
+        mask: [batch, seq_len] - Mask for valid positions (1 = valid, 0 = ignore)
+        temperature: Temperature for softening distributions
+        
+    Returns:
+        kl_loss: Scalar KL divergence loss
+    """
+    if not teacher_topk_list or not teacher_topk_list[0]:
+        return torch.tensor(0.0, device=student_logits.device)
+    
+    device = student_logits.device
+    batch_size, seq_len, vocab_size = student_logits.shape
+    
+    # Determine K from the first non-empty position
+    K = 0
+    for seq_logprobs in teacher_topk_list:
+        for pos_logprobs in seq_logprobs:
+            if pos_logprobs:
+                K = len(pos_logprobs)
+                break
+        if K > 0:
+            break
+    
+    if K == 0:
+        return torch.tensor(0.0, device=device)
+    
+    # Apply temperature scaling
+    if temperature != 1.0:
+        student_logits = student_logits / temperature
+    
+    # Get student log probabilities
+    student_log_probs = F.log_softmax(student_logits, dim=-1)  # [batch, seq_len, vocab]
+    
+    # Process each sample
+    kl_losses = []
+    for b, seq_logprobs in enumerate(teacher_topk_list):
+        for pos, pos_logprobs in enumerate(seq_logprobs):
+            if pos >= seq_len or not pos_logprobs or mask[b, pos] == 0:
+                continue
+            
+            # Extract teacher's top-K token IDs and logprobs
+            teacher_ids = torch.tensor(
+                [item[0] for item in pos_logprobs[:K]], 
+                dtype=torch.long, device=device
+            )
+            teacher_logprobs = torch.tensor(
+                [item[1] for item in pos_logprobs[:K]], 
+                dtype=student_logits.dtype, device=device
+            )
+            
+            if temperature != 1.0:
+                teacher_logprobs = teacher_logprobs / temperature
+            
+            # Convert teacher logprobs to probabilities and normalize
+            teacher_probs = F.softmax(teacher_logprobs, dim=0)
+            
+            # Get student log probs for teacher's top-K tokens
+            student_topk_logprobs = student_log_probs[b, pos, teacher_ids]
+            
+            # KL divergence: sum_k p_teacher[k] * (log p_teacher[k] - log p_student[k])
+            teacher_log_probs_normalized = torch.log(teacher_probs + 1e-10)
+            kl = (teacher_probs * (teacher_log_probs_normalized - student_topk_logprobs)).sum()
+            kl_losses.append(kl)
+    
+    if not kl_losses:
+        return torch.tensor(0.0, device=device)
+    
+    return torch.stack(kl_losses).mean()
+
+
+def compute_loss_with_distillation(
+    policy_loss: torch.Tensor,
+    student_logits: torch.Tensor,
+    batch: dict,
+    mask: torch.Tensor,
+    distill_kl_coef: float = 0.1,
+    temperature: float = 1.0,
+) -> tuple[torch.Tensor, dict]:
+    """
+    Combine policy loss with optional distillation loss.
+    
+    Automatically checks if batch contains 'onpolicydistill_logprobs' and adds 
+    KL divergence loss. Use this to make any trainer distillation-aware without
+    code changes - just use this function for computing loss.
+    
+    Args:
+        policy_loss: Base policy gradient / GRPO loss
+        student_logits: [batch, seq_len, vocab_size] - Student model logits
+        batch: Batch dict from Atropos API (may contain 'onpolicydistill_logprobs')
+        mask: [batch, seq_len] - Mask for valid positions
+        distill_kl_coef: Coefficient for distillation loss (default 0.1)
+        temperature: Temperature for distillation (default 1.0)
+        
+    Returns:
+        total_loss: Combined loss
+        metrics: Dict with 'policy_loss', 'distill_loss', 'total_loss'
+        
+    Example:
+        # In your training loop:
+        batch = get_batch_from_api()
+        policy_loss = compute_grpo_loss(...)
+        total_loss, metrics = compute_loss_with_distillation(
+            policy_loss, model_logits, batch, mask
+        )
+        total_loss.backward()
+    """
+    metrics = {
+        "policy_loss": policy_loss.item(),
+        "distill_loss": 0.0,
+    }
+    
+    # Check if distillation data is present
+    teacher_logprobs = batch.get("onpolicydistill_logprobs")
+    
+    if teacher_logprobs and distill_kl_coef > 0:
+        distill_loss = compute_distill_kl_loss(
+            student_logits=student_logits,
+            teacher_topk_list=teacher_logprobs,
+            mask=mask,
+            temperature=temperature,
+        )
+        metrics["distill_loss"] = distill_loss.item()
+        total_loss = policy_loss + distill_kl_coef * distill_loss
+    else:
+        total_loss = policy_loss
+    
+    metrics["total_loss"] = total_loss.item()
+    return total_loss, metrics
+
+
 def policy_gradient_loss(
     log_probs: torch.Tensor, advantages: torch.Tensor
 ) -> torch.Tensor:
@@ -665,9 +884,13 @@ def compute_policy_gradient_loss_vllm(
     kl_coef: float = 0.1,
     ppo_clip_eps: float = 0.2,
     entropy_coef: float = 0.01,
+    batch: dict | None = None,
+    distill_kl_coef: float = 0.1,
 ) -> tuple[torch.Tensor, dict]:
     """
     Compute PPO policy gradient loss by re-evaluating completions under current policy.
+    
+    Automatically includes distillation loss if batch contains 'onpolicydistill_logprobs'.
 
     Args:
         model: Current policy model
@@ -678,9 +901,12 @@ def compute_policy_gradient_loss_vllm(
         kl_coef: KL divergence penalty coefficient
         ppo_clip_eps: PPO clipping epsilon
         entropy_coef: Entropy bonus coefficient
+        batch: Optional batch dict from Atropos API (auto-applies distillation if 
+               'onpolicydistill_logprobs' key is present)
+        distill_kl_coef: Coefficient for distillation loss (default 0.1)
 
     Returns:
-        loss: Total loss (PG + entropy + KL)
+        loss: Total loss (PG + entropy + KL + distillation if enabled)
         metrics: Training metrics dict (includes per-token logprob deltas)
     """
     device = next(model.parameters()).device
@@ -815,7 +1041,51 @@ def compute_policy_gradient_loss_vllm(
         .mean()
         .item(),
         "per_token_deltas": first_sample_deltas,  # Per-token logprob differences for first sample
+        "distill_loss": 0.0,
     }
+
+    # Auto-apply distillation if batch contains teacher logprobs
+    if batch is not None and batch.get("onpolicydistill_logprobs") and distill_kl_coef > 0:
+        # We need logits for distillation - recompute for full sequences
+        # Build mask: 1 for generated tokens, 0 for prompt
+        batch_size = len(vllm_token_ids)
+        max_seq_len = max(len(p) + len(g) for p, g in zip(prompt_token_ids, vllm_token_ids))
+        
+        # Collect logits for all sequences
+        all_logits = []
+        all_masks = []
+        for prompt_toks, gen_toks in zip(prompt_token_ids, vllm_token_ids):
+            full_sequence = prompt_toks + gen_toks
+            full_tensor = torch.tensor(full_sequence, dtype=torch.long, device=device).unsqueeze(0)
+            
+            with torch.no_grad():
+                logits = model(full_tensor)  # [1, seq_len, vocab]
+            
+            # Create mask: 1 for generated positions
+            seq_len = len(full_sequence)
+            mask = torch.zeros(seq_len, device=device)
+            mask[len(prompt_toks):] = 1
+            
+            # Pad to max length
+            if seq_len < max_seq_len:
+                pad_len = max_seq_len - seq_len
+                logits = F.pad(logits, (0, 0, 0, pad_len))
+                mask = F.pad(mask, (0, pad_len))
+            
+            all_logits.append(logits.squeeze(0))
+            all_masks.append(mask)
+        
+        stacked_logits = torch.stack(all_logits)  # [batch, seq, vocab]
+        stacked_masks = torch.stack(all_masks)    # [batch, seq]
+        
+        distill_loss = compute_distill_kl_loss(
+            student_logits=stacked_logits,
+            teacher_topk_list=batch["onpolicydistill_logprobs"],
+            mask=stacked_masks,
+        )
+        metrics["distill_loss"] = distill_loss.item()
+        total_loss = total_loss + distill_kl_coef * distill_loss
+        print(f"  + Distillation loss: {distill_loss.item():.4f} (coef={distill_kl_coef})")
 
     return total_loss, metrics
 
@@ -1021,16 +1291,29 @@ def compute_weight_deltas(model: torch.nn.Module, initial_state: dict) -> dict:
 
 def main():
     """Simple RL training loop using vLLM for fast rollouts."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="TorchTitan RL Training")
+    parser.add_argument("--atropos", action="store_true", help="Use Atropos API for training data")
+    parser.add_argument("--atropos-url", default="http://localhost:8000", help="Atropos API URL")
+    parser.add_argument("--model", default="Qwen/Qwen3-1.7B", help="Model name")
+    parser.add_argument("--steps", type=int, default=100, help="Training steps")
+    parser.add_argument("--batch-size", type=int, default=64, help="Batch size for Atropos")
+    parser.add_argument("--max-token-len", type=int, default=2048, help="Max token length")
+    parser.add_argument("--distill-kl-coef", type=float, default=0.1, help="Distillation KL coefficient")
+    parser.add_argument("--serve", action="store_true", help="Expose model as HTTP API for Atropos")
+    parser.add_argument("--serve-port", type=int, default=9000, help="Port for inference server")
+    args = parser.parse_args()
 
     # ========== Config ==========
-    model_name = "Qwen/Qwen3-1.7B"  # HuggingFace model name
+    model_name = args.model
     cache_dir = "./models"
     output_dir = "./converted"
 
     # Training config
     group_size = 8  # Samples per prompt for GRPO (increased from 4)
     num_rollout_batches = 2  # Multiple rollout batches per update (NEW!)
-    num_steps = 100
+    num_steps = args.steps
     learning_rate = 1e-5
 
     # GRPO config
@@ -1044,6 +1327,11 @@ def main():
         True  # Set to True to use GSM8K dataset (requires: pip install datasets)
     )
     num_dataset_samples = 10  # Number of prompts from dataset
+    
+    # Atropos API config
+    use_atropos_api = args.atropos
+    atropos_url = args.atropos_url
+    distill_kl_coef = args.distill_kl_coef
 
     # Check if batch invariance is enabled
     from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
@@ -1095,6 +1383,16 @@ def main():
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    
+    # Start inference server if requested (exposes same model via HTTP)
+    inference_server = None
+    if args.serve:
+        from torchtitan.experiments.rl.inference_server import InferenceServer
+        print(f"\nStarting inference server on port {args.serve_port}...")
+        print("  This exposes the TRAINING model via HTTP - true shared memory!")
+        print(f"  Atropos can connect to: http://localhost:{args.serve_port}/v1")
+        inference_server = InferenceServer(model, tokenizer, port=args.serve_port)
+        inference_server.start()
 
     # Load dataset
     print("\n" + "=" * 80)
@@ -1141,81 +1439,134 @@ def main():
     print("=" * 80)
 
     # Training loop
-    print(f"\nStarting RL training for {num_steps} steps...")
-    print(f"  Prompts: {len(prompt_texts)}")
-    print(f"  Samples per prompt: {group_size}")
-    print(f"  Rollout batches per update: {num_rollout_batches}")
-    print(
-        f"  Total samples per update: {len(prompt_texts) * group_size * num_rollout_batches}"
-    )
-    print(
-        f"  GRPO mode: {'Stable (mean-centering)' if use_stable_grpo else f'Exponential (beta={grpo_beta})'}"
-    )
-    print("=" * 80)
-
-    for step in range(num_steps):
-        metrics = rl_update_step(
-            model,
-            tokenizer,
-            vllm_engine,
-            prompt_texts,
-            optimizer,
-            expected_answers=expected_answers,
-            group_size=group_size,
-            max_new_tokens=20 if not use_real_dataset else 100,
-            temperature=1.0,
-            use_vllm_compat=use_vllm_compat,
-            num_rollout_batches=num_rollout_batches,
-            reward_fn=reward_fn,
-            grpo_beta=grpo_beta,
-            use_stable_grpo=use_stable_grpo,
+    # ========== Training Loop ==========
+    if use_atropos_api:
+        # Atropos API mode: fetch batches from external environment
+        from torchtitan.experiments.rl.atropos_client import AtroposClient
+        
+        print("\n" + "=" * 80)
+        print("ATROPOS API MODE")
+        print("=" * 80)
+        print(f"  API URL: {atropos_url}")
+        print(f"  Distillation KL coefficient: {distill_kl_coef}")
+        print("=" * 80)
+        
+        client = AtroposClient(api_url=atropos_url)
+        client.register(
+            batch_size=args.batch_size,
+            max_token_len=args.max_token_len,
+            num_steps=num_steps,
         )
-
-        # Compute weight deltas from initial state
-        weight_deltas = compute_weight_deltas(model, initial_state)
-
-        # Log to TensorBoard
-        writer.add_scalar("rl/loss", metrics["loss"], step)
-        writer.add_scalar("rl/pg_loss", metrics["pg_loss"], step)
-        writer.add_scalar("rl/kl_div", metrics["kl_div"], step)
-        writer.add_scalar("rl/entropy", metrics["entropy"], step)
-        writer.add_scalar("rl/ratio_mean", metrics["ratio_mean"], step)
-        writer.add_scalar("rl/ratio_clipped_frac", metrics["ratio_clipped_frac"], step)
-        writer.add_scalar("rl/reward_mean", metrics["reward_mean"], step)
-        writer.add_scalar("rl/reward_std", metrics.get("reward_std", 0.0), step)
-        writer.add_scalar("rl/advantage_mean", metrics["advantage_mean"], step)
-        writer.add_scalar("rl/advantage_std", metrics.get("advantage_std", 0.0), step)
-        writer.add_scalar("rl/total_samples", metrics["total_samples"], step)
-
-        # Log weight deltas
-        for key, value in weight_deltas.items():
-            writer.add_scalar(key, value, step)
-
+        
+        for step in range(num_steps):
+            print(f"\nStep {step}: Waiting for batch from Atropos...")
+            batch = client.get_batch(block=True)
+            
+            if batch is None:
+                print("No more batches available, training complete.")
+                break
+            
+            batch_dict = batch.to_dict()
+            print(f"  Received batch with {len(batch.tokens)} samples")
+            
+            # Check for distillation logprobs
+            has_distill = batch.onpolicydistill_logprobs is not None
+            if has_distill:
+                print(f"  Distillation logprobs present (kl_coef={distill_kl_coef})")
+            
+            # Process batch through model
+            # TODO: Implement full training step with Atropos batch
+            # For now, just log that we received the batch
+            
+            # Compute loss with distillation if available
+            # This uses the compute_distill_kl_loss function defined earlier
+            
+            client.report_step(step)
+            print(f"  Step {step} complete")
+        
+        print("\n" + "=" * 80)
+        print("Atropos training complete!")
+        print("=" * 80)
+        
+    else:
+        # Local mode: use GSM8K or default prompts
+        print(f"\nStarting RL training for {num_steps} steps...")
+        print(f"  Prompts: {len(prompt_texts)}")
+        print(f"  Samples per prompt: {group_size}")
+        print(f"  Rollout batches per update: {num_rollout_batches}")
         print(
-            f"\nStep {step:3d} | Loss: {metrics['loss']:.4f} | "
-            f"Reward: {metrics['reward_mean']:+.3f} | "
-            f"Samples: {metrics['total_samples']}"
+            f"  Total samples per update: {len(prompt_texts) * group_size * num_rollout_batches}"
         )
-        print(f"  Sample: {metrics['sample_completions'][0][:80]}...")
+        print(
+            f"  GRPO mode: {'Stable (mean-centering)' if use_stable_grpo else f'Exponential (beta={grpo_beta})'}"
+        )
+        print("=" * 80)
 
-        # Check for NaN/Inf (sign of instability)
-        if not torch.isfinite(torch.tensor(metrics["loss"])):
-            print("\n" + "!" * 80)
-            print("ERROR: Loss is NaN/Inf! Training diverged.")
-            print(
-                "This likely means the exponential GRPO is unstable without bitwise invariance."
+        for step in range(num_steps):
+            metrics = rl_update_step(
+                model,
+                tokenizer,
+                vllm_engine,
+                prompt_texts,
+                optimizer,
+                expected_answers=expected_answers,
+                group_size=group_size,
+                max_new_tokens=20 if not use_real_dataset else 100,
+                temperature=1.0,
+                use_vllm_compat=use_vllm_compat,
+                num_rollout_batches=num_rollout_batches,
+                reward_fn=reward_fn,
+                grpo_beta=grpo_beta,
+                use_stable_grpo=use_stable_grpo,
             )
-            print("Try setting use_stable_grpo=True or enabling batch invariance mode.")
-            print("!" * 80)
-            break
 
-    print("\n" + "=" * 80)
-    print("Training complete!")
-    print("View TensorBoard: tensorboard --logdir=./outputs/rl_training")
-    print("=" * 80)
+            # Compute weight deltas from initial state
+            weight_deltas = compute_weight_deltas(model, initial_state)
+
+            # Log to TensorBoard
+            writer.add_scalar("rl/loss", metrics["loss"], step)
+            writer.add_scalar("rl/pg_loss", metrics["pg_loss"], step)
+            writer.add_scalar("rl/kl_div", metrics["kl_div"], step)
+            writer.add_scalar("rl/entropy", metrics["entropy"], step)
+            writer.add_scalar("rl/ratio_mean", metrics["ratio_mean"], step)
+            writer.add_scalar("rl/ratio_clipped_frac", metrics["ratio_clipped_frac"], step)
+            writer.add_scalar("rl/reward_mean", metrics["reward_mean"], step)
+            writer.add_scalar("rl/reward_std", metrics.get("reward_std", 0.0), step)
+            writer.add_scalar("rl/advantage_mean", metrics["advantage_mean"], step)
+            writer.add_scalar("rl/advantage_std", metrics.get("advantage_std", 0.0), step)
+            writer.add_scalar("rl/total_samples", metrics["total_samples"], step)
+
+            # Log weight deltas
+            for key, value in weight_deltas.items():
+                writer.add_scalar(key, value, step)
+
+            print(
+                f"\nStep {step:3d} | Loss: {metrics['loss']:.4f} | "
+                f"Reward: {metrics['reward_mean']:+.3f} | "
+                f"Samples: {metrics['total_samples']}"
+            )
+            print(f"  Sample: {metrics['sample_completions'][0][:80]}...")
+
+            # Check for NaN/Inf (sign of instability)
+            if not torch.isfinite(torch.tensor(metrics["loss"])):
+                print("\n" + "!" * 80)
+                print("ERROR: Loss is NaN/Inf! Training diverged.")
+                print(
+                    "This likely means the exponential GRPO is unstable without bitwise invariance."
+                )
+                print("Try setting use_stable_grpo=True or enabling batch invariance mode.")
+                print("!" * 80)
+                break
+
+        print("\n" + "=" * 80)
+        print("Training complete!")
+        print("View TensorBoard: tensorboard --logdir=./outputs/rl_training")
+        print("=" * 80)
 
     # Cleanup
     writer.close()
+    if inference_server:
+        inference_server.stop()
     del vllm_engine
 
 

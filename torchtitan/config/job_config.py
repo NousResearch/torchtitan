@@ -997,6 +997,30 @@ class Debug:
 
 
 @dataclass
+class AtroposAPI:
+    """Configuration for connecting to Atropos API for RL training."""
+
+    enabled: bool = False
+    """Enable fetching training data from Atropos API instead of local dataset"""
+
+    api_url: str = "http://localhost:8000"
+    """Base URL of the Atropos API server"""
+
+    poll_interval: float = 1.0
+    """Seconds to wait between polling for new batches"""
+
+    timeout: float = 30.0
+    """Request timeout in seconds"""
+
+    distill_kl_coef: float = 0.1
+    """
+    Coefficient for distillation KL loss. When batches contain 
+    'onpolicydistill_logprobs' from a teacher model, this controls 
+    the weight of the distillation loss term.
+    """
+
+
+@dataclass
 class JobConfig:
     """
     Default container for training configuration.
@@ -1022,6 +1046,7 @@ class JobConfig:
     experimental: Experimental = field(default_factory=Experimental)
     validation: Validation = field(default_factory=Validation)
     debug: Debug = field(default_factory=Debug)
+    atropos_api: AtroposAPI = field(default_factory=AtroposAPI)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
