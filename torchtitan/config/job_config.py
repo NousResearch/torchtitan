@@ -1208,6 +1208,46 @@ class GRPO:
 
 
 @dataclass
+class AtroposAPI:
+    """Configuration for connecting to Atropos API for RL training with on-policy distillation."""
+
+    enabled: bool = False
+    """Enable fetching training data from Atropos API instead of local dataset."""
+
+    api_url: str = "http://localhost:8000"
+    """Base URL of the Atropos API server."""
+
+    poll_interval: float = 1.0
+    """Seconds to wait between polling for new batches."""
+
+    timeout: float = 30.0
+    """Request timeout in seconds."""
+
+    batch_size: int = 64
+    """Batch size to request from Atropos."""
+
+    max_token_len: int = 2048
+    """Maximum token length for sequences."""
+
+    distill_kl_coef: float = 0.1
+    """
+    Coefficient for distillation KL loss. When batches contain
+    'onpolicydistill_logprobs' from a teacher model, this controls
+    the weight of the distillation loss term.
+    """
+
+    serve_inference: bool = False
+    """
+    If True, expose the training model as an HTTP API for on-policy inference.
+    This allows Atropos environments to use the training model for generation,
+    ensuring shared memory between inference and training.
+    """
+
+    serve_port: int = 9000
+    """Port for the inference server when serve_inference is True."""
+
+
+@dataclass
 class Debug:
     seed: int | None = None
     """Choose the base RNG seed used for training"""
@@ -1251,6 +1291,7 @@ class JobConfig:
     grpo: GRPO = field(default_factory=GRPO)
     debug: Debug = field(default_factory=Debug)
     peft: PEFT = field(default_factory=PEFT)
+    atropos_api: AtroposAPI = field(default_factory=AtroposAPI)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

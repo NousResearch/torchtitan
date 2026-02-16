@@ -655,6 +655,79 @@ def policy_gradient_loss(
     return pg_loss
 
 
+def compute_distill_kl_loss(
+    student_logits: torch.Tensor,
+    teacher_topk_list: list[list[list[list]]],
+    mask: torch.Tensor,
+    temperature: float = 1.0,
+) -> torch.Tensor:
+    """
+    Compute KL divergence loss for on-policy distillation.
+
+    Uses teacher's top-K logprobs to compute a sparse KL divergence,
+    which pushes the student distribution closer to the teacher.
+
+    Args:
+        student_logits: [batch, seq_len, vocab_size] - Student model logits
+        teacher_topk_list: Teacher's top-K logprobs per position
+                          Structure: [batch][position][top_k] = [token_id, logprob]
+        mask: [batch, seq_len] - Mask for valid positions (1 = valid, 0 = pad)
+        temperature: Temperature for softening distributions
+
+    Returns:
+        Scalar KL divergence loss
+    """
+    device = student_logits.device
+    batch_size, seq_len, vocab_size = student_logits.shape
+
+    total_kl = 0.0
+    num_valid_positions = 0
+
+    for b in range(batch_size):
+        teacher_seq = teacher_topk_list[b] if b < len(teacher_topk_list) else []
+
+        for t in range(seq_len):
+            if mask[b, t] < 0.5:
+                continue  # Skip masked positions
+
+            if t >= len(teacher_seq) or not teacher_seq[t]:
+                continue  # No teacher logprobs for this position
+
+            # Get student log probs at this position
+            student_log_probs = F.log_softmax(
+                student_logits[b, t, :].float() / temperature, dim=-1
+            )
+
+            # Get teacher's top-K for this position
+            teacher_topk = teacher_seq[t]  # List of [token_id, logprob]
+
+            # Compute KL divergence over teacher's top-K tokens
+            # KL(teacher || student) = sum_k p_teacher(k) * (log p_teacher(k) - log p_student(k))
+            position_kl = 0.0
+            for token_id, teacher_logprob in teacher_topk:
+                if not isinstance(token_id, int) or token_id < 0 or token_id >= vocab_size:
+                    continue
+
+                # Teacher probability (from logprob)
+                teacher_prob = torch.exp(torch.tensor(teacher_logprob / temperature, device=device))
+
+                # Student log prob for this token
+                student_log_prob = student_log_probs[token_id]
+
+                # KL contribution: p_teacher * (log p_teacher - log p_student)
+                # = p_teacher * log p_teacher - p_teacher * log p_student
+                kl_contrib = teacher_prob * (teacher_logprob / temperature - student_log_prob)
+                position_kl += kl_contrib
+
+            total_kl += position_kl
+            num_valid_positions += 1
+
+    if num_valid_positions == 0:
+        return torch.tensor(0.0, device=device, requires_grad=True)
+
+    return total_kl / num_valid_positions
+
+
 def compute_policy_gradient_loss_vllm(
     model: torch.nn.Module,
     vllm_token_ids: list[list[int]],
@@ -664,9 +737,13 @@ def compute_policy_gradient_loss_vllm(
     kl_coef: float = 0.1,
     ppo_clip_eps: float = 0.2,
     entropy_coef: float = 0.01,
+    batch: dict | None = None,
+    distill_kl_coef: float = 0.0,
 ) -> tuple[torch.Tensor, dict]:
     """
     Compute PPO policy gradient loss by re-evaluating completions under current policy.
+
+    Optionally includes on-policy distillation loss when batch contains teacher logprobs.
 
     Args:
         model: Current policy model
@@ -677,9 +754,11 @@ def compute_policy_gradient_loss_vllm(
         kl_coef: KL divergence penalty coefficient
         ppo_clip_eps: PPO clipping epsilon
         entropy_coef: Entropy bonus coefficient
+        batch: Optional batch dict containing 'onpolicydistill_logprobs' from teacher
+        distill_kl_coef: Coefficient for distillation KL loss (0 = disabled)
 
     Returns:
-        loss: Total loss (PG + entropy + KL)
+        loss: Total loss (PG + entropy + KL + distillation if enabled)
         metrics: Training metrics dict (includes per-token logprob deltas)
     """
     device = next(model.parameters()).device
@@ -815,6 +894,68 @@ def compute_policy_gradient_loss_vllm(
         .item(),
         "per_token_deltas": first_sample_deltas,  # Per-token logprob differences for first sample
     }
+
+    # ========== On-Policy Distillation ==========
+    # Automatically apply distillation if batch contains teacher logprobs
+    if (
+        batch is not None
+        and batch.get("onpolicydistill_logprobs")
+        and distill_kl_coef > 0
+    ):
+        print(f"  [Distillation] Computing KL loss with coef={distill_kl_coef}")
+
+        # Recompute logits for full sequences to get vocab distribution
+        # We need logits (not just selected log probs) for KL divergence
+        all_logits = []
+        all_masks = []
+
+        for prompt_toks, gen_toks in zip(prompt_token_ids, vllm_token_ids):
+            full_sequence = prompt_toks + gen_toks
+            full_tensor = torch.tensor(
+                full_sequence, dtype=torch.long, device=device
+            ).unsqueeze(0)
+
+            # Forward pass for logits
+            with torch.enable_grad():
+                logits = model(full_tensor)  # [1, seq_len, vocab_size]
+
+            # We want logits for positions that predict generated tokens
+            # i.e., positions prompt_len-1 to prompt_len+gen_len-2
+            prompt_len = len(prompt_toks)
+            gen_start_idx = prompt_len - 1
+            gen_end_idx = gen_start_idx + len(gen_toks)
+
+            # Extract logits for generated positions [1, gen_len, vocab_size]
+            gen_logits = logits[:, gen_start_idx:gen_end_idx, :]
+            all_logits.append(gen_logits)
+
+            # Create mask (all 1s for generated tokens)
+            mask = torch.ones(1, len(gen_toks), device=device)
+            all_masks.append(mask)
+
+        # Pad and stack (handle variable lengths)
+        max_gen_len = max(lg.shape[1] for lg in all_logits)
+        vocab_size = all_logits[0].shape[2]
+
+        stacked_logits = torch.zeros(
+            len(all_logits), max_gen_len, vocab_size, device=device
+        )
+        stacked_masks = torch.zeros(len(all_logits), max_gen_len, device=device)
+
+        for i, (lg, mk) in enumerate(zip(all_logits, all_masks)):
+            stacked_logits[i, : lg.shape[1], :] = lg[0]
+            stacked_masks[i, : mk.shape[1]] = mk[0]
+
+        # Compute distillation loss
+        distill_loss = compute_distill_kl_loss(
+            student_logits=stacked_logits,
+            teacher_topk_list=batch["onpolicydistill_logprobs"],
+            mask=stacked_masks,
+        )
+
+        metrics["distill_loss"] = distill_loss.item()
+        total_loss = total_loss + distill_kl_coef * distill_loss
+        print(f"  [Distillation] Loss: {distill_loss.item():.4f}")
 
     return total_loss, metrics
 
@@ -1024,30 +1165,117 @@ def compute_weight_deltas(model: torch.nn.Module, initial_state: dict) -> dict:
 
 
 def main():
-    """Simple RL training loop using vLLM for fast rollouts."""
+    """Simple RL training loop using vLLM for fast rollouts.
 
-    # ========== Config ==========
-    model_name = "Qwen/Qwen3-1.7B"  # HuggingFace model name
-    cache_dir = "./models"
-    output_dir = "./converted"
+    Supports two modes:
+    1. Local mode (default): Use local GSM8K dataset for training
+    2. Atropos mode (--atropos): Fetch batches from Atropos API server
+
+    For on-policy distillation:
+    - Run with --serve to expose the training model as HTTP API
+    - Configure Atropos environment with distillation_enabled=True
+    - Atropos will fetch teacher logprobs and include them in batches
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="TorchTitan RL Training with On-Policy Distillation Support"
+    )
+
+    # Model config
+    parser.add_argument(
+        "--model", default="Qwen/Qwen3-1.7B", help="HuggingFace model name"
+    )
+    parser.add_argument("--cache-dir", default="./models", help="Model cache directory")
+    parser.add_argument(
+        "--output-dir", default="./converted", help="Output directory for checkpoints"
+    )
 
     # Training config
-    group_size = 8  # Samples per prompt for GRPO (increased from 4)
-    num_rollout_batches = 2  # Multiple rollout batches per update (NEW!)
-    num_steps = 100
-    learning_rate = 1e-5
+    parser.add_argument("--steps", type=int, default=100, help="Number of training steps")
+    parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
+    parser.add_argument(
+        "--group-size", type=int, default=8, help="Samples per prompt for GRPO"
+    )
+    parser.add_argument(
+        "--num-rollout-batches", type=int, default=2, help="Rollout batches per update"
+    )
 
     # GRPO config
-    use_stable_grpo = (
-        False  # Set to True for stable training, False to test bitwise invariance
+    parser.add_argument(
+        "--stable-grpo",
+        action="store_true",
+        help="Use stable GRPO (mean-centering) instead of exponential",
     )
-    grpo_beta = 0.1  # Lower = more unstable (will explode without bitwise invariance!)
+    parser.add_argument(
+        "--grpo-beta", type=float, default=0.1, help="GRPO exponential beta"
+    )
+
+    # Atropos API config
+    parser.add_argument(
+        "--atropos", action="store_true", help="Use Atropos API for training data"
+    )
+    parser.add_argument(
+        "--atropos-url", default="http://localhost:8000", help="Atropos API URL"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=64, help="Batch size for Atropos"
+    )
+    parser.add_argument(
+        "--max-token-len", type=int, default=2048, help="Max token length"
+    )
+
+    # Distillation config
+    parser.add_argument(
+        "--distill-kl-coef",
+        type=float,
+        default=0.1,
+        help="Distillation KL coefficient (0 to disable)",
+    )
+
+    # Inference server config
+    parser.add_argument(
+        "--serve",
+        action="store_true",
+        help="Expose training model as HTTP API for on-policy inference",
+    )
+    parser.add_argument(
+        "--serve-port", type=int, default=9000, help="Port for inference server"
+    )
 
     # Dataset config
-    use_real_dataset = (
-        True  # Set to True to use GSM8K dataset (requires: pip install datasets)
+    parser.add_argument(
+        "--use-gsm8k", action="store_true", default=True, help="Use GSM8K dataset"
     )
-    num_dataset_samples = 10  # Number of prompts from dataset
+    parser.add_argument(
+        "--num-samples", type=int, default=10, help="Number of dataset samples"
+    )
+
+    args = parser.parse_args()
+
+    # Map args to config variables
+    model_name = args.model
+    cache_dir = args.cache_dir
+    output_dir = args.output_dir
+
+    # Training config
+    group_size = args.group_size
+    num_rollout_batches = args.num_rollout_batches
+    num_steps = args.steps
+    learning_rate = args.lr
+
+    # GRPO config
+    use_stable_grpo = args.stable_grpo
+    grpo_beta = args.grpo_beta
+
+    # Dataset config
+    use_real_dataset = args.use_gsm8k
+    num_dataset_samples = args.num_samples
+
+    # Atropos/Distillation config
+    use_atropos_api = args.atropos
+    atropos_url = args.atropos_url
+    distill_kl_coef = args.distill_kl_coef
 
     # Check if batch invariance is enabled
     from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
@@ -1100,40 +1328,23 @@ def main():
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
 
-    # Load dataset
-    print("\n" + "=" * 80)
-    print("Dataset Configuration")
-    print("=" * 80)
-
-    if use_real_dataset:
-        print(f"Attempting to load GSM8K dataset ({num_dataset_samples} samples)...")
-        prompt_texts, expected_answers = load_gsm8k_dataset(
-            split="train", num_samples=num_dataset_samples
+    # Start inference server if requested (exposes training model via HTTP)
+    inference_server = None
+    if args.serve:
+        from torchtitan.experiments.deterministic_vllm_rl.inference_server import (
+            InferenceServer,
+            InferenceConfig,
         )
 
-        if prompt_texts is None or len(prompt_texts) == 0:
-            print("⚠ Failed to load dataset, falling back to default prompts")
-            use_real_dataset = False
+        print("\n" + "=" * 80)
+        print("Starting Inference Server")
+        print("=" * 80)
+        print(f"  This exposes the TRAINING model via HTTP - true shared memory!")
+        print(f"  Atropos can connect to: http://localhost:{args.serve_port}/v1")
 
-    if not use_real_dataset:
-        # Fallback: simple prompts with verifiable answers
-        print("Using default prompts (factual questions)")
-        prompts_with_answers = [
-            ("The capital of France is", "paris"),
-            ("What is 7 times 8?", "56"),
-            ("The first president of the United States was", "washington"),
-            ("The chemical symbol for water is", "h2o"),
-            ("The largest planet in our solar system is", "jupiter"),
-        ]
-        prompt_texts = [p[0] for p in prompts_with_answers]
-        expected_answers = [p[1] for p in prompts_with_answers]
-
-    # Select reward function
-    reward_fn = math_reward_function if use_real_dataset else trivial_reward_function
-
-    print(f"Loaded {len(prompt_texts)} prompts")
-    print(f"Reward function: {reward_fn.__name__}")
-    print(f"First prompt: {prompt_texts[0][:80]}...")
+        inference_config = InferenceConfig(port=args.serve_port)
+        inference_server = InferenceServer(model, tokenizer, inference_config)
+        inference_server.start()
 
     # Optimizer
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -1144,74 +1355,265 @@ def main():
     print("TensorBoard logging enabled at: ./outputs/rl_training")
     print("=" * 80)
 
-    # Training loop
-    print(f"\nStarting RL training for {num_steps} steps...")
-    print(f"  Prompts: {len(prompt_texts)}")
-    print(f"  Samples per prompt: {group_size}")
-    print(f"  Rollout batches per update: {num_rollout_batches}")
-    print(
-        f"  Total samples per update: {len(prompt_texts) * group_size * num_rollout_batches}"
-    )
-    print(
-        f"  GRPO mode: {'Stable (mean-centering)' if use_stable_grpo else f'Exponential (beta={grpo_beta})'}"
-    )
-    print("=" * 80)
-
-    for step in range(num_steps):
-        metrics = rl_update_step(
-            model,
-            tokenizer,
-            vllm_engine,
-            prompt_texts,
-            optimizer,
-            expected_answers=expected_answers,
-            group_size=group_size,
-            max_new_tokens=20 if not use_real_dataset else 100,
-            temperature=1.0,
-            use_vllm_compat=use_vllm_compat,
-            num_rollout_batches=num_rollout_batches,
-            reward_fn=reward_fn,
-            grpo_beta=grpo_beta,
-            use_stable_grpo=use_stable_grpo,
+    # ========== TRAINING MODE SELECTION ==========
+    if use_atropos_api:
+        # ========== ATROPOS API MODE ==========
+        from torchtitan.experiments.deterministic_vllm_rl.atropos_client import (
+            AtroposClient,
         )
 
-        # Compute weight deltas from initial state
-        weight_deltas = compute_weight_deltas(model, initial_state)
+        print("\n" + "=" * 80)
+        print("ATROPOS API MODE")
+        print("=" * 80)
+        print(f"  Connecting to: {atropos_url}")
+        print(f"  Batch size: {args.batch_size}")
+        print(f"  Max token len: {args.max_token_len}")
+        print(f"  Distillation KL coef: {distill_kl_coef}")
+        print("=" * 80)
 
-        # Log to TensorBoard
-        writer.add_scalar("rl/loss", metrics["loss"], step)
-        writer.add_scalar("rl/pg_loss", metrics["pg_loss"], step)
-        writer.add_scalar("rl/kl_div", metrics["kl_div"], step)
-        writer.add_scalar("rl/entropy", metrics["entropy"], step)
-        writer.add_scalar("rl/ratio_mean", metrics["ratio_mean"], step)
-        writer.add_scalar("rl/ratio_clipped_frac", metrics["ratio_clipped_frac"], step)
-        writer.add_scalar("rl/reward_mean", metrics["reward_mean"], step)
-        writer.add_scalar("rl/reward_std", metrics.get("reward_std", 0.0), step)
-        writer.add_scalar("rl/advantage_mean", metrics["advantage_mean"], step)
-        writer.add_scalar("rl/advantage_std", metrics.get("advantage_std", 0.0), step)
-        writer.add_scalar("rl/total_samples", metrics["total_samples"], step)
+        client = AtroposClient(api_url=atropos_url)
+        if not client.register(
+            batch_size=args.batch_size,
+            max_token_len=args.max_token_len,
+            num_steps=num_steps,
+        ):
+            print("Failed to register with Atropos API. Exiting.")
+            return
 
-        # Log weight deltas
-        for key, value in weight_deltas.items():
-            writer.add_scalar(key, value, step)
+        for step in range(num_steps):
+            print(f"\n[Step {step}] Waiting for batch from Atropos...")
+            batch = client.get_batch(block=True)
 
-        print(
-            f"\nStep {step:3d} | Loss: {metrics['loss']:.4f} | "
-            f"Reward: {metrics['reward_mean']:+.3f} | "
-            f"Samples: {metrics['total_samples']}"
-        )
-        print(f"  Sample: {metrics['sample_completions'][0][:80]}...")
+            if batch is None:
+                print("No more batches available. Training complete.")
+                break
 
-        # Check for NaN/Inf (sign of instability)
-        if not torch.isfinite(torch.tensor(metrics["loss"])):
-            print("\n" + "!" * 80)
-            print("ERROR: Loss is NaN/Inf! Training diverged.")
-            print(
-                "This likely means the exponential GRPO is unstable without bitwise invariance."
+            batch_dict = batch.to_dict()
+            print(f"  Received batch with {len(batch)} sequences")
+
+            # Check for distillation data
+            has_distill = batch_dict.get("onpolicydistill_logprobs") is not None
+            if has_distill:
+                print(f"  [Distillation] Teacher logprobs present in batch")
+
+            # Update vLLM weights from current policy
+            titan_state = model.state_dict()
+            vllm_compat_state = torchtitan_to_vllm_compat(titan_state)
+            vllm_engine.update_weights(vllm_compat_state)
+
+            # Process batch: extract tokens, compute advantages, etc.
+            tokens = batch_dict["tokens"]
+            masks = batch_dict["masks"]
+            scores = batch_dict["scores"]
+
+            # Convert scores to advantages (simple normalization)
+            scores_tensor = torch.tensor(scores, dtype=torch.float32)
+            advantages = (scores_tensor - scores_tensor.mean()) / (
+                scores_tensor.std() + 1e-8
             )
-            print("Try setting use_stable_grpo=True or enabling batch invariance mode.")
-            print("!" * 80)
-            break
+
+            # Forward pass and loss computation
+            optimizer.zero_grad()
+
+            # For Atropos batches, we need to handle the format differently
+            # The tokens already include prompt + generated, masks indicate generated
+            all_logits = []
+            all_token_log_probs = []
+
+            for seq_idx, (seq_tokens, seq_mask) in enumerate(zip(tokens, masks)):
+                seq_tensor = torch.tensor(
+                    seq_tokens, dtype=torch.long, device=device
+                ).unsqueeze(0)
+
+                # Forward pass
+                logits = model(seq_tensor)  # [1, seq_len, vocab]
+
+                # Compute log probs
+                log_probs = F.log_softmax(logits[:, :-1, :].to(torch.float32), dim=-1)
+                target_tokens = seq_tensor[:, 1:]
+
+                # Gather log probs for actual tokens
+                token_log_probs = log_probs.gather(
+                    2, target_tokens.unsqueeze(-1)
+                ).squeeze(-1)
+
+                # Apply mask (only count generated tokens)
+                mask_tensor = torch.tensor(
+                    seq_mask[1:], dtype=torch.float32, device=device
+                ).unsqueeze(0)
+                masked_log_probs = token_log_probs * mask_tensor
+
+                all_logits.append(logits)
+                all_token_log_probs.append(masked_log_probs.sum())
+
+            # Stack log probs
+            total_log_probs = torch.stack(all_token_log_probs)
+
+            # Policy gradient loss
+            pg_loss = -(total_log_probs * advantages.to(device)).mean()
+
+            # Add distillation loss if present
+            distill_loss = torch.tensor(0.0, device=device)
+            if has_distill and distill_kl_coef > 0:
+                # Pad and stack logits for distillation
+                max_len = max(lg.shape[1] for lg in all_logits)
+                vocab_size = all_logits[0].shape[2]
+                stacked_logits = torch.zeros(
+                    len(all_logits), max_len, vocab_size, device=device
+                )
+                stacked_masks = torch.zeros(len(all_logits), max_len, device=device)
+
+                for i, lg in enumerate(all_logits):
+                    stacked_logits[i, : lg.shape[1], :] = lg[0]
+                    stacked_masks[i, : len(masks[i])] = torch.tensor(
+                        masks[i], dtype=torch.float32
+                    )
+
+                distill_loss = compute_distill_kl_loss(
+                    student_logits=stacked_logits[:, :-1, :],
+                    teacher_topk_list=batch_dict["onpolicydistill_logprobs"],
+                    mask=stacked_masks[:, 1:],
+                )
+                print(f"  [Distillation] Loss: {distill_loss.item():.4f}")
+
+            total_loss = pg_loss + distill_kl_coef * distill_loss
+
+            # Backward and optimize
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            # Log metrics
+            writer.add_scalar("rl/loss", total_loss.item(), step)
+            writer.add_scalar("rl/pg_loss", pg_loss.item(), step)
+            if has_distill:
+                writer.add_scalar("rl/distill_loss", distill_loss.item(), step)
+            writer.add_scalar("rl/reward_mean", scores_tensor.mean().item(), step)
+
+            print(
+                f"  Loss: {total_loss.item():.4f} | "
+                f"PG: {pg_loss.item():.4f} | "
+                f"Reward: {scores_tensor.mean().item():.3f}"
+            )
+
+            # Report progress to Atropos
+            client.report_step(
+                step,
+                {
+                    "loss": total_loss.item(),
+                    "pg_loss": pg_loss.item(),
+                    "distill_loss": distill_loss.item() if has_distill else 0.0,
+                    "reward_mean": scores_tensor.mean().item(),
+                },
+            )
+
+        client.close()
+
+    else:
+        # ========== LOCAL DATASET MODE ==========
+        # Load dataset
+        print("\n" + "=" * 80)
+        print("Dataset Configuration")
+        print("=" * 80)
+
+        if use_real_dataset:
+            print(f"Attempting to load GSM8K dataset ({num_dataset_samples} samples)...")
+            prompt_texts, expected_answers = load_gsm8k_dataset(
+                split="train", num_samples=num_dataset_samples
+            )
+
+            if prompt_texts is None or len(prompt_texts) == 0:
+                print("⚠ Failed to load dataset, falling back to default prompts")
+                use_real_dataset = False
+
+        if not use_real_dataset:
+            # Fallback: simple prompts with verifiable answers
+            print("Using default prompts (factual questions)")
+            prompts_with_answers = [
+                ("The capital of France is", "paris"),
+                ("What is 7 times 8?", "56"),
+                ("The first president of the United States was", "washington"),
+                ("The chemical symbol for water is", "h2o"),
+                ("The largest planet in our solar system is", "jupiter"),
+            ]
+            prompt_texts = [p[0] for p in prompts_with_answers]
+            expected_answers = [p[1] for p in prompts_with_answers]
+
+        # Select reward function
+        reward_fn = math_reward_function if use_real_dataset else trivial_reward_function
+
+        print(f"Loaded {len(prompt_texts)} prompts")
+        print(f"Reward function: {reward_fn.__name__}")
+        print(f"First prompt: {prompt_texts[0][:80]}...")
+
+        # Training loop
+        print(f"\nStarting RL training for {num_steps} steps...")
+        print(f"  Prompts: {len(prompt_texts)}")
+        print(f"  Samples per prompt: {group_size}")
+        print(f"  Rollout batches per update: {num_rollout_batches}")
+        print(
+            f"  Total samples per update: {len(prompt_texts) * group_size * num_rollout_batches}"
+        )
+        print(
+            f"  GRPO mode: {'Stable (mean-centering)' if use_stable_grpo else f'Exponential (beta={grpo_beta})'}"
+        )
+        print("=" * 80)
+
+        for step in range(num_steps):
+            metrics = rl_update_step(
+                model,
+                tokenizer,
+                vllm_engine,
+                prompt_texts,
+                optimizer,
+                expected_answers=expected_answers,
+                group_size=group_size,
+                max_new_tokens=20 if not use_real_dataset else 100,
+                temperature=1.0,
+                use_vllm_compat=use_vllm_compat,
+                num_rollout_batches=num_rollout_batches,
+                reward_fn=reward_fn,
+                grpo_beta=grpo_beta,
+                use_stable_grpo=use_stable_grpo,
+            )
+
+            # Compute weight deltas from initial state
+            weight_deltas = compute_weight_deltas(model, initial_state)
+
+            # Log to TensorBoard
+            writer.add_scalar("rl/loss", metrics["loss"], step)
+            writer.add_scalar("rl/pg_loss", metrics["pg_loss"], step)
+            writer.add_scalar("rl/kl_div", metrics["kl_div"], step)
+            writer.add_scalar("rl/entropy", metrics["entropy"], step)
+            writer.add_scalar("rl/ratio_mean", metrics["ratio_mean"], step)
+            writer.add_scalar("rl/ratio_clipped_frac", metrics["ratio_clipped_frac"], step)
+            writer.add_scalar("rl/reward_mean", metrics["reward_mean"], step)
+            writer.add_scalar("rl/reward_std", metrics.get("reward_std", 0.0), step)
+            writer.add_scalar("rl/advantage_mean", metrics["advantage_mean"], step)
+            writer.add_scalar("rl/advantage_std", metrics.get("advantage_std", 0.0), step)
+            writer.add_scalar("rl/total_samples", metrics["total_samples"], step)
+
+            # Log weight deltas
+            for key, value in weight_deltas.items():
+                writer.add_scalar(key, value, step)
+
+            print(
+                f"\nStep {step:3d} | Loss: {metrics['loss']:.4f} | "
+                f"Reward: {metrics['reward_mean']:+.3f} | "
+                f"Samples: {metrics['total_samples']}"
+            )
+            print(f"  Sample: {metrics['sample_completions'][0][:80]}...")
+
+            # Check for NaN/Inf (sign of instability)
+            if not torch.isfinite(torch.tensor(metrics["loss"])):
+                print("\n" + "!" * 80)
+                print("ERROR: Loss is NaN/Inf! Training diverged.")
+                print(
+                    "This likely means the exponential GRPO is unstable without bitwise invariance."
+                )
+                print("Try setting use_stable_grpo=True or enabling batch invariance mode.")
+                print("!" * 80)
+                break
 
     print("\n" + "=" * 80)
     print("Training complete!")
@@ -1220,6 +1622,8 @@ def main():
 
     # Cleanup
     writer.close()
+    if inference_server:
+        inference_server.stop()
     del vllm_engine
 
 
