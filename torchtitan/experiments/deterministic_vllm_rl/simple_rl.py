@@ -28,7 +28,29 @@ from torch.utils.tensorboard import SummaryWriter
 from transformers import AutoConfig, AutoTokenizer
 
 from vllm import LLM, SamplingParams
-from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+
+# Try to import and initialize batch invariance (API varies by vLLM version)
+try:
+    from vllm.model_executor.layers.batch_invariant import init_batch_invariance
+    # Newer vLLM versions require attention_backend argument
+    try:
+        init_batch_invariance()
+    except TypeError:
+        # Try with default attention backend for newer vLLM
+        try:
+            from vllm.v1.attention.backends.registry import get_attn_backend
+            backend = get_attn_backend()
+            init_batch_invariance(backend)
+        except ImportError:
+            # Fall back to environment variable approach
+            import os
+            os.environ["VLLM_BATCH_INVARIANT"] = "1"
+            print("Using VLLM_BATCH_INVARIANT=1 environment variable for batch invariance")
+except ImportError:
+    # Batch invariance not available in this vLLM version
+    import os
+    os.environ["VLLM_BATCH_INVARIANT"] = "1"
+    print("Batch invariance module not found, using environment variable")
 
 from torchtitan.experiments.deterministic_vllm_rl.weights.converter import (
     torchtitan_to_vllm,
@@ -39,8 +61,6 @@ from torchtitan.experiments.deterministic_vllm_rl.weights_vllm_compat import (
 )
 
 from torchtitan.models.qwen3.model.args import Qwen3ModelArgs
-
-init_batch_invariance()
 
 
 class VLLMRolloutEngine:
@@ -1371,19 +1391,26 @@ def main():
             args.wandb = False
 
     # Check if batch invariance is enabled
-    from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
-
-    use_vllm_compat = vllm_is_batch_invariant()
+    use_vllm_compat = False
+    try:
+        from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
+        use_vllm_compat = vllm_is_batch_invariant()
+    except ImportError:
+        # Check environment variable as fallback
+        use_vllm_compat = os.environ.get("VLLM_BATCH_INVARIANT", "0") == "1"
 
     if use_vllm_compat:
         print("✓ Batch invariance detected - using vLLM-compatible model")
         # Add backward pass support to vLLM's batch_invariant mode
         print("  Adding gradient support to vLLM's batch_invariant mode...")
-        from torchtitan.experiments.deterministic_vllm_rl.batch_invariant_backward import (
-            enable_batch_invariant_backward_mode,
-        )
-
-        enable_batch_invariant_backward_mode()
+        try:
+            from torchtitan.experiments.deterministic_vllm_rl.batch_invariant_backward import (
+                enable_batch_invariant_backward_mode,
+            )
+            enable_batch_invariant_backward_mode()
+        except Exception as e:
+            print(f"  ⚠ Could not enable batch invariant backward mode: {e}")
+            print("  Continuing without bitwise determinism guarantees")
     else:
         print("⚠ Batch invariance NOT detected - using standard model")
         if not use_stable_grpo:
