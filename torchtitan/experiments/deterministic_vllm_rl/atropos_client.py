@@ -107,7 +107,11 @@ class AtroposClient:
         batch_size: int = 64,
         max_token_len: int = 2048,
         num_steps: int = 100,
-        trainer_name: str = "torchtitan",
+        wandb_group: str | None = None,
+        wandb_project: str | None = None,
+        checkpoint_dir: str = "./checkpoints",
+        save_checkpoint_interval: int = 100,
+        starting_step: int = 0,
     ) -> bool:
         """
         Register this trainer with Atropos API.
@@ -116,25 +120,42 @@ class AtroposClient:
             batch_size: Batch size to request
             max_token_len: Maximum token length
             num_steps: Expected number of training steps
-            trainer_name: Name identifier for this trainer
+            wandb_group: Wandb group name (auto-generated if None)
+            wandb_project: Wandb project name (from env var if None)
+            checkpoint_dir: Directory for saving checkpoints
+            save_checkpoint_interval: Steps between checkpoint saves
+            starting_step: Starting training step
 
         Returns:
             True if registration successful
         """
+        import os
+        import time
+
+        # Use env vars or generate defaults
+        if wandb_group is None:
+            wandb_group = f"torchtitan-{int(time.time())}"
+        if wandb_project is None:
+            wandb_project = os.environ.get("WANDB_PROJECT", "torchtitan-rl")
+
         try:
             response = requests.post(
                 f"{self.api_url}/register",
                 json={
+                    "wandb_group": wandb_group,
+                    "wandb_project": wandb_project,
                     "batch_size": batch_size,
                     "max_token_len": max_token_len,
+                    "checkpoint_dir": checkpoint_dir,
+                    "save_checkpoint_interval": save_checkpoint_interval,
+                    "starting_step": starting_step,
                     "num_steps": num_steps,
-                    "trainer_name": trainer_name,
                 },
                 timeout=self.timeout,
             )
             response.raise_for_status()
             data = response.json()
-            self.trainer_id = data.get("trainer_id")
+            self.trainer_id = data.get("uuid")
             self._registered = True
             print(f"[AtroposClient] Registered with ID: {self.trainer_id}")
             return True
@@ -155,39 +176,54 @@ class AtroposClient:
         while True:
             try:
                 response = requests.get(
-                    f"{self.api_url}/get_batch",
-                    params={"trainer_id": self.trainer_id} if self.trainer_id else {},
+                    f"{self.api_url}/batch",
                     timeout=self.timeout,
                 )
 
-                if response.status_code == 204:
-                    # No batch available
+                response.raise_for_status()
+                data = response.json()
+
+                # Atropos returns {"batch": <batch_data or None>}
+                batch_data = data.get("batch")
+
+                if batch_data is None:
+                    # No batch available yet
                     if not block:
                         return None
                     time.sleep(self.poll_interval)
                     continue
 
-                if response.status_code == 410:
-                    # Training complete
-                    print("[AtroposClient] Training complete signal received")
-                    return None
+                # batch_data is a list of scored data groups
+                # Merge them into a single AtroposBatch
+                all_tokens = []
+                all_masks = []
+                all_scores = []
+                all_advantages = []
+                all_ref_logprobs = []
+                all_messages = []
+                all_distill_logprobs = []
 
-                response.raise_for_status()
-                data = response.json()
+                for group in batch_data:
+                    all_tokens.extend(group.get("tokens", []))
+                    all_masks.extend(group.get("masks", []))
+                    all_scores.extend(group.get("scores", []))
+                    if group.get("advantages"):
+                        all_advantages.extend(group.get("advantages"))
+                    if group.get("ref_logprobs"):
+                        all_ref_logprobs.extend(group.get("ref_logprobs"))
+                    if group.get("messages"):
+                        all_messages.extend(group.get("messages"))
+                    if group.get("onpolicydistill_logprobs"):
+                        all_distill_logprobs.extend(group.get("onpolicydistill_logprobs"))
 
                 return AtroposBatch(
-                    tokens=data.get("tokens", []),
-                    masks=data.get("masks", []),
-                    scores=data.get("scores", []),
-                    advantages=data.get("advantages"),
-                    ref_logprobs=data.get("ref_logprobs"),
-                    messages=data.get("messages"),
-                    generation_params=data.get("generation_params"),
-                    inference_logprobs=data.get("inference_logprobs"),
-                    group_overrides=data.get("group_overrides"),
-                    overrides=data.get("overrides"),
-                    images=data.get("images"),
-                    onpolicydistill_logprobs=data.get("onpolicydistill_logprobs"),
+                    tokens=all_tokens,
+                    masks=all_masks,
+                    scores=all_scores,
+                    advantages=all_advantages if all_advantages else None,
+                    ref_logprobs=all_ref_logprobs if all_ref_logprobs else None,
+                    messages=all_messages if all_messages else None,
+                    onpolicydistill_logprobs=all_distill_logprobs if all_distill_logprobs else None,
                 )
 
             except requests.RequestException as e:
@@ -202,30 +238,34 @@ class AtroposClient:
         metrics: dict[str, float] | None = None,
     ) -> bool:
         """
-        Report training step completion to Atropos.
+        Report training step completion (local logging only).
+
+        The Atropos API tracks steps internally via batch fetches.
+        This method is for local logging/tracking purposes.
 
         Args:
             step: Current training step
             metrics: Optional training metrics (loss, reward, etc.)
 
         Returns:
-            True if report successful
+            True always (no remote call)
         """
+        # Atropos tracks steps internally - no need to report
+        # Just log locally if desired
+        return True
+
+    def get_status(self) -> dict:
+        """Get current training status from Atropos API."""
         try:
-            response = requests.post(
-                f"{self.api_url}/report_step",
-                json={
-                    "trainer_id": self.trainer_id,
-                    "step": step,
-                    "metrics": metrics or {},
-                },
+            response = requests.get(
+                f"{self.api_url}/status",
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            return True
+            return response.json()
         except requests.RequestException as e:
-            print(f"[AtroposClient] Error reporting step: {e}")
-            return False
+            print(f"[AtroposClient] Error getting status: {e}")
+            return {"current_step": -1, "queue_size": -1}
 
     def close(self) -> None:
         """Unregister from Atropos API."""
