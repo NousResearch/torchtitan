@@ -31,10 +31,18 @@ class PreprocessedDataset(IterableDataset, Stateful):
         infinite: bool = False,
         shuffle_seed: int | None = 42,
     ) -> None:
-        if dataset_path:
-            ds = load_from_disk(dataset_path)
-        else:
-            ds = load_dataset(dataset_name, split="train")
+        dataset_id = dataset_path if dataset_path is not None else dataset_name
+
+        try:
+            logger.info(
+                f"Loading preprocessed dataset {dataset_id} for rank {dp_rank} via load_dataset"
+            )
+            ds = load_dataset(dataset_id, split="train")
+        except Exception:
+            logger.info(
+                f"Loading preprocessed dataset {dataset_id} for rank {dp_rank} via load_from_disk"
+            )
+            ds = load_from_disk(dataset_id)
 
         if not isinstance(ds, Dataset):
             raise ValueError(
