@@ -1105,6 +1105,42 @@ def rl_update_step(
     return metrics
 
 
+def compute_gradient_stats(model: torch.nn.Module) -> dict:
+    """
+    Compute gradient statistics for training hygiene monitoring.
+
+    Args:
+        model: Model with gradients computed
+
+    Returns:
+        Dictionary of gradient statistics
+    """
+    total_norm = 0.0
+    max_norm = 0.0
+    num_params = 0
+    num_zero_grads = 0
+
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            param_norm = param.grad.data.norm(2).item()
+            total_norm += param_norm ** 2
+            max_norm = max(max_norm, param_norm)
+            num_params += 1
+
+            # Check for zero gradients
+            if param_norm < 1e-10:
+                num_zero_grads += 1
+
+    total_norm = total_norm ** 0.5
+
+    return {
+        "grad_norm": total_norm,
+        "grad_max_norm": max_norm,
+        "grad_num_params": num_params,
+        "grad_zero_frac": num_zero_grads / max(num_params, 1),
+    }
+
+
 def compute_weight_deltas(model: torch.nn.Module, initial_state: dict) -> dict:
     """
     Compute weight changes from initial state based on magnitude (L2 norm).
@@ -1251,6 +1287,13 @@ def main():
         "--num-samples", type=int, default=10, help="Number of dataset samples"
     )
 
+    # Wandb config (uses env vars: WANDB_PROJECT, WANDB_TEAM, WANDB_RUN_NAME)
+    parser.add_argument(
+        "--wandb", action="store_true",
+        help="Enable Weights & Biases logging. Configure via env vars: "
+        "WANDB_PROJECT, WANDB_TEAM, WANDB_RUN_NAME",
+    )
+
     args = parser.parse_args()
 
     # Map args to config variables
@@ -1276,6 +1319,56 @@ def main():
     use_atropos_api = args.atropos
     atropos_url = args.atropos_url
     distill_kl_coef = args.distill_kl_coef
+
+    # Initialize wandb if enabled (uses TorchTitan's env var pattern)
+    wandb_run = None
+    if args.wandb:
+        try:
+            import wandb
+            import time
+
+            # Use env vars like rest of TorchTitan, with fallbacks
+            project = os.environ.get("WANDB_PROJECT", "torchtitan-rl")
+            entity = os.environ.get("WANDB_TEAM", None)
+            run_name = os.environ.get("WANDB_RUN_NAME", None)
+
+            if run_name is None:
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                mode = "atropos" if use_atropos_api else "local"
+                run_name = f"{model_name.split('/')[-1]}_{mode}_{timestamp}"
+
+            # Config dict for wandb
+            wandb_config = {
+                "model": model_name,
+                "learning_rate": learning_rate,
+                "num_steps": num_steps,
+                "group_size": group_size,
+                "num_rollout_batches": num_rollout_batches,
+                "grpo_beta": grpo_beta,
+                "use_stable_grpo": use_stable_grpo,
+                "distill_kl_coef": distill_kl_coef,
+                "use_atropos_api": use_atropos_api,
+                "atropos_url": atropos_url if use_atropos_api else None,
+                "batch_size": args.batch_size if use_atropos_api else None,
+                "max_token_len": args.max_token_len if use_atropos_api else None,
+                "serve_inference": args.serve,
+                "serve_port": args.serve_port if args.serve else None,
+            }
+
+            wandb_run = wandb.init(
+                project=project,
+                entity=entity,
+                name=run_name,
+                config=wandb_config,
+                reinit=True,
+            )
+            print(f"\n✓ Wandb initialized: {wandb_run.url}")
+        except ImportError:
+            print("⚠ wandb not installed. Install with: pip install wandb")
+            args.wandb = False
+        except Exception as e:
+            print(f"⚠ Failed to initialize wandb: {e}")
+            args.wandb = False
 
     # Check if batch invariance is enabled
     from vllm.model_executor.layers.batch_invariant import vllm_is_batch_invariant
@@ -1478,22 +1571,67 @@ def main():
 
             total_loss = pg_loss + distill_kl_coef * distill_loss
 
-            # Backward and optimize
+            # Backward pass
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+            # Compute gradient stats before clipping
+            grad_stats = compute_gradient_stats(model)
+
+            # Gradient clipping
+            grad_norm_clipped = torch.nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=1.0
+            )
+
+            # Optimizer step
             optimizer.step()
 
-            # Log metrics
-            writer.add_scalar("rl/loss", total_loss.item(), step)
-            writer.add_scalar("rl/pg_loss", pg_loss.item(), step)
-            if has_distill:
-                writer.add_scalar("rl/distill_loss", distill_loss.item(), step)
-            writer.add_scalar("rl/reward_mean", scores_tensor.mean().item(), step)
+            # Get current learning rate
+            current_lr = optimizer.param_groups[0]["lr"]
+
+            # Compute comprehensive metrics
+            metrics = {
+                # Loss components
+                "loss/total": total_loss.item(),
+                "loss/policy_gradient": pg_loss.item(),
+                "loss/distillation": distill_loss.item() if has_distill else 0.0,
+                # Reward statistics
+                "reward/mean": scores_tensor.mean().item(),
+                "reward/std": scores_tensor.std().item(),
+                "reward/min": scores_tensor.min().item(),
+                "reward/max": scores_tensor.max().item(),
+                # Advantage statistics
+                "advantage/mean": advantages.mean().item(),
+                "advantage/std": advantages.std().item(),
+                "advantage/min": advantages.min().item(),
+                "advantage/max": advantages.max().item(),
+                # Gradient statistics (training hygiene)
+                "gradients/norm_before_clip": grad_stats["grad_norm"],
+                "gradients/norm_after_clip": grad_norm_clipped.item(),
+                "gradients/max_norm": grad_stats["grad_max_norm"],
+                "gradients/zero_fraction": grad_stats["grad_zero_frac"],
+                # Learning rate
+                "training/learning_rate": current_lr,
+                # Batch info
+                "training/batch_size": len(tokens),
+                "training/total_tokens": sum(len(t) for t in tokens),
+                "training/step": step,
+            }
+
+            # Log to TensorBoard
+            for key, value in metrics.items():
+                writer.add_scalar(key.replace("/", "_"), value, step)
+
+            # Log to wandb if enabled
+            if args.wandb and wandb_run:
+                import wandb
+                wandb.log(metrics, step=step)
 
             print(
                 f"  Loss: {total_loss.item():.4f} | "
                 f"PG: {pg_loss.item():.4f} | "
-                f"Reward: {scores_tensor.mean().item():.3f}"
+                f"Reward: {scores_tensor.mean().item():.3f} | "
+                f"GradNorm: {grad_stats['grad_norm']:.4f} | "
+                f"LR: {current_lr:.2e}"
             )
 
             # Report progress to Atropos
@@ -1580,27 +1718,68 @@ def main():
             # Compute weight deltas from initial state
             weight_deltas = compute_weight_deltas(model, initial_state)
 
-            # Log to TensorBoard
-            writer.add_scalar("rl/loss", metrics["loss"], step)
-            writer.add_scalar("rl/pg_loss", metrics["pg_loss"], step)
-            writer.add_scalar("rl/kl_div", metrics["kl_div"], step)
-            writer.add_scalar("rl/entropy", metrics["entropy"], step)
-            writer.add_scalar("rl/ratio_mean", metrics["ratio_mean"], step)
-            writer.add_scalar("rl/ratio_clipped_frac", metrics["ratio_clipped_frac"], step)
-            writer.add_scalar("rl/reward_mean", metrics["reward_mean"], step)
-            writer.add_scalar("rl/reward_std", metrics.get("reward_std", 0.0), step)
-            writer.add_scalar("rl/advantage_mean", metrics["advantage_mean"], step)
-            writer.add_scalar("rl/advantage_std", metrics.get("advantage_std", 0.0), step)
-            writer.add_scalar("rl/total_samples", metrics["total_samples"], step)
+            # Compute gradient stats
+            grad_stats = compute_gradient_stats(model)
 
-            # Log weight deltas
+            # Get current learning rate
+            current_lr = optimizer.param_groups[0]["lr"]
+
+            # Comprehensive metrics for wandb
+            wandb_metrics = {
+                # Loss components
+                "loss/total": metrics["loss"],
+                "loss/policy_gradient": metrics["pg_loss"],
+                "loss/kl_divergence": metrics["kl_div"],
+                "loss/entropy": metrics["entropy"],
+                # Distillation (if present)
+                "loss/distillation": metrics.get("distill_loss", 0.0),
+                # PPO metrics
+                "ppo/ratio_mean": metrics["ratio_mean"],
+                "ppo/clip_fraction": metrics["ratio_clipped_frac"],
+                # Reward statistics
+                "reward/mean": metrics["reward_mean"],
+                "reward/std": metrics.get("reward_std", 0.0),
+                # Advantage statistics
+                "advantage/mean": metrics["advantage_mean"],
+                "advantage/std": metrics.get("advantage_std", 0.0),
+                # Gradient statistics (training hygiene)
+                "gradients/norm": grad_stats["grad_norm"],
+                "gradients/max_norm": grad_stats["grad_max_norm"],
+                "gradients/zero_fraction": grad_stats["grad_zero_frac"],
+                # Learning rate
+                "training/learning_rate": current_lr,
+                # Samples
+                "training/total_samples": metrics["total_samples"],
+                "training/step": step,
+            }
+
+            # Add weight delta metrics
             for key, value in weight_deltas.items():
-                writer.add_scalar(key, value, step)
+                wandb_metrics[key] = value
+
+            # Log to TensorBoard
+            for key, value in wandb_metrics.items():
+                writer.add_scalar(key.replace("/", "_"), value, step)
+
+            # Log to wandb if enabled
+            if args.wandb and wandb_run:
+                import wandb
+                wandb.log(wandb_metrics, step=step)
+
+                # Log sample completions as a table every 10 steps
+                if step % 10 == 0 and metrics.get("sample_completions"):
+                    completion_table = wandb.Table(
+                        columns=["step", "completion"],
+                        data=[[step, c[:200]] for c in metrics["sample_completions"][:2]],
+                    )
+                    wandb.log({"samples/completions": completion_table}, step=step)
 
             print(
                 f"\nStep {step:3d} | Loss: {metrics['loss']:.4f} | "
                 f"Reward: {metrics['reward_mean']:+.3f} | "
-                f"Samples: {metrics['total_samples']}"
+                f"KL: {metrics['kl_div']:.4f} | "
+                f"Clip: {metrics['ratio_clipped_frac']:.2%} | "
+                f"LR: {current_lr:.2e}"
             )
             print(f"  Sample: {metrics['sample_completions'][0][:80]}...")
 
@@ -1618,10 +1797,15 @@ def main():
     print("\n" + "=" * 80)
     print("Training complete!")
     print("View TensorBoard: tensorboard --logdir=./outputs/rl_training")
+    if args.wandb and wandb_run:
+        print(f"View Wandb: {wandb_run.url}")
     print("=" * 80)
 
     # Cleanup
     writer.close()
+    if args.wandb and wandb_run:
+        import wandb
+        wandb.finish()
     if inference_server:
         inference_server.stop()
     del vllm_engine
