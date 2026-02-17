@@ -298,23 +298,40 @@ def download_and_convert_model(
         titan_checkpoint_path: Path to TorchTitan checkpoint
         model_path: Path to downloaded HuggingFace model
     """
+    import sys
+    print(f"[DEBUG] download_and_convert_model called with model_name={model_name}", flush=True)
+    sys.stdout.flush()
+    
     os.makedirs(output_dir, exist_ok=True)
+    print(f"[DEBUG] Created output dir: {output_dir}", flush=True)
+    sys.stdout.flush()
 
     # Download model from HuggingFace
-    print(f"Downloading {model_name} from HuggingFace...")
+    print(f"Downloading {model_name} from HuggingFace...", flush=True)
+    sys.stdout.flush()
     model_path = snapshot_download(
         model_name,
         cache_dir=cache_dir,
         allow_patterns=["*.safetensors", "*.json", "*.txt", "tokenizer.model"],
     )
-    print(f"  Downloaded to: {model_path}")
+    print(f"  Downloaded to: {model_path}", flush=True)
+    sys.stdout.flush()
 
     # Convert to TorchTitan format
-    print("Converting weights to TorchTitan format...")
+    print("Converting weights to TorchTitan format...", flush=True)
+    sys.stdout.flush()
+    print(f"[DEBUG] Calling vllm_to_torchtitan({model_path})...", flush=True)
+    sys.stdout.flush()
     titan_state = vllm_to_torchtitan(model_path)
+    print(f"[DEBUG] vllm_to_torchtitan returned {len(titan_state)} weights", flush=True)
+    sys.stdout.flush()
+    
     titan_checkpoint_path = os.path.join(output_dir, "qwen3_torchtitan.safetensors")
+    print(f"[DEBUG] Saving to {titan_checkpoint_path}...", flush=True)
+    sys.stdout.flush()
     save_file(titan_state, titan_checkpoint_path)
-    print(f"  Saved TorchTitan weights to: {titan_checkpoint_path}")
+    print(f"  Saved TorchTitan weights to: {titan_checkpoint_path}", flush=True)
+    sys.stdout.flush()
 
     return titan_checkpoint_path, model_path
 

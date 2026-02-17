@@ -54,36 +54,55 @@ def vllm_to_torchtitan(
     Returns:
         Dictionary with TorchTitan-formatted state dict
     """
+    import sys
+    print(f"[DEBUG] vllm_to_torchtitan called with: {vllm_path_or_state}", flush=True)
+    sys.stdout.flush()
+    
     # Check if input is a state dict or a path
     if isinstance(vllm_path_or_state, dict):
         vllm_state = vllm_path_or_state
-        print(f"Using provided vLLM state dict with {len(vllm_state)} weights")
+        print(f"Using provided vLLM state dict with {len(vllm_state)} weights", flush=True)
+        sys.stdout.flush()
     else:
         vllm_path = Path(vllm_path_or_state)
+        print(f"[DEBUG] vllm_path = {vllm_path}", flush=True)
+        sys.stdout.flush()
 
         # Load weights from vLLM format (try safetensors first, then .bin)
         vllm_state = {}
         safetensor_files = sorted(vllm_path.glob("*.safetensors"))
+        print(f"[DEBUG] Found {len(safetensor_files)} safetensor files", flush=True)
+        sys.stdout.flush()
 
         if safetensor_files:
-            print(f"Loading {len(safetensor_files)} safetensors files...")
-            for st_file in safetensor_files:
+            print(f"Loading {len(safetensor_files)} safetensors files...", flush=True)
+            sys.stdout.flush()
+            for i, st_file in enumerate(safetensor_files):
                 if "index" not in st_file.name:  # Skip index files
+                    print(f"[DEBUG] Loading file {i+1}: {st_file.name}...", flush=True)
+                    sys.stdout.flush()
                     vllm_state.update(load_file(str(st_file)))
+                    print(f"[DEBUG] Loaded, now have {len(vllm_state)} weights", flush=True)
+                    sys.stdout.flush()
         else:
             # Fallback to .bin files
             bin_files = sorted(vllm_path.glob("*.bin"))
-            print(f"Loading {len(bin_files)} .bin files...")
+            print(f"Loading {len(bin_files)} .bin files...", flush=True)
+            sys.stdout.flush()
             for bin_file in bin_files:
                 state = torch.load(bin_file, map_location="cpu", weights_only=True)
                 vllm_state.update(state)
 
-        print(f"Loaded {len(vllm_state)} weights from vLLM format")
+        print(f"Loaded {len(vllm_state)} weights from vLLM format", flush=True)
+        sys.stdout.flush()
 
     # Convert to TorchTitan format
+    print("[DEBUG] Starting weight conversion...", flush=True)
+    sys.stdout.flush()
     titan_state = {}
+    warnings_count = 0
 
-    for vllm_key, tensor in vllm_state.items():
+    for i, (vllm_key, tensor) in enumerate(vllm_state.items()):
         # Skip rotary embedding frequencies (not needed in TorchTitan)
         if "rotary_emb.inv_freq" in vllm_key:
             continue
@@ -103,16 +122,19 @@ def vllm_to_torchtitan(
                 titan_key = abstract_titan_key.format(layer_idx)
                 titan_state[titan_key] = tensor
             else:
-                print(f"Warning: No mapping found for {vllm_key}")
+                print(f"Warning: No mapping found for {vllm_key}", flush=True)
+                warnings_count += 1
         else:
             # Non-layer weight
             if vllm_key in VLLM_TO_TITAN_MAP:
                 titan_key = VLLM_TO_TITAN_MAP[vllm_key]
                 titan_state[titan_key] = tensor
             else:
-                print(f"Warning: No mapping found for {vllm_key}")
+                print(f"Warning: No mapping found for {vllm_key}", flush=True)
+                warnings_count += 1
 
-    print(f"Converted to {len(titan_state)} TorchTitan weights")
+    print(f"Converted to {len(titan_state)} TorchTitan weights (with {warnings_count} warnings)", flush=True)
+    sys.stdout.flush()
     return titan_state
 
 
