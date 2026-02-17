@@ -12,6 +12,9 @@ SAME model instance that is being trained - shared memory, no weight copying.
 
 The server implements an OpenAI-compatible API (subset) so Atropos environments
 can connect to it as their inference endpoint.
+
+Also implements vLLM's native /generate endpoint for compatibility with Atropos
+environments that use the vLLM server type.
 """
 
 import json
@@ -19,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -47,6 +50,9 @@ class InferenceServer:
 
     The server runs in a background thread, so training can continue while
     serving inference requests.
+    
+    Supports both OpenAI-compatible endpoints (/v1/completions) and vLLM's
+    native /generate endpoint for Atropos compatibility.
     """
 
     def __init__(
@@ -54,6 +60,7 @@ class InferenceServer:
         model: torch.nn.Module,
         tokenizer,
         config: InferenceConfig | None = None,
+        vllm_engine: Optional[Any] = None,
     ):
         """
         Initialize inference server.
@@ -62,10 +69,12 @@ class InferenceServer:
             model: The TorchTitan model (shared reference, not a copy!)
             tokenizer: HuggingFace tokenizer
             config: Server configuration
+            vllm_engine: Optional VLLMRolloutEngine for fast generation with /generate endpoint
         """
         self.model = model
         self.tokenizer = tokenizer
         self.config = config or InferenceConfig()
+        self.vllm_engine = vllm_engine
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._running = False
@@ -126,6 +135,8 @@ class InferenceServer:
                     self._handle_completions()
                 elif self.path == "/v1/chat/completions":
                     self._handle_chat_completions()
+                elif self.path == "/generate":
+                    self._handle_generate()
                 else:
                     self._send_error(404, "Not found")
 
@@ -237,6 +248,132 @@ class InferenceServer:
                     self._send_json(response)
 
                 except Exception as e:
+                    self._send_error(500, str(e))
+
+            def _handle_generate(self):
+                """
+                Handle /generate endpoint - vLLM native format for Atropos compatibility.
+                
+                This endpoint uses the vLLM engine for fast generation with KV cache.
+                
+                Request format (vLLM native):
+                {
+                    "prompt": {"prompt_token_ids": [1, 2, 3, ...]},  # or string prompt
+                    "max_tokens": 512,
+                    "temperature": 1.0,
+                    "n": 1,
+                    "logprobs": 0,  # Number of top logprobs (0 = return 1 logprob per token)
+                    ...
+                }
+                
+                Response format (matches vLLM /generate):
+                {
+                    "text": ["completion1", "completion2", ...],
+                    "logprobs": [[[{token_id: logprob}], ...], ...],  # Per sample, per position
+                    "finish_reasons": ["stop", "length", ...],
+                }
+                """
+                try:
+                    data = self._read_json()
+                    
+                    # Parse prompt - can be string or {"prompt_token_ids": [...]}
+                    prompt_data = data.get("prompt", "")
+                    if isinstance(prompt_data, dict):
+                        prompt_token_ids = prompt_data.get("prompt_token_ids", [])
+                        # Decode token IDs to text for vLLM
+                        prompt_text = server.tokenizer.decode(prompt_token_ids)
+                    else:
+                        prompt_text = prompt_data
+                        prompt_token_ids = server.tokenizer.encode(prompt_text)
+                    
+                    # Parse sampling params (vLLM format - directly in request, not nested)
+                    max_tokens = data.get("max_tokens", server.config.max_new_tokens)
+                    temperature = data.get("temperature", server.config.temperature)
+                    n_samples = data.get("n", 1)
+                    stop_sequences = data.get("stop", None)
+                    top_p = data.get("top_p", server.config.top_p)
+                    
+                    # Whether to return logprobs (0 means return 1 logprob per token)
+                    logprobs_requested = data.get("logprobs", 0) is not None
+                    
+                    # Use vLLM engine if available for fast generation
+                    if server.vllm_engine is not None:
+                        # Use vLLM's fast generation with KV cache
+                        (
+                            completions,
+                            log_probs_tensor,
+                            token_ids_list,
+                            token_log_probs_list,
+                            prompt_token_ids_list,
+                            finish_reasons,
+                        ) = server.vllm_engine.generate(
+                            prompt_texts=[prompt_text],
+                            max_new_tokens=max_tokens,
+                            temperature=max(temperature, 0.01),  # vLLM doesn't like temp=0
+                            n_samples_per_prompt=n_samples,
+                            stop=stop_sequences,
+                            top_p=top_p,
+                        )
+                        
+                        # Format response in vLLM style
+                        # logprobs format: [[[{token_id: logprob}], ...], ...]
+                        # - Outer list: one entry per sample
+                        # - Middle list: one entry per token position  
+                        # - Inner list: contains single dict {token_id: logprob}
+                        formatted_logprobs = []
+                        for sample_idx, (tids, tlps) in enumerate(zip(token_ids_list, token_log_probs_list)):
+                            sample_logprobs = []
+                            for tid, tlp in zip(tids, tlps):
+                                # Each position is a list containing a single {token_id: logprob} dict
+                                sample_logprobs.append([{int(tid): float(tlp)}])
+                            formatted_logprobs.append(sample_logprobs)
+                        
+                        response = {
+                            "text": completions,
+                            "logprobs": formatted_logprobs,
+                            "finish_reasons": finish_reasons,
+                        }
+                    else:
+                        # Fallback to slow PyTorch generation if no vLLM engine
+                        all_completions = []
+                        all_logprobs = []
+                        all_finish_reasons = []
+                        
+                        for _ in range(n_samples):
+                            text, tokens, token_lps, _ = server._generate(
+                                prompt_text, max_tokens, temperature, 1 if logprobs_requested else 0
+                            )
+                            all_completions.append(text)
+                            
+                            # Get token IDs for the generated tokens
+                            gen_token_ids = server.tokenizer.encode(text, add_special_tokens=False)
+                            
+                            # Format logprobs - each position is [{token_id: logprob}]
+                            if logprobs_requested and token_lps:
+                                sample_logprobs = []
+                                for tid, tlp in zip(gen_token_ids, token_lps):
+                                    sample_logprobs.append([{int(tid): float(tlp)}])
+                                all_logprobs.append(sample_logprobs)
+                            else:
+                                all_logprobs.append([])
+                            
+                            # Finish reason
+                            if len(gen_token_ids) >= max_tokens:
+                                all_finish_reasons.append("length")
+                            else:
+                                all_finish_reasons.append("stop")
+                        
+                        response = {
+                            "text": all_completions,
+                            "logprobs": all_logprobs,
+                            "finish_reasons": all_finish_reasons,
+                        }
+                    
+                    self._send_json(response)
+                    
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
                     self._send_error(500, str(e))
 
             def _read_json(self) -> dict:

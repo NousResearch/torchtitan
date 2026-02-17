@@ -228,8 +228,10 @@ class VLLMRolloutEngine:
         max_new_tokens: int = 20,
         temperature: float = 1.0,
         n_samples_per_prompt: int = 4,
+        stop: list[str] | None = None,
+        top_p: float = 1.0,
     ) -> tuple[
-        list[str], torch.Tensor, list[list[int]], list[list[float]], list[list[int]]
+        list[str], torch.Tensor, list[list[int]], list[list[float]], list[list[int]], list[str]
     ]:
         """
         Generate samples using vLLM.
@@ -239,6 +241,8 @@ class VLLMRolloutEngine:
             max_new_tokens: Max tokens to generate
             temperature: Sampling temperature
             n_samples_per_prompt: Number of samples per prompt
+            stop: Optional list of stop sequences
+            top_p: Top-p (nucleus) sampling parameter
 
         Returns:
             completions: List of completion strings
@@ -246,6 +250,7 @@ class VLLMRolloutEngine:
             token_ids: List of token ID lists for each completion (generated tokens only)
             token_log_probs: List of per-token log prob lists for each completion
             prompt_token_ids: List of prompt token ID lists for each completion
+            finish_reasons: List of finish reasons for each completion
         """
         sampling_params = SamplingParams(
             temperature=temperature,
@@ -254,6 +259,8 @@ class VLLMRolloutEngine:
             seed=42,
             logprobs=1,
             prompt_logprobs=1,  # Also get prompt log probs to access prompt token IDs
+            stop=stop or [],
+            top_p=top_p,
         )
 
         outputs = self.llm.generate(prompt_texts, sampling_params)
@@ -264,6 +271,7 @@ class VLLMRolloutEngine:
         token_ids_list = []
         token_log_probs_list = []
         prompt_token_ids_list = []
+        finish_reasons_list = []
 
         for output in outputs:
             # Extract prompt token IDs from the output
@@ -290,6 +298,10 @@ class VLLMRolloutEngine:
                 total_log_prob = sum(per_token_log_probs)
                 log_probs_list.append(total_log_prob)
 
+                # Extract finish reason from vLLM
+                finish_reason = sample.finish_reason if hasattr(sample, 'finish_reason') else "length"
+                finish_reasons_list.append(finish_reason)
+
         log_probs = torch.tensor(log_probs_list, dtype=torch.float32)
 
         return (
@@ -298,6 +310,7 @@ class VLLMRolloutEngine:
             token_ids_list,
             token_log_probs_list,
             prompt_token_ids_list,
+            finish_reasons_list,
         )
 
     def __del__(self):
@@ -1153,6 +1166,7 @@ def rl_update_step(
             vllm_token_ids,
             vllm_token_log_probs,
             prompt_token_ids,
+            _finish_reasons,  # Not used in training loop but returned by generate
         ) = vllm_engine.generate(
             prompt_texts,
             max_new_tokens,
@@ -1595,9 +1609,10 @@ def main():
         sys.stdout.flush()
 
         inference_config = InferenceConfig(port=args.serve_port)
-        print("[DEBUG] Creating InferenceServer...", flush=True)
+        print("[DEBUG] Creating InferenceServer with vLLM engine...", flush=True)
         sys.stdout.flush()
-        inference_server = InferenceServer(model, tokenizer, inference_config)
+        # Pass vLLM engine for fast /generate endpoint
+        inference_server = InferenceServer(model, tokenizer, inference_config, vllm_engine=vllm_engine)
         print("[DEBUG] Starting InferenceServer...", flush=True)
         sys.stdout.flush()
         inference_server.start()
