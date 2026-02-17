@@ -581,7 +581,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         dynamic_grad_accum_size = batch_dict["dynamic_grad_accum_size"]
         total_masked_tokens = batch_dict["total_masked_tokens"]
         curr_len = -1
-        input_ids, labels, masks, inf_logps, rewards = batch
+        # Unpack batch - handle optional distillation logprobs (6th element)
+        if len(batch) >= 6:
+            input_ids, labels, masks, inf_logps, rewards, distill_logprobs = batch
+        else:
+            input_ids, labels, masks, inf_logps, rewards = batch
+            distill_logprobs = None
         # if tp_rank == 0:
         device_type = utils.device_type
         input_ids = torch.from_numpy(input_ids).to(device_type)
@@ -678,6 +683,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         input_ids=input_ids,
                         use_ref_model=self.use_ref_model,
                         inf_logps=inf_logps,
+                        distill_logprobs=distill_logprobs,  # On-policy distillation
                     )
                     if not job_config.grpo.grpo_by_token:
                         mb_loss = (mb_loss * mask).sum(-1) / mask.sum(-1)

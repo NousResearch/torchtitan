@@ -58,6 +58,7 @@ def pad_data_to_good_offset(
     masks = list()
     lengths = list()
     inf_logps = list()
+    distill_logprobs = list()  # On-policy distillation logprobs from teacher
     for item in data["batch"]:
         scores = item["scores"]
         scores = np.array(scores)
@@ -131,6 +132,17 @@ def pad_data_to_good_offset(
                     ]
                 )
                 inf_logps.append(item["inference_logprobs"][i][:-1])
+            
+            # Handle on-policy distillation logprobs from teacher model
+            # Structure: [position][top_k] = [token_id, logprob]
+            if item.get("onpolicydistill_logprobs") is not None and i < len(item["onpolicydistill_logprobs"]):
+                seq_distill = item["onpolicydistill_logprobs"][i]
+                # Pad to token_setup_len - 1 (same as labels/masks after shift)
+                padded_distill = seq_distill + [[] for _ in range(max(0, token_setup_len - 1 - len(seq_distill)))]
+                distill_logprobs.append(padded_distill[:token_setup_len - 1])
+            else:
+                # No distillation data - append None placeholder
+                distill_logprobs.append(None)
     # sort into 4 buckets...
     raw_items = [
         {
@@ -140,9 +152,10 @@ def pad_data_to_good_offset(
             "reward": reward,
             "length": length,
             "inf_logp": inf_logp,
+            "distill_logprob": distill_logprob,
         }
-        for (input_id, label, mask, reward, length, inf_logp) in zip(
-            input_ids, labels, masks, rewards, lengths, inf_logps
+        for (input_id, label, mask, reward, length, inf_logp, distill_logprob) in zip(
+            input_ids, labels, masks, rewards, lengths, inf_logps, distill_logprobs
         )
     ]
     sorted_items = sorted(raw_items, key=lambda x: x["length"], reverse=True)
@@ -166,6 +179,7 @@ def pad_data_to_good_offset(
         [x["mask"] for x in items],
         [x["length"] for x in items],
         [x["inf_logp"] for x in items],
+        [x["distill_logprob"] for x in items],
     )
 
 
@@ -191,6 +205,7 @@ def prep_data(
         masks,
         lengths,
         inf_logps,
+        distill_logprobs,
     ) = pad_data_to_good_offset(
         data,
         cp_degree,
@@ -210,6 +225,9 @@ def prep_data(
     for i in range(dynamic_grad_accum_size * dp_degree):
         start = i * dynamic_batch_size
         end = (i + 1) * dynamic_batch_size
+        # Check if we have any valid distillation data in this batch
+        batch_distill = distill_logprobs[start:end]
+        has_distill = any(d is not None for d in batch_distill)
         batches.append(
             (
                 np.array(input_ids[start:end]),
@@ -217,6 +235,7 @@ def prep_data(
                 np.array(masks[start:end]),
                 np.array(inf_logps[start:end]),
                 np.array(rewards[start:end]),
+                batch_distill if has_distill else None,  # Distillation logprobs (or None)
             )
         )
     return batches, max_token_len, dynamic_batch_size, dynamic_grad_accum_size, lengths
@@ -248,6 +267,7 @@ def prep_empty_data_matricies(
             np.zeros((dynamic_batch_size, max_token_len), dtype=np.int64),
             np.zeros((dynamic_batch_size, max_token_len), dtype=np.int64),
             np.zeros(dynamic_batch_size, dtype=np.float32),
+            None,  # Distillation logprobs placeholder
         ]
         for _ in range(dynamic_grad_accum_size * dp_degree)
     ]

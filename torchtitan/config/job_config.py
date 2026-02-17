@@ -1206,6 +1206,32 @@ class GRPO:
     Whether to scale by total tokens.
     """
 
+    # On-policy distillation settings
+    distillation_enabled: bool = False
+    """
+    Enable on-policy distillation from teacher model logprobs.
+    When enabled, expects `onpolicydistill_logprobs` in the batch from Atropos.
+    """
+
+    distillation_coef: float = 0.1
+    """
+    Coefficient for distillation loss. Final loss = grpo_loss + distillation_coef * distill_loss
+    """
+
+    distillation_loss_type: Literal["kl", "cross_entropy", "mse"] = "kl"
+    """
+    Type of distillation loss:
+        - "kl": KL divergence from student to teacher (forward KL)
+        - "cross_entropy": Cross entropy with teacher soft targets
+        - "mse": Mean squared error on logits
+    """
+
+    distillation_temperature: float = 1.0
+    """
+    Temperature for softening teacher/student distributions in distillation.
+    Higher values produce softer distributions.
+    """
+
 
 @dataclass
 class AtroposAPI:

@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import torch
+import torch.nn.functional as F
 
 from torchtitan.config.job_config import JobConfig
 from torchtitan.grpo.importance_sampling import compute_rollout_importance_weights
@@ -147,8 +148,112 @@ def compute_logit_loss(pred, weight, device):
         return torch.tensor(0.0, device=device)
 
 
+def compute_distillation_loss(
+    pred: torch.Tensor,
+    distill_logprobs: list,
+    mask: torch.Tensor,
+    loss_type: str = "kl",
+    temperature: float = 1.0,
+    device: torch.device = None,
+) -> tuple[torch.Tensor, dict]:
+    """
+    Compute distillation loss from teacher model logprobs.
+    
+    Args:
+        pred: Model predictions [batch_size, seq_len, vocab_size]
+        distill_logprobs: List of teacher logprobs per sequence
+            Structure: [batch][position][top_k] = [token_id, logprob]
+        mask: Attention mask [batch_size, seq_len]
+        loss_type: Type of distillation loss ("kl", "cross_entropy", "mse")
+        temperature: Temperature for softening distributions
+        device: Device for tensor creation
+        
+    Returns:
+        distill_loss: Per-token distillation loss [batch_size, seq_len]
+        metrics: Dictionary of distillation metrics
+    """
+    if distill_logprobs is None or all(d is None for d in distill_logprobs):
+        return torch.tensor(0.0, device=device), {}
+    
+    batch_size, seq_len, vocab_size = pred.shape
+    distill_loss = torch.zeros(batch_size, seq_len, device=device)
+    
+    # Track metrics
+    total_positions = 0
+    total_teacher_entropy = 0.0
+    
+    for batch_idx, seq_distill in enumerate(distill_logprobs):
+        if seq_distill is None:
+            continue
+            
+        for pos_idx, pos_logprobs in enumerate(seq_distill):
+            if pos_idx >= seq_len or not pos_logprobs:
+                continue
+            if mask[batch_idx, pos_idx] == 0:
+                continue
+                
+            # Get student logits for this position
+            student_logits = pred[batch_idx, pos_idx] / temperature
+            student_log_probs = F.log_softmax(student_logits, dim=-1)
+            
+            # Build sparse teacher distribution from top-K logprobs
+            # pos_logprobs structure: [[token_id, logprob], [token_id, logprob], ...]
+            teacher_token_ids = []
+            teacher_logprobs = []
+            for item in pos_logprobs:
+                if isinstance(item, (list, tuple)) and len(item) >= 2:
+                    teacher_token_ids.append(int(item[0]))
+                    teacher_logprobs.append(float(item[1]))
+            
+            if not teacher_token_ids:
+                continue
+            
+            teacher_token_ids = torch.tensor(teacher_token_ids, device=device, dtype=torch.long)
+            teacher_logprobs = torch.tensor(teacher_logprobs, device=device, dtype=torch.float32)
+            
+            # Apply temperature to teacher logprobs
+            teacher_logprobs = teacher_logprobs / temperature
+            
+            # Compute loss based on type
+            if loss_type == "kl":
+                # KL divergence: sum_i p_teacher(i) * (log p_teacher(i) - log p_student(i))
+                # Only compute over teacher's top-K tokens
+                teacher_probs = F.softmax(teacher_logprobs, dim=-1)
+                student_log_probs_subset = student_log_probs[teacher_token_ids]
+                teacher_log_probs_normalized = F.log_softmax(teacher_logprobs, dim=-1)
+                kl = (teacher_probs * (teacher_log_probs_normalized - student_log_probs_subset)).sum()
+                distill_loss[batch_idx, pos_idx] = kl
+                
+            elif loss_type == "cross_entropy":
+                # Cross entropy with soft targets
+                teacher_probs = F.softmax(teacher_logprobs, dim=-1)
+                student_log_probs_subset = student_log_probs[teacher_token_ids]
+                ce = -(teacher_probs * student_log_probs_subset).sum()
+                distill_loss[batch_idx, pos_idx] = ce
+                
+            elif loss_type == "mse":
+                # MSE on logits (only for top-K tokens)
+                student_logits_subset = pred[batch_idx, pos_idx, teacher_token_ids]
+                # Unnormalize teacher logprobs to approximate logits
+                mse = F.mse_loss(student_logits_subset, teacher_logprobs * temperature, reduction='mean')
+                distill_loss[batch_idx, pos_idx] = mse
+            
+            total_positions += 1
+            # Teacher entropy for monitoring
+            teacher_probs = F.softmax(teacher_logprobs, dim=-1)
+            total_teacher_entropy += -(teacher_probs * teacher_probs.log().clamp(min=-100)).sum().item()
+    
+    metrics = {
+        "distill/positions_with_teacher": total_positions,
+        "distill/avg_teacher_entropy": total_teacher_entropy / max(total_positions, 1),
+    }
+    
+    return distill_loss, metrics
+
+
 def compose_grpo_loss(
-    reward, ratio, kl_div_est=None, kl_beta=0.0, logit_loss=None, entropy_loss=None
+    reward, ratio, kl_div_est=None, kl_beta=0.0, logit_loss=None, entropy_loss=None,
+    distill_loss=None
 ):
     """
     Compose the final GRPO loss from components.
@@ -160,6 +265,7 @@ def compose_grpo_loss(
         kl_beta: KL penalty weight
         logit_loss: Logit regularization loss (optional)
         entropy_loss: Entropy bonus loss (optional)
+        distill_loss: Distillation loss from teacher model (optional)
 
     Returns:
         loss: Combined GRPO loss
@@ -174,6 +280,9 @@ def compose_grpo_loss(
 
     if entropy_loss is not None:
         loss = loss + entropy_loss
+    
+    if distill_loss is not None and isinstance(distill_loss, torch.Tensor) and distill_loss.dim() > 0:
+        loss = loss + distill_loss
 
     return loss
 
@@ -194,6 +303,7 @@ def compute_grpo_loss_from_predictions(
     input_ids=None,
     use_ref_model=False,
     inf_logps=None,
+    distill_logprobs=None,
 ):
     """
     Compute full GRPO loss from model predictions.
@@ -214,6 +324,7 @@ def compute_grpo_loss_from_predictions(
         input_ids: Input IDs (needed if computing ref_pred)
         use_ref_model: Whether to use reference model
         inf_logps: Precomputed log probabilities from inference model
+        distill_logprobs: Teacher model logprobs for on-policy distillation
 
     Returns:
         loss: GRPO loss
@@ -286,6 +397,22 @@ def compute_grpo_loss_from_predictions(
     entropy_loss = compute_entropy_loss(
         pred, entropy_loss_fn, job_config.grpo.entropy_loss_weight, device
     )
+    
+    # Compute distillation loss if enabled
+    distill_loss = None
+    distill_metrics = {}
+    if job_config.grpo.distillation_enabled and distill_logprobs is not None:
+        distill_loss, distill_metrics = compute_distillation_loss(
+            pred=pred,
+            distill_logprobs=distill_logprobs,
+            mask=mask,
+            loss_type=job_config.grpo.distillation_loss_type,
+            temperature=job_config.grpo.distillation_temperature,
+            device=device,
+        )
+        # Scale by coefficient
+        if isinstance(distill_loss, torch.Tensor) and distill_loss.dim() > 0:
+            distill_loss = distill_loss * job_config.grpo.distillation_coef
 
     # Handle reference model
     if use_ref_model:
@@ -325,6 +452,7 @@ def compute_grpo_loss_from_predictions(
         kl_beta=job_config.grpo.kl_beta if use_ref_model else 0.0,
         logit_loss=logit_loss,
         entropy_loss=entropy_loss,
+        distill_loss=distill_loss,
     )
 
     # Compute metrics
@@ -514,5 +642,11 @@ def compute_grpo_loss_from_predictions(
                     else torch.tensor(0.0, device=device),
                 }
             )
+        
+        # Add distillation metrics
+        if distill_loss is not None and isinstance(distill_loss, torch.Tensor) and distill_loss.dim() > 0:
+            metrics["loss_metrics/distill_loss"] = masked_mean(distill_loss, mask)
+        if distill_metrics:
+            metrics.update(distill_metrics)
 
     return loss, metrics, logp
