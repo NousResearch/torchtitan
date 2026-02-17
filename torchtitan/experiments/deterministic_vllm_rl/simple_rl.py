@@ -77,17 +77,25 @@ class VLLMRolloutEngine:
     """
 
     def __init__(self, model_path: str, temp_checkpoint_dir: str = "./converted"):
+        import sys
+        import glob
+        import shutil
+        
+        print(f"[DEBUG] VLLMRolloutEngine.__init__ called with model_path={model_path}", flush=True)
+        sys.stdout.flush()
+        
         self.base_model_path = model_path
         self.temp_model_dir = os.path.abspath(
             os.path.join(temp_checkpoint_dir, "vllm_temp_model")
         )
+        print(f"[DEBUG] temp_model_dir = {self.temp_model_dir}", flush=True)
+        sys.stdout.flush()
+        
         os.makedirs(self.temp_model_dir, exist_ok=True)
-
-        import glob
+        print(f"[DEBUG] Created temp dir", flush=True)
+        sys.stdout.flush()
 
         # Copy config/tokenizer files from base model to temp dir
-        import shutil
-
         for file in [
             "config.json",
             "tokenizer.json",
@@ -98,21 +106,37 @@ class VLLMRolloutEngine:
         ]:
             src = os.path.join(model_path, file)
             if os.path.exists(src):
+                print(f"[DEBUG] Copying {file}...", flush=True)
+                sys.stdout.flush()
                 shutil.copy2(src, self.temp_model_dir)
+
+        print(f"[DEBUG] Config files copied", flush=True)
+        sys.stdout.flush()
 
         # Copy the original model shard files if they exist
         # We'll overwrite these with our single model.safetensors later
-        for shard_file in glob.glob(os.path.join(model_path, "model-*.safetensors")):
+        shard_files = glob.glob(os.path.join(model_path, "model-*.safetensors"))
+        print(f"[DEBUG] Found {len(shard_files)} shard files to copy", flush=True)
+        sys.stdout.flush()
+        
+        for i, shard_file in enumerate(shard_files):
             dst = os.path.join(self.temp_model_dir, os.path.basename(shard_file))
+            print(f"[DEBUG] Copying shard {i+1}/{len(shard_files)}: {os.path.basename(shard_file)}...", flush=True)
+            sys.stdout.flush()
             shutil.copy2(shard_file, dst)
+            print(f"[DEBUG] Shard {i+1} copied", flush=True)
+            sys.stdout.flush()
 
         # Copy index file if it exists
         index_file = os.path.join(model_path, "model.safetensors.index.json")
         if os.path.exists(index_file):
+            print(f"[DEBUG] Copying index file...", flush=True)
+            sys.stdout.flush()
             shutil.copy2(index_file, self.temp_model_dir)
 
         self.llm = None
-        print("vLLM rollout engine initialized (will load on first use)")
+        print("vLLM rollout engine initialized (will load on first use)", flush=True)
+        sys.stdout.flush()
 
     def update_weights(self, vllm_compat_state: dict) -> None:
         """
@@ -1511,36 +1535,56 @@ def main():
     print("\nInitializing vLLM engine for rollouts...", flush=True)
     sys.stdout.flush()
     vllm_engine = VLLMRolloutEngine(model_path)
+    print("[DEBUG] VLLMRolloutEngine created", flush=True)
+    sys.stdout.flush()
 
     # Load tokenizer
+    print("[DEBUG] Loading tokenizer...", flush=True)
+    sys.stdout.flush()
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+    print(f"[DEBUG] Tokenizer loaded: vocab_size={tokenizer.vocab_size}", flush=True)
+    sys.stdout.flush()
 
     # Start inference server if requested (exposes training model via HTTP)
     inference_server = None
     if args.serve:
+        print("[DEBUG] Starting inference server setup...", flush=True)
+        sys.stdout.flush()
         from torchtitan.experiments.deterministic_vllm_rl.inference_server import (
             InferenceServer,
             InferenceConfig,
         )
 
-        print("\n" + "=" * 80)
-        print("Starting Inference Server")
-        print("=" * 80)
-        print(f"  This exposes the TRAINING model via HTTP - true shared memory!")
-        print(f"  Atropos can connect to: http://localhost:{args.serve_port}/v1")
+        print("\n" + "=" * 80, flush=True)
+        print("Starting Inference Server", flush=True)
+        print("=" * 80, flush=True)
+        print(f"  This exposes the TRAINING model via HTTP - true shared memory!", flush=True)
+        print(f"  Atropos can connect to: http://localhost:{args.serve_port}/v1", flush=True)
+        sys.stdout.flush()
 
         inference_config = InferenceConfig(port=args.serve_port)
+        print("[DEBUG] Creating InferenceServer...", flush=True)
+        sys.stdout.flush()
         inference_server = InferenceServer(model, tokenizer, inference_config)
+        print("[DEBUG] Starting InferenceServer...", flush=True)
+        sys.stdout.flush()
         inference_server.start()
+        print("[DEBUG] InferenceServer started!", flush=True)
+        sys.stdout.flush()
 
     # Optimizer
+    print("[DEBUG] Creating optimizer...", flush=True)
+    sys.stdout.flush()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
+    print("[DEBUG] Optimizer created", flush=True)
+    sys.stdout.flush()
 
     # TensorBoard writer
     writer = SummaryWriter("./outputs/rl_training")
-    print("\n" + "=" * 80)
-    print("TensorBoard logging enabled at: ./outputs/rl_training")
-    print("=" * 80)
+    print("\n" + "=" * 80, flush=True)
+    print("TensorBoard logging enabled at: ./outputs/rl_training", flush=True)
+    print("=" * 80, flush=True)
+    sys.stdout.flush()
 
     # ========== TRAINING MODE SELECTION ==========
     if use_atropos_api:
