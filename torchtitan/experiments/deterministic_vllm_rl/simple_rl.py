@@ -436,6 +436,22 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
         sys.stdout.flush()
         print("[DEBUG] Loading state dict into model...", flush=True)
         sys.stdout.flush()
+        
+        # Diagnostic: check what keys match
+        model_keys = set(model.state_dict().keys())
+        checkpoint_keys = set(vllm_compat_state.keys())
+        missing = model_keys - checkpoint_keys
+        unexpected = checkpoint_keys - model_keys
+        print(f"[WEIGHT DIAGNOSTIC] Model expects {len(model_keys)} keys", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Checkpoint has {len(checkpoint_keys)} keys", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Missing (in model, not in checkpoint): {len(missing)}", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Unexpected (in checkpoint, not in model): {len(unexpected)}", flush=True)
+        if missing:
+            print(f"[WEIGHT DIAGNOSTIC] First 10 missing: {list(missing)[:10]}", flush=True)
+        if unexpected:
+            print(f"[WEIGHT DIAGNOSTIC] First 10 unexpected: {list(unexpected)[:10]}", flush=True)
+        sys.stdout.flush()
+        
         model.load_state_dict(vllm_compat_state, strict=False)
         print("[DEBUG] State dict loaded", flush=True)
         sys.stdout.flush()
@@ -446,6 +462,22 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
         from torchtitan.models.qwen3 import Qwen3Model
 
         model = Qwen3Model(model_args, peft_config)
+        
+        # Diagnostic: check what keys match
+        model_keys = set(model.state_dict().keys())
+        checkpoint_keys = set(state_dict.keys())
+        missing = model_keys - checkpoint_keys
+        unexpected = checkpoint_keys - model_keys
+        print(f"[WEIGHT DIAGNOSTIC] Model expects {len(model_keys)} keys", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Checkpoint has {len(checkpoint_keys)} keys", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Missing (in model, not in checkpoint): {len(missing)}", flush=True)
+        print(f"[WEIGHT DIAGNOSTIC] Unexpected (in checkpoint, not in model): {len(unexpected)}", flush=True)
+        if missing:
+            print(f"[WEIGHT DIAGNOSTIC] First 10 missing: {list(missing)[:10]}", flush=True)
+        if unexpected:
+            print(f"[WEIGHT DIAGNOSTIC] First 10 unexpected: {list(unexpected)[:10]}", flush=True)
+        sys.stdout.flush()
+        
         print("[DEBUG] Loading state dict into model...", flush=True)
         sys.stdout.flush()
         # Load standard TorchTitan format directly
