@@ -348,10 +348,20 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
     Returns:
         model: Loaded TorchTitan model
     """
+    import sys
+    print(f"[DEBUG] load_model called: checkpoint={checkpoint_path}, use_vllm_compat={use_vllm_compat}", flush=True)
+    sys.stdout.flush()
+    
     # Load HuggingFace config
+    print("[DEBUG] Loading HuggingFace config...", flush=True)
+    sys.stdout.flush()
     hf_config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+    print(f"[DEBUG] Config loaded: {hf_config.hidden_size} hidden, {hf_config.num_hidden_layers} layers", flush=True)
+    sys.stdout.flush()
 
     # Create model args
+    print("[DEBUG] Creating model args...", flush=True)
+    sys.stdout.flush()
     model_args = Qwen3ModelArgs(
         dim=hf_config.hidden_size,
         n_layers=hf_config.num_hidden_layers,
@@ -371,9 +381,15 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
         depth_init=True,
         eos_id=getattr(hf_config, "eos_token_id", 151645),
     )
+    print("[DEBUG] Model args created", flush=True)
+    sys.stdout.flush()
 
     # state_dict is in standard TorchTitan format (w1, w2, w3)
+    print(f"[DEBUG] Loading state dict from {checkpoint_path}...", flush=True)
+    sys.stdout.flush()
     state_dict = load_file(checkpoint_path)
+    print(f"[DEBUG] State dict loaded with {len(state_dict)} keys", flush=True)
+    sys.stdout.flush()
 
     # Create default PEFT config (disabled)
     from torchtitan.config.job_config import PEFT
@@ -381,21 +397,37 @@ def load_model(checkpoint_path: str, model_path: str, use_vllm_compat: bool = Tr
 
     if use_vllm_compat:
         # Create and load model (using vLLM-compat for bitwise determinism)
+        print("[DEBUG] Creating Qwen3VLLMCompatModel...", flush=True)
+        sys.stdout.flush()
         from torchtitan.experiments.deterministic_vllm_rl.models.qwen3 import (
             Qwen3VLLMCompatModel,
         )
 
         model = Qwen3VLLMCompatModel(model_args)
+        print("[DEBUG] Model created, converting state dict...", flush=True)
+        sys.stdout.flush()
         # Convert to vLLM-compat format (merged gate_up_proj, down_proj)
         vllm_compat_state = torchtitan_to_vllm_compat(state_dict)
+        print(f"[DEBUG] Converted to {len(vllm_compat_state)} vLLM-compat keys", flush=True)
+        sys.stdout.flush()
+        print("[DEBUG] Loading state dict into model...", flush=True)
+        sys.stdout.flush()
         model.load_state_dict(vllm_compat_state, strict=False)
+        print("[DEBUG] State dict loaded", flush=True)
+        sys.stdout.flush()
     else:
         # Use standard TorchTitan model
+        print("[DEBUG] Creating standard Qwen3Model...", flush=True)
+        sys.stdout.flush()
         from torchtitan.models.qwen3 import Qwen3Model
 
         model = Qwen3Model(model_args, peft_config)
+        print("[DEBUG] Loading state dict into model...", flush=True)
+        sys.stdout.flush()
         # Load standard TorchTitan format directly
         model.load_state_dict(state_dict, strict=False)
+        print("[DEBUG] State dict loaded", flush=True)
+        sys.stdout.flush()
 
     model.to(torch.bfloat16)
 
@@ -1448,22 +1480,36 @@ def main():
     )
 
     # Load TorchTitan model for training
-    print("\nLoading TorchTitan model for training...")
+    import sys
+    print("\nLoading TorchTitan model for training...", flush=True)
+    sys.stdout.flush()
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[DEBUG] Device: {device}", flush=True)
+    sys.stdout.flush()
+    print(f"[DEBUG] Calling load_model({titan_checkpoint_path}, {model_path})...", flush=True)
+    sys.stdout.flush()
     model = load_model(
         titan_checkpoint_path, model_path, use_vllm_compat=use_vllm_compat
     )
+    print(f"[DEBUG] Model loaded, moving to {device}...", flush=True)
+    sys.stdout.flush()
     model = model.to(device)
+    print(f"[DEBUG] Model on device, setting train mode...", flush=True)
+    sys.stdout.flush()
     model.train()
 
     # Save initial weights for delta computation (on CPU to save GPU memory)
-    print("Saving initial weights for tracking...")
+    print("Saving initial weights for tracking...", flush=True)
+    sys.stdout.flush()
     initial_state = {
         name: param.clone().cpu() for name, param in model.state_dict().items()
     }
+    print(f"[DEBUG] Saved {len(initial_state)} initial weights", flush=True)
+    sys.stdout.flush()
 
     # Initialize persistent vLLM engine for rollouts
-    print("\nInitializing vLLM engine for rollouts...")
+    print("\nInitializing vLLM engine for rollouts...", flush=True)
+    sys.stdout.flush()
     vllm_engine = VLLMRolloutEngine(model_path)
 
     # Load tokenizer
