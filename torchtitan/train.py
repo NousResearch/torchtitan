@@ -19,7 +19,10 @@ from torch.distributed.elastic.multiprocessing.errors import record
 import torchtitan.protocols.train_spec as train_spec_module
 from torchtitan.components.checkpoint import CheckpointManager
 from torchtitan.components.dataloader import DataloaderExhaustedError
+
 from torchtitan.components.loss import IGNORE_INDEX
+from torchtitan.components.ft import FTManager, maybe_semi_sync_training
+from torchtitan.components.loss import rescale_accumulated_loss
 from torchtitan.components.metrics import (
     build_metrics_processor,
     ensure_pp_loss_visible,
@@ -453,18 +456,23 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # dict as extra_inputs are not forwarded to other stages in PP, but
         # extra_kwargs are.
         extra_kwargs: dict[str, Any] = {}
+        if "position_ids" in extra_inputs:
+            extra_kwargs["positions"] = extra_inputs.pop("position_ids")
 
         attn_type = getattr(self.model_args, "attn_type", "sdpa")
         if attn_type in ["flex", "varlen"]:
-            assert (
-                self.tokenizer is not None
-            ), "tokenizer is required for flex/varlen attention"
+            assert self.tokenizer is not None, (
+                "tokenizer is required for flex/varlen attention"
+            )
             model = cast(ModelProtocol, self.model_parts[0])
             extra_kwargs["attention_masks"] = model.get_attention_masks(
                 input_batch=inputs,
                 tokenizer=self.tokenizer,
                 extra_inputs=extra_inputs,
             )
+
+            # drop sequence_lengths from extra_inputs after mask mod creation (model forward doesn't need it)
+            extra_inputs.pop("sequence_lengths", None)
 
         if self.parallel_dims.cp_enabled:
             inputs, labels, extra_kwargs = prepare_context_parallel_input(
@@ -682,9 +690,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 )
 
                 # Run validation if validator is available
-                if (
-                    self.job_config.validation.enable
-                    and self.validator.should_validate(self.step)
+                if self.job_config.validation.enable and self.validator.should_validate(
+                    self.step
                 ):
                     self.validator.validate(self.model_parts, self.step)
 
@@ -757,12 +764,12 @@ def main(trainer_class: type[Trainer]) -> None:
             return
 
         if config.checkpoint.create_seed_checkpoint:
-            assert (
-                int(os.environ["WORLD_SIZE"]) == 1
-            ), "Must create seed checkpoint using a single device, to disable sharding."
-            assert (
-                config.checkpoint.enable
-            ), "Must enable checkpointing when creating a seed checkpoint."
+            assert int(os.environ["WORLD_SIZE"]) == 1, (
+                "Must create seed checkpoint using a single device, to disable sharding."
+            )
+            assert config.checkpoint.enable, (
+                "Must enable checkpointing when creating a seed checkpoint."
+            )
             trainer.checkpointer.save(curr_step=0, last_step=True)
             logger.info("Created seed checkpoint")
         else:

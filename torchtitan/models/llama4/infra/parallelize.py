@@ -7,6 +7,7 @@
 from typing import Any
 
 import torch
+import torch._inductor.config
 import torch.nn as nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointWrapper,
@@ -81,9 +82,7 @@ def parallelize_llama(
     # TODO: TP currently cannot handle uneven seq_len because we set
     #       `use_local_output=True` to use plain Tensors for legacy reasons.
     #       Need to revisit this.
-    assert (
-        job_config.training.seq_len % parallel_dims.seq_len_divisor == 0
-    ), f"""
+    assert job_config.training.seq_len % parallel_dims.seq_len_divisor == 0, f"""
         Sequence length {job_config.training.seq_len} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
@@ -258,7 +257,7 @@ def apply_non_moe_tp(
     # inputs may be different for float8 linears with tensorwise scaling.
     if enable_float8_tensorwise_tp:
         # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
-        from torchao.float8.float8_tensor_parallel import (
+        from torchao.float8.float8_tensor_parallel import (  # type: ignore[import]
             Float8ColwiseParallel,
             Float8RowwiseParallel,
             PrepareFloat8ModuleInput,
@@ -332,6 +331,7 @@ def apply_fsdp(
     ep_degree: int = 1,
     edp_mesh: DeviceMesh | None = None,
     gradient_divide_factor: int | None = None,
+    disable_prefetch: bool = False,
 ):
     """
     Apply data parallelism (via FSDP2) to the model.
@@ -399,7 +399,7 @@ def apply_fsdp(
                 edp_mesh["efsdp"].size() * ep_degree
                 > transformer_block.moe.experts.num_experts
             ):
-                _experts_shard_placement_fn = lambda param: Shard(1)
+                _experts_shard_placement_fn = lambda param: Shard(1)  # noqa: E731
 
             fully_shard(
                 transformer_block.moe.experts,
@@ -432,6 +432,11 @@ def apply_fsdp(
     # NOTE: set up explicit prefetching when EP is enabled, as D2H syncs
     # in EP could interfere with implicit prefetching in FSDP
     if ep_degree == 1:
+        return
+
+    # Skip prefetch setup if disabled
+    if disable_prefetch:
+        logger.info("FSDP explicit prefetching is disabled")
         return
 
     # forward
@@ -598,6 +603,14 @@ def apply_compile(model: nn.Module, compile_config: CompileConfig, ep_enabled: b
     # NOTE: This flag is needed for torch.compile to avoid graph breaking on dynamic shapes in token-choice MoE
     # but it is experimental.
     torch._dynamo.config.capture_scalar_outputs = True
+
+    # set inductor config from compile_config
+    torch._inductor.config.max_autotune = compile_config.max_autotune
+    torch._inductor.config.max_autotune_prune_choices_based_on_shared_mem = (
+        compile_config.prune_configs_by_shared_mem
+    )
+    torch._inductor.config.triton.cudagraphs = compile_config.triton_cudagraphs
+
     # pyrefly: ignore [missing-attribute]
     for layer_id, transformer_block in model.layers.named_children():
         if transformer_block.moe_enabled:

@@ -239,33 +239,43 @@ def get_document_mask_mod(batch: torch.Tensor, eos_id: int) -> _mask_mod_signatu
     return document_mask
 
 
-def get_document_mask_mod_by_seq_lens(
-    seq_lens: torch.Tensor,
-) -> _mask_mod_signature:
+def get_document_mask_mod_by_seq_lens(seq_lens: torch.Tensor):
     """
     seq_lens: [batch_size, num_docs]
-              each row sums to packed sequence length
+              each row sums to packed sequence length (can vary per batch row)
+    returns a mask_mod: (b, h, q_idx, kv_idx) -> bool
     """
 
     device = seq_lens.device
     seq_lens = seq_lens.to(torch.long)
     bsz, num_docs = seq_lens.shape
 
-    # create doc id labels like:
-    # [[0,1,2,...],
-    #  [0,1,2,...]]
-    doc_ids = torch.arange(num_docs, device=device).expand(bsz, num_docs)
+    # total packed length per sample
+    lengths = seq_lens.sum(dim=1)  # [bsz]
+    max_len = int(lengths.max().item())
 
-    # expand into per-token ownership
-    # example:
-    # seq_lens = [[2,3,1]]
-    # → document_ids = [[0,0,1,1,1,2]]
-    doc_ids = torch.repeat_interleave(doc_ids, seq_lens, dim=1)
+    # cumulative document boundaries
+    # e.g. [4, 10, 12] means:
+    # token idx 0..3 -> doc0, 4..9 -> doc1, 10..11 -> doc2
+    cum = torch.cumsum(seq_lens, dim=1)  # [bsz, num_docs]
+
+    # token positions [0..max_len-1], broadcasted over batch
+    pos = torch.arange(max_len, device=device)  # [max_len]
+    pos = pos.expand(bsz, max_len)  # [bsz, max_len]  <-- the important bit
+
+    # doc id per token: first doc where pos < cum[doc]
+    # shape: [bsz, max_len]
+    doc_ids = torch.searchsorted(cum, pos, right=False)
+
+    # optional, but you probably want it if rows have different packed lengths
+    valid = torch.arange(max_len, device=device).unsqueeze(0) < lengths.unsqueeze(1)
+    doc_ids = doc_ids.masked_fill(~valid, -1)
 
     def document_seq_len_mask(
         b: torch.Tensor, h: torch.Tensor, q_idx: torch.Tensor, kv_idx: torch.Tensor
     ) -> torch.Tensor:
-        return doc_ids[b, q_idx] == doc_ids[b, kv_idx]
+        # causal + same-doc
+        return (q_idx >= kv_idx) & (doc_ids[b, q_idx] == doc_ids[b, kv_idx])
 
     return document_seq_len_mask
 

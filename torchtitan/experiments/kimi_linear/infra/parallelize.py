@@ -6,7 +6,6 @@
 
 import torch
 import torch.nn as nn
-import torch._inductor.config
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import Replicate, Shard
 from torch.distributed.tensor.parallel import (
@@ -49,8 +48,7 @@ _op_sac_save_list = {
 }
 
 
-# Adapted from llama4/infra/parallelize.py
-def parallelize_deepseekv3(
+def parallelize_kimi_linear(
     model: nn.Module,
     parallel_dims: ParallelDims,
     job_config: JobConfig,
@@ -58,7 +56,9 @@ def parallelize_deepseekv3(
     # TODO: TP currently cannot handle uneven seq_len because we set
     #       `use_local_output=True` to use plain Tensors for legacy reasons.
     #       Need to revisit this.
-    assert job_config.training.seq_len % parallel_dims.seq_len_divisor == 0, f"""
+    assert (
+        job_config.training.seq_len % parallel_dims.seq_len_divisor == 0
+    ), f"""
         Sequence length {job_config.training.seq_len} must be divisible by the product of TP degree
         ({parallel_dims.tp}) and 2 * CP degree ({parallel_dims.cp}).
         """
@@ -72,29 +72,7 @@ def parallelize_deepseekv3(
         )
 
     if parallel_dims.tp_enabled:
-        enable_float8_linear = "float8" in job_config.model.converters
-        float8_is_rowwise = job_config.quantize.linear.float8.recipe_name in (
-            "rowwise",
-            "rowwise_with_gw_hp",
-        )
-
-        enable_float8_tensorwise_tp = enable_float8_linear and not float8_is_rowwise
-        if enable_float8_tensorwise_tp:
-            # TODO(jianiw): This branch needs to be tested and enabled
-            raise NotImplementedError(
-                "Currently, float8 tensorwise TP is not tested for deepseekv3"
-            )
-
-        tp_mesh = parallel_dims.get_mesh("tp")
-        apply_non_moe_tp(
-            model,
-            tp_mesh,
-            loss_parallel=not job_config.parallelism.disable_loss_parallel,
-            enable_float8_tensorwise_tp=False,
-            cp_enabled=parallel_dims.cp_enabled
-            or job_config.training.dataset_type == "preprocessed",
-        )
-        maybe_enable_async_tp(job_config, tp_mesh)
+        raise NotImplementedError("TP not supported for Kimi Linear")
 
     # Check if using DeepEP for MoE communication
     if job_config.parallelism.expert_parallel_comm_backend == "deepep":
@@ -185,7 +163,6 @@ def parallelize_deepseekv3(
             ep_degree=parallel_dims.ep,
             edp_mesh=edp_mesh,
             gradient_divide_factor=parallel_dims.fsdp_gradient_divide_factor,
-            disable_prefetch=job_config.parallelism.fsdp_disable_prefetch,
         )
 
         if parallel_dims.dp_replicate_enabled:
@@ -206,139 +183,3 @@ def parallelize_deepseekv3(
         )
 
     return model
-
-
-def apply_non_moe_tp(
-    model: nn.Module,
-    tp_mesh: DeviceMesh,
-    loss_parallel: bool,
-    enable_float8_tensorwise_tp: bool,
-    enable_async_tp: bool,
-    cp_enabled: bool,
-):
-    """Apply tensor parallelism."""
-    # 1. Parallelize the embedding and shard its outputs (which are the first
-    # transformer block's inputs)
-    # 2. Parallelize the root norm layer over the sequence dim
-    # 3. Parallelize the final linear output layer
-    parallelize_module(
-        model,
-        tp_mesh,
-        {
-            "tok_embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "norm": SequenceParallel(),
-            "output": ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Shard(-1) if loss_parallel else Replicate(),
-                use_local_output=not loss_parallel,
-            ),
-        },
-    )
-
-    # Parallel styles used for transformer block linear weights and their
-    # inputs may be different for float8 linears with tensorwise scaling.
-    if enable_float8_tensorwise_tp:
-        # TODO(vkuzo): add the items below to __init__.py of torchao.float8 and import from there
-        from torchao.float8.float8_tensor_parallel import (  # type: ignore[import]
-            Float8ColwiseParallel,
-            Float8RowwiseParallel,
-            PrepareFloat8ModuleInput,
-        )
-
-        rowwise_parallel, colwise_parallel, prepare_module_input = (
-            Float8RowwiseParallel,
-            Float8ColwiseParallel,
-            PrepareFloat8ModuleInput,
-        )
-    else:
-        rowwise_parallel, colwise_parallel, prepare_module_input = (
-            RowwiseParallel,
-            ColwiseParallel,
-            PrepareModuleInput,
-        )
-
-    attention_kernel_plan = prepare_module_input(
-        input_layouts=(Shard(1), Shard(1), Shard(1)),
-        desired_input_layouts=(Shard(1), Shard(1), Shard(1)),
-        use_local_output=True,
-    )
-    # Apply tensor + sequence parallelism to every transformer block
-    # NOTE: At the cost of model code change, we can accelerate Sequence Parallel
-    #       by folding (and unfolding) the batch dimension and the sequence dimension.
-    #       Examples can be found at https://github.com/pytorch/torchtitan/pull/437
-    positions_sharding = Replicate() if cp_enabled else None
-    # pyrefly: ignore [not-callable]
-    for transformer_block in model.layers.values():
-        layer_plan = {
-            "attention_norm": SequenceParallel(),
-            "attention": prepare_module_input(
-                input_layouts=(Shard(1), Replicate(), None, positions_sharding),
-                desired_input_layouts=(
-                    Replicate(),
-                    Replicate(),
-                    None,
-                    positions_sharding,
-                ),
-            ),
-            # NOTE: use_local_output=False make the output to be a DTensor instead of a plain Tensor
-            # so that the intermedidate results k is generated as a DTensor and its gradient is
-            # correctly handled by the autograd engine.
-            "attention.wkv_a": NoParallel(use_local_output=False),
-            "attention.wkv_b": colwise_parallel(use_local_output=False),
-            "attention.kv_norm": NoParallel(use_local_output=False),
-            # NOTE: use_local_output=True so that the inputs to FlexAttention are plain Tensors
-            "attention.inner_attention": attention_kernel_plan,
-            "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
-            "ffn_norm": SequenceParallel(),
-        }
-
-        # pyrefly: ignore [missing-attribute]
-        if transformer_block.attention.q_lora_rank == 0:
-            layer_plan.update(
-                {
-                    "attention.wq": colwise_parallel(
-                        use_local_output=False
-                    ),  # This is only used when q_lora_rank==0
-                }
-            )
-        else:
-            layer_plan.update(
-                {
-                    "attention.wq_a": NoParallel(use_local_output=False),
-                    "attention.wq_b": colwise_parallel(use_local_output=False),
-                    "attention.q_norm": NoParallel(use_local_output=False),
-                }
-            )
-
-        # pyrefly: ignore [missing-attribute]
-        if not transformer_block.moe_enabled:
-            layer_plan.update(
-                {
-                    "feed_forward": prepare_module_input(
-                        input_layouts=(Shard(1),),
-                        desired_input_layouts=(Replicate(),),
-                    ),
-                    "feed_forward.w1": colwise_parallel(),
-                    "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
-                    "feed_forward.w3": colwise_parallel(),
-                }
-            )
-
-        parallelize_module(
-            # pyrefly: ignore [bad-argument-type]
-            module=transformer_block,
-            device_mesh=tp_mesh,
-            # pyrefly: ignore [bad-argument-type]
-            parallelize_plan=layer_plan,
-        )
-
-    if enable_async_tp:
-        torch._inductor.config._micro_pipeline_tp = True
-
-    logger.info(
-        f"Applied {'Float8 tensorwise ' if enable_float8_tensorwise_tp else ''}{'Async ' if enable_async_tp else ''}"
-        "Tensor Parallelism to the model"
-    )

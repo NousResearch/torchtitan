@@ -15,5 +15,7 @@ _supported_experiments = frozenset(
         "autoparallel.llama3",
         "autoparallel.deepseek_v3",
         "autoparallel.local_map_deepseek_v3",
+        "kimi_linear",
+        "dion_optimizer",
     ]
 )

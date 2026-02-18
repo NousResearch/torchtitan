@@ -25,16 +25,13 @@ class BaseTokenizer(ABC):
         self.eos_id = None
 
     @abstractmethod
-    def encode(self, *args, **kwargs) -> list[int]:
-        ...
+    def encode(self, *args, **kwargs) -> list[int]: ...
 
     @abstractmethod
-    def decode(self, *args, **kwargs) -> str:
-        ...
+    def decode(self, *args, **kwargs) -> str: ...
 
     @abstractmethod
-    def get_vocab_size(self) -> int:
-        ...
+    def get_vocab_size(self) -> int: ...
 
 
 class HuggingFaceTokenizer(BaseTokenizer):
