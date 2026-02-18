@@ -41,20 +41,23 @@ class HealthMonitor:
         self.neg_logp = deque(maxlen=window_size)
         self.kl_div = deque(maxlen=window_size)
         self.clip_ratio = deque(maxlen=window_size)
+        self.losses = deque(maxlen=window_size)
 
         self.step = 0
+        self.last_checked_step = 0
         self.warning_count = 0
         self.critical_count = 0
         self.is_healthy = True
 
         self.patterns = {
-            "step": re.compile(r"step[:\s]+(\d+)", re.IGNORECASE),
-            "reward": re.compile(r"global_advantages[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
-            "ratio": re.compile(r"global_ratio[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
-            "pos_logp": re.compile(r"global_pos_logp[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
-            "neg_logp": re.compile(r"global_neg_logp[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
-            "kl": re.compile(r"kl_div_est[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
-            "clip": re.compile(r"global_clip_ratio[:\s]+([+-]?\d+\.?\d*)", re.IGNORECASE),
+            "step": re.compile(r"step:\s+(\d+)", re.IGNORECASE),
+            "loss": re.compile(r"loss:\s+([-+]?\d+\.\d+)", re.IGNORECASE),
+            "reward": re.compile(r"Metric:\s*loss_metrics/global_advantages.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
+            "ratio": re.compile(r"Metric:\s*loss_metrics/global_ratio[^,]*,.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
+            "pos_logp": re.compile(r"Metric:\s*loss_metrics/global_pos_logp.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
+            "neg_logp": re.compile(r"Metric:\s*loss_metrics/global_neg_logp.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
+            "kl": re.compile(r"Metric:\s*loss_metrics/kl_div_est.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
+            "clip": re.compile(r"Metric:\s*loss_metrics/global_clip_ratio[^,]*,.*?value:\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)", re.IGNORECASE),
         }
 
     def parse_line(self, line: str) -> Dict[str, float]:
@@ -70,8 +73,10 @@ class HealthMonitor:
 
     def update(self, metrics: Dict[str, float]):
         if "step" in metrics:
-            self.step = int(metrics["step"])
+            self.step = max(self.step, int(metrics["step"]))
 
+        if "loss" in metrics:
+            self.losses.append(metrics["loss"])
         if "reward" in metrics:
             self.rewards.append(metrics["reward"])
         if "ratio" in metrics:
@@ -85,7 +90,8 @@ class HealthMonitor:
         if "clip" in metrics:
             self.clip_ratio.append(metrics["clip"])
 
-        if len(self.rewards) >= 5 and len(self.rewards) % self.check_interval == 0:
+        if self.step > self.last_checked_step and self.step % self.check_interval == 0 and len(self.rewards) >= 5:
+            self.last_checked_step = self.step
             return self.check_health()
         return None
 
@@ -168,12 +174,10 @@ class HealthMonitor:
                 elif mean_clip > 0.5:
                     checks.append(f"Moderate clipping: {mean_clip:.1%}")
 
-        # Determine status
+        # Determine status - only CRITICAL (red) or HEALTHY (green)
         if criticals:
             status = "CRITICAL"
             self.is_healthy = False
-        elif warnings:
-            status = "WARNING"
         else:
             status = "HEALTHY"
             self.is_healthy = True
@@ -204,21 +208,22 @@ class HealthMonitor:
             print(msg)
 
         # Summary
-        if self.rewards:
+        if self.rewards or self.losses:
             print(f"\nLatest metrics:")
-            print(f"   Reward: {list(self.rewards)[-1]:.4f}")
+            if self.losses:
+                print(f"   Loss:   {list(self.losses)[-1]:.4f}")
+            if self.rewards:
+                print(f"   Reward: {list(self.rewards)[-1]:.4f}")
             if self.ratios:
                 print(f"   Ratio:  {list(self.ratios)[-1]:.4f}")
             if self.pos_logp and self.neg_logp:
                 sep = list(self.pos_logp)[-1] - list(self.neg_logp)[-1]
                 print(f"   Pos/Neg Separation: {sep:.4f}")
 
-        # Colored status
+        # Colored status - only green or red
         status = health_result['status']
         if status == "HEALTHY":
             status_colored = f"{GREEN}{BOLD}{status}{RESET}"
-        elif status == "WARNING":
-            status_colored = f"{YELLOW}{BOLD}{status}{RESET}"
         elif status == "CRITICAL":
             status_colored = f"{RED}{BOLD}{status}{RESET}"
         else:
@@ -231,6 +236,30 @@ class HealthMonitor:
 
 def tail_log_file(log_file: Path, monitor: HealthMonitor, auto_kill_job: Optional[str] = None):
     print(f"Monitoring log file: {log_file}")
+
+    # First, read last 500 lines to catch up on existing metrics
+    print("Reading recent metrics from log...")
+    metrics_found = 0
+    try:
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            print(f"Processing last {min(500, len(lines))} lines...")
+            for line in lines[-500:]:
+                metrics = monitor.parse_line(line)
+                if metrics:
+                    metrics_found += 1
+                    health_result = monitor.update(metrics)
+                    if health_result:
+                        monitor.print_status(health_result)
+        print(f"Caught up on existing metrics ({metrics_found} metric lines found).")
+        # Force a health check after catching up
+        if len(monitor.rewards) >= 5:
+            print("Running health check on existing metrics...\n")
+            health_result = monitor.check_health()
+            monitor.print_status(health_result)
+        print("Now monitoring new lines...\n")
+    except Exception as e:
+        print(f"Could not read existing lines: {e}")
 
     try:
         process = subprocess.Popen(
@@ -267,7 +296,14 @@ def tail_log_file(log_file: Path, monitor: HealthMonitor, auto_kill_job: Optiona
 
 
 def monitor_job(job_id: str, monitor: HealthMonitor, auto_kill: bool = False):
-    print(f"🔍 Looking for log file for job {job_id}...")
+    print(f"Looking for log file for job {job_id}...")
+
+    search_paths = [
+        Path.cwd(), 
+        Path.cwd().parent,
+        Path.cwd().parent.parent,
+        Path.cwd().parent.parent.parent, 
+    ]
 
     log_patterns = [
         f"{job_id}.out",
@@ -276,10 +312,21 @@ def monitor_job(job_id: str, monitor: HealthMonitor, auto_kill: bool = False):
     ]
 
     log_file = None
-    for pattern in log_patterns:
-        candidates = list(Path.cwd().rglob(pattern))
-        if candidates:
-            log_file = candidates[0]
+    for search_path in search_paths:
+        if not search_path.exists():
+            continue
+        for pattern in log_patterns:
+            logs_dir = search_path / "logs"
+            if logs_dir.exists():
+                candidates = list(logs_dir.glob(pattern))
+                if candidates:
+                    log_file = candidates[0]
+                    break
+            candidates = list(search_path.rglob(pattern))
+            if candidates:
+                log_file = candidates[0]
+                break
+        if log_file:
             break
 
     if not log_file:
