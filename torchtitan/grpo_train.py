@@ -531,7 +531,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             logger.debug(
                 f"Setting up SGlang process groups, dp_shard_degree: {self.dp_shard_degree}, tp_degree: {self.tp_degree}"
             )
-            hostname = "localhost" if local_rank < 8 else get_hostname_url()
+            hostname = "localhost" if int(os.environ.get("SLURM_NODEID", 0)) == 0 else get_hostname_url()
             logger.debug(
                 f"total: {self.total_group_size}, rank: {self.dp_shard_rank * self.tp_degree + self.tp_rank}, pg_server: {hostname}"
             )

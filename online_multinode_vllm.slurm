@@ -2,7 +2,7 @@
 #SBATCH --job-name=multinode_online_runner
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
-#SBATCH --nodes=2
+#SBATCH --nodes=3
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
 #SBATCH --gpus-per-task=8
@@ -34,20 +34,20 @@ export NCCL_IB_PCI_RELAXED_ORDERING=1
 export NCCL_IB_QPS_PER_CONNECTION=2
 export NCCL_IB_SPLIT_DATA_ON_QPS=0
 export NCCL_IGNORE_CPU_AFFINITY=1
-export NCCL_IB_HCA=mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1,mlx5_10:1,mlx5_13:1,mlx5_14:1,mlx5_15:1
-export NCCL_SOCKET_IFNAME=bond0
-export UCX_NET_DEVICES=bond0
+#export NCCL_IB_HCA=mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1,mlx5_10:1,mlx5_13:1,mlx5_14:1,mlx5_15:1
+export NCCL_SOCKET_IFNAME=ens10f0np0
+export UCX_NET_DEVICES=ens10f0np0
 
 
 # Define environment paths
-export TRAIN_PATH="/home/dakota/github/simple-trainer"
-export TRAIN_ENV="${TRAIN_PATH}/.venv"
-export VLLM_ENV="/home/dakota/envs/vllm/.venv"
-export API_ENV="/home/dakota/github/trajectory-handler/.venv"
+export TRAIN_PATH="/mnt/data/home/nous/mormio/torchtitan"
+export TRAIN_ENV="mormiott"
+export VLLM_ENV="mormiovllm"
+export API_ENV="atropos"
 
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
 head_node=${nodes_array[0]}
-export head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+export head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname -I | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ && $i !~ /^127\./) {print $i; exit}}')
 
 srun -l --export=ALL ./vllm_launch.sh

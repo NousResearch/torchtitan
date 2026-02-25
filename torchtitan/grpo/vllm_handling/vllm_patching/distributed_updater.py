@@ -320,6 +320,14 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
     json_data = get_json_data()
     param_name_list = list(json_data["param_mappings"].keys())
     param_name_list.sort()
+
+    # Read the auto-selected port from sglang_json.json (written by training rank 0)
+    dynamic_port = json_data.get("sglang_port")
+    if dynamic_port is not None:
+        head_node = master_addr.rsplit(":", 1)[0]
+        master_addr = f"{head_node}:{dynamic_port}"
+        print(f"Using dynamic sglang port from json: {dynamic_port}", flush=True)
+
     if rank == 0:
         print("Rank 0, writing json of weight dtypes...", flush=True)
         name_conversions = get_name_conversions(json_data["param_mappings"])

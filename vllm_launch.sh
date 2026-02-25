@@ -1,22 +1,23 @@
 #!/bin/bash
+source /mnt/data/home/nous/miniconda3/etc/profile.d/conda.sh
 printenv
 ulimit -n 32000
 # if NODEID == 0...
 if [[ "$SLURM_NODEID" -eq 0 ]]; then
     # Create the trajectory handler stuff
     echo "Starting job at $(date)"
-    source ${API_ENV}/bin/activate
+    conda activate ${API_ENV}
     # Start trajectory handler
     echo "Starting trajectory handler..."
     run-api > ${LOGDIR}/api.log 2>&1 &
     python $PYTHON_SCRIPT serve --slurm=True $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
-    deactivate
+    conda deactivate
     echo "Started trajectory handler..."
 fi
 echo $SLURM_NODEID ", " $NUM_TRAINING_NODES
 # now, if we're within the number of nodes allocated to training...
 if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
-    source ${TRAIN_ENV}/bin/activate
+    conda activate ${TRAIN_ENV}
     cd $TRAIN_PATH
     nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
     nodes_array=($nodes)
@@ -52,7 +53,8 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 #    dcgmi profile --pause
     # adjust sbatch --ntasks and sbatch --nodes above and --nnodes below
     # to your specific node count, and update target launch file.
-    torchrun --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
+    export PYTORCH_ALLOC_CONF=expandable_segments:True
+    torchrun --nproc_per_node 8 --nnodes ${NUM_TRAINING_NODES} --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
 -m torchtitan.grpo_train --job.config_file ${CONFIG_FILE}  --grpo.sglang_slurm_num_nodes ${NUM_INFERENCE_NODES} ${TRAINING_ARGS}
     scancel $SLURM_JOBID
 #    dcgmi profile --resume
@@ -63,11 +65,12 @@ else
     echo "Starting vllm instances..."
 
     # Startup wandb monitoring...
-    source ${API_ENV}/bin/activate
+    conda activate ${API_ENV}
     API_ADDR="http://${head_node_ip}:8000"
     inference-node-wandb-watcher --api_addr ${API_ADDR} --tp 1 --node_num ${SLURM_NODEID} > ${LOGDIR}/wandb_${SLURM_NODEID}.log 2>&1  &
 
-    source ${VLLM_ENV}/bin/activate
+    conda activate ${VLLM_ENV}
+    export VLLM_WORKER_MULTIPROC_METHOD=spawn
 
     PORT_BASE=9000
 
@@ -83,9 +86,11 @@ else
         CUDA_VISIBLE_DEVICES=$GPU_ID nohup python -m torchtitan.grpo.vllm_handling.vllm_runner \
           --model $MODEL_NAME \
           --host 0.0.0.0 \
-          --gpu-memory-utilization 0.75 \
+          --gpu-memory-utilization 0.92 \
+          --max-model-len 131072 \
           --dtype="bfloat16" \
           --log-level="error" \
+          --worker-cls torchtitan.grpo.vllm_handling.vllm_patching.patched_worker.PatchedWorker \
           --port $PORT > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1 &
         sleep 3  # wait so vllm can find ports without conflicts :)
     done
@@ -96,8 +101,10 @@ else
     CUDA_VISIBLE_DEVICES=7 nohup python -m torchtitan.grpo.vllm_handling.vllm_runner \
       --model $MODEL_NAME \
       --host 0.0.0.0 \
-      --gpu-memory-utilization 0.75 \
+      --gpu-memory-utilization 0.92 \
+      --max-model-len 131072 \
       --dtype="bfloat16" \
       --log-level="error" \
+      --worker-cls torchtitan.grpo.vllm_handling.vllm_patching.patched_worker.PatchedWorker \
       --port 9007 > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1
 fi

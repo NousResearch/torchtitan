@@ -40,6 +40,7 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 #    export LD_LIBRARY_PATH=/opt/amazon/efa/lib:$LD_LIBRARY_PATH
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
     export CUDA_LAUNCH_BLOCKING=0
+    export PYTORCH_ALLOC_CONF=expandable_segments:True
     TORCHFT_LIGHTHOUSE=${TORCHFT_LIGHTHOUSE:-"http://localhost:29510"}
 
     # on your cluster you might need these:
@@ -52,7 +53,7 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 #    dcgmi profile --pause
     # adjust sbatch --ntasks and sbatch --nodes above and --nnodes below
     # to your specific node count, and update target launch file.
-    torchrun --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
+    PYTORCH_ALLOC_CONF=expandable_segments:True torchrun --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
 -m torchtitan.grpo_train --job.config_file ${CONFIG_FILE}  --grpo.sglang_slurm_num_nodes ${NUM_INFERENCE_NODES} ${TRAINING_ARGS}
     scancel $SLURM_JOBID
 #    dcgmi profile --resume

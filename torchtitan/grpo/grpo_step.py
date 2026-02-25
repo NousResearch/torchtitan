@@ -48,8 +48,8 @@ def compute_logp_from_model(
     if temperature != 1.0:
         # Apply temperature scaling to the logits
         pred = pred / temperature
-    chunked_pred = torch.chunk(pred, 16, dim=1)
-    chunked_labels = torch.chunk(labels, 16, dim=1)
+    chunked_pred = torch.chunk(pred, 64, dim=1)
+    chunked_labels = torch.chunk(labels, 64, dim=1)
     chunked_logp = [
         -loss_fn(chunk, label_chunk)
         for chunk, label_chunk in zip(chunked_pred, chunked_labels)
@@ -72,7 +72,7 @@ def compute_entropy_loss(pred, entropy_loss_fn, entropy_weight, device):
         entropy_loss: Computed entropy loss
     """
     if entropy_weight > 0:
-        chunked_pred = torch.chunk(pred, 16, dim=1)
+        chunked_pred = torch.chunk(pred, 64, dim=1)
         chunked_entropy_loss = [entropy_loss_fn(chunk) for chunk in chunked_pred]
         entropy_loss = entropy_weight * torch.cat(chunked_entropy_loss, dim=1)
     else:
@@ -221,8 +221,8 @@ def compute_grpo_loss_from_predictions(
         logp: Log probabilities (for saving in off-policy buffer)
     """
     # Compute log probabilities
-    chunked_pred = torch.chunk(pred, 16, dim=1)
-    chunked_labels = torch.chunk(labels, 16, dim=1)
+    chunked_pred = torch.chunk(pred, 64, dim=1)
+    chunked_labels = torch.chunk(labels, 64, dim=1)
     chunked_logp = [
         -loss_fn(chunk, label_chunk)
         for chunk, label_chunk in zip(chunked_pred, chunked_labels)
@@ -266,6 +266,25 @@ def compute_grpo_loss_from_predictions(
         clipped_ratio = ratio
     if job_config.grpo.rollout_is_threshold is not None and inf_logps is not None:
         imp_ratio_mask = (inf_logps <= 0).float() * mask
+        # Sanity checks for inference logprobs
+        with torch.no_grad():
+            frac_included = (imp_ratio_mask.sum() / mask.sum()).item() if mask.sum() > 0 else 0.0
+            included_tokens = imp_ratio_mask > 0
+            if included_tokens.any():
+                imp_ratio_logp_check = (old_logp if old_logp is not None else logp.detach())
+                inf_logratio_included = (imp_ratio_logp_check[included_tokens] - inf_logps[included_tokens])
+                inf_logratio_mean = inf_logratio_included.mean().item()
+                inf_logratio_std = inf_logratio_included.std().item() if inf_logratio_included.numel() > 1 else 0.0
+            else:
+                inf_logratio_mean = 0.0
+                inf_logratio_std = 0.0
+            logger.info(
+                f"[IS_SANITY] frac_included={frac_included:.4f}, "
+                f"inf_logratio_mean={inf_logratio_mean:.4f}, "
+                f"inf_logratio_std={inf_logratio_std:.4f}, "
+                f"mask_sum={mask.sum().item():.0f}, "
+                f"imp_mask_sum={imp_ratio_mask.sum().item():.0f}"
+            )
         imp_ratio_logp = old_logp if old_logp is not None else logp.detach()
         importance_ratio, is_metrics = compute_rollout_importance_weights(
             imp_ratio_logp,

@@ -1,0 +1,98 @@
+# torchtitan Config.toml — 130k context GRPO training
+# Requires: 4 training nodes (32 GPUs) + 1 inference node (8 GPUs) = 5 nodes total
+# Context parallelism splits 130k sequence across 2 GPUs → ~65k tokens/GPU
+# dp_shard = 32 / (1*1*2*1) = 16 (matches working 32k config)
+# Full activation checkpointing to fit in memory
+
+[job]
+dump_folder = "/mnt/data/home/nous/mormio/torchtitan/outputs/3ba_30b_scienceqa_130k"
+description = "3ba_30b_scienceqa_grpo_130k"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "qwen3"
+flavor = "30B-A3B"
+hf_assets_path = "/mnt/data/home/nous/mormio/torchtitan/assets/qwen3_30b_a3b_scienceqa_20260128_ckpt191"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-6
+beta1 = 0.9
+beta2 = 0.95
+weight_decay = 0.1
+
+[lr_scheduler]
+warmup_steps = 10
+decay_type="linear"
+decay_ratio=0.1
+
+[training]
+local_batch_size = 1
+seq_len = 131072
+global_batch_size = 256
+
+max_norm = 0.25  # grad norm clipping
+steps = 1000
+dataset = "c4"
+
+[compile]
+enable=true                       # may give 10-30% speedup on training compute; first step will be slower (compilation)
+components = ["model", "loss"]
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1   # auto: 32 / (1*1*2*1) = 16
+tensor_parallel_degree = 1
+context_parallel_degree = 2       # split 131k seq across 2 GPUs → ~65k/GPU
+pipeline_parallel_degree = 1
+
+[grpo]
+sglang_tp = 1
+sglang_urls = ["localhost:9004", "localhost:9005", "localhost:9006", "localhost:9007"]
+sglang_slurm_num_nodes = 1
+sglang_port = 26756
+logit_loss_weight = 0.0
+entropy_loss_weight = 0.0000
+kl_beta = 0.000
+kl_estimator_type = "k3"
+ref_model_ema = 0.999
+clip_ratio_lower_bound = 0.0003
+clip_ratio_upper_bound = 0.0004
+policy_ratio_type = "sequence"
+pos_scaler = 1.00
+neg_scaler = 1.00
+grpo_by_token = true
+scale_adv_by_len = false
+num_microbatches = 8              # match working 32k config; 65k tokens/GPU needs at least this
+onpolicy_logp_threshold = 0.0
+rollout_is_level = "sequence"
+rollout_is_mode = "truncate"
+# rollout_is_threshold = 4.0  # disabled: was zeroing out importance_ratio → loss=0 in 32k config
+
+[checkpoint]
+enable = true
+folder = "checkpoints"
+interval = 1000
+initial_load_in_hf = true
+last_save_model_only = true
+last_save_in_hf = true
+export_dtype = "bfloat16"
+async_mode = "disabled"
+
+[activation_checkpoint]
+mode = 'full'                     # changed from 'selective' → critical for 65k tokens/GPU
+selective_ac_option = 'op'
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false

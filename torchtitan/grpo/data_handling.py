@@ -116,7 +116,7 @@ def pad_data_to_good_offset(
             labels.append(label_item[1:])
             rewards.append(item["scores"][i])
             masks.append(item["masks"][i][1:])
-            if item["inference_logprobs"] is None:
+            if item.get("inference_logprobs") is None:
                 inf_logps.append(np.full(item["masks"][i].shape, 1.0, dtype=np.float32))
             else:
                 item["inference_logprobs"][i] = np.concatenate(
@@ -410,10 +410,12 @@ class OnlineDataHandler:
                 if data["batch"] is not None:
                     logger.debug("Rx'd batch from server...")
                     # Save the batch
+                    print(f"[BATCH_DEBUG] rank 0: saving temp.json...", flush=True)
                     start_data_dump_time = time.perf_counter()
                     with open("temp.json", "w") as f:
                         json.dump(data, f)
                     data_dump_time = time.perf_counter() - start_data_dump_time
+                    print(f"[BATCH_DEBUG] rank 0: prep_data starting...", flush=True)
                     start_data_prep_time = time.perf_counter()
                     (
                         batches,
@@ -432,19 +434,26 @@ class OnlineDataHandler:
                         num_microbatches=job_config.grpo.num_microbatches,
                     )
                     prep_time = time.perf_counter() - start_data_prep_time
+                    print(f"[BATCH_DEBUG] rank 0: prep_data done in {prep_time:.2f}s, {len(batches)} batches, max_token_len={max_token_len}, dbs={dynamic_batch_size}, dgas={dynamic_grad_accum_size}", flush=True)
 
                     flag = flag + 1
+                    print(f"[BATCH_DEBUG] rank 0: broadcasting flag...", flush=True)
                     torch.distributed.broadcast(flag, 0)
+                    print(f"[BATCH_DEBUG] rank 0: flag broadcast done, send_wait...", flush=True)
                     if dp_replicate_rank == 0:
                         send_wait(sglang_nccl_group, device)
+                    print(f"[BATCH_DEBUG] rank 0: send_wait done, all_reduce max_token_len...", flush=True)
                     max_token_len = torch.tensor(max_token_len).to(device)
                     torch.distributed.all_reduce(max_token_len)
                     # back to int
                     max_token_len = max_token_len.item()
+                    print(f"[BATCH_DEBUG] rank 0: broadcasting data_lens...", flush=True)
                     # distribute the lengths
                     torch.distributed.broadcast_object_list(data_lens, 0)
+                    print(f"[BATCH_DEBUG] rank 0: broadcasting batches...", flush=True)
                     # now broadcast the batch
                     torch.distributed.broadcast_object_list(batches, 0)
+                    print(f"[BATCH_DEBUG] rank 0: broadcasting timing...", flush=True)
                     # Finally, the timing info
                     prep_time = torch.tensor(prep_time).to(device)
                     data_dump_time = torch.tensor(data_dump_time).to(device)
@@ -452,6 +461,7 @@ class OnlineDataHandler:
                     torch.distributed.broadcast(prep_time, 0)
                     torch.distributed.broadcast(data_dump_time, 0)
                     torch.distributed.broadcast(data_get_time, 0)
+                    print(f"[BATCH_DEBUG] rank 0: batch distribution complete!", flush=True)
                     break
                 else:
                     logger.debug("No batch yet, retrying...")

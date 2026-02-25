@@ -1,19 +1,10 @@
 # flake8: noqa: F401
-import vllm.v1.worker.gpu_worker
-from torchtitan.grpo.vllm_handling.vllm_patching.lib_patching.gpu_model_runner import (
-    PatchedGPUModelRunner,
-)
+# NOTE: The old monkeypatch approach (replacing GPUModelRunner) required fork
+# mode, which breaks on setups where CUDA gets initialized before the fork.
+# Weight updater spawning is now handled via --worker-cls pointing to
+# torchtitan.grpo.vllm_handling.vllm_patching.patched_worker.PatchedWorker
 
-# Patch GPU Runner...
-vllm.v1.worker.gpu_worker.GPUModelRunner = PatchedGPUModelRunner
-
-from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs
+from vllm.engine.arg_utils import AsyncEngineArgs, EngineArgs  # noqa: F401
 from vllm.v1.engine.async_llm import AsyncLLM
-from vllm.v1.executor.abstract import Executor
-from vllm.v1.executor.multiproc_executor import MultiprocExecutor
-from vllm.v1.worker.gpu_worker import Worker
-
-# Patch MP launcher with this context...
-from vllm.v1.worker.worker_base import WorkerWrapperBase
 
 AsyncLLMEngine = AsyncLLM
