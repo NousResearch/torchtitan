@@ -73,7 +73,7 @@ qwen3next_configs = {
     "80B_A3B": Qwen3NextModelArgs(
         moe_enabled=True,
         moe_inter_dim=512,
-        rope_theta=50000,
+        rope_theta=10000000,  # HF config.json: rope_theta=10000000 (was incorrectly 50000)
         moe_args=MoEArgs(
             num_experts=512,
             num_shared_experts=1,
