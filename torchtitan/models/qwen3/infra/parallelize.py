@@ -240,6 +240,12 @@ def apply_non_moe_tp(
             "attention": prepare_module_input(
                 input_layouts=(Shard(1), Replicate(), None),
                 desired_input_layouts=(Replicate(), Replicate(), None),
+                input_kwarg_layouts={
+                    "position_ids": Replicate(),
+                },
+                desired_input_kwarg_layouts={
+                    "position_ids": Replicate(),
+                },
             ),
             "attention.wq": colwise_parallel(use_local_output=False),
             "attention.wk": colwise_parallel(use_local_output=False),

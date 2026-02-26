@@ -359,7 +359,12 @@ class TransformerBlock(nn.Module):
             torch.Tensor: Output tensor after applying attention and feedforward layers.
 
         """
-        x = x + self.attention(self.attention_norm(x), rope_cache, attention_masks, position_ids)
+        x = x + self.attention(
+            self.attention_norm(x),
+            rope_cache,
+            attention_masks,
+            position_ids=position_ids,
+        )
 
         if self.moe_enabled:
             x = x + self.moe(self.ffn_norm(x))
