@@ -122,6 +122,7 @@ def submit(
     cmd = [
         "sbatch",
         f"--job-name={job_name}",
+        # "--exclude=d2dfac12-010",
         f"--nodes={n_nodes}",
         f"--gpus-per-node={gpus_per_node}",
         f"--cpus-per-task={cpus_per_task}",
