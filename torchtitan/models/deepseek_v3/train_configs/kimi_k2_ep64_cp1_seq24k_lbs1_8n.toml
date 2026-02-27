@@ -1,0 +1,114 @@
+# Kimi K2: EP=64 CP=1 SEQ=24K LBS=1 - 8 nodes (64 GPUs)
+#
+# Based on the original 32-node config that achieved 409 TPS/GPU (job 2656):
+#   Source config: /mnt/data/home/nous/kimi_1t_sft/configs/kimi_k2_ep64_cp1_seq24k_lbs1_32n.toml
+#   Source SLURM:  /mnt/data/home/nous/kimi_1t_sft/launch_kimi_k2_ep64_cp1_32n_conda.slurm
+#   Source log:    /mnt/data/home/nous/kimi_1t_sft/torchrun/kimi_k2_ep64_cp1_32n/2656_1okxnnz0/attempt_0/1/stdout.log
+#
+# Key differences from the original 32n run:
+#   - 8 nodes (64 GPUs) vs 32 nodes (256 GPUs)
+#   - dp_shard=1 (64 GPUs / EP=64) vs dp_shard=4 (256 GPUs / EP=64)
+#     Less FSDP communication, so per-GPU TPS should be similar or better (~400 TPS)
+#   - Using c4_test dataset (hermes45 not available on this cluster)
+#   - Checkpoint loading disabled (shared path not accessible)
+#
+# Critical settings for TPS:
+#   - moe_force_load_balance = true  -> ~400 TPS/GPU
+#   - moe_force_load_balance = false -> ~116 TPS/GPU (6x slower!)
+#
+# Model: Kimi K2 (1.026T params, 384 experts, top_k=8, MoE)
+# No DeepEP - using standard torch all-to-all for expert parallel
+# SLURM script: launch_kimi_k2_ep64_cp1_8n.slurm
+# Known bad nodes to exclude: sfc-003 (missing GPU), sfc-028 (bad IB mlx5_1)
+
+[job]
+dump_folder = "./outputs/kimi_k2_ep64_cp1_seq24k_lbs1_8n"
+description = "Kimi K2: EP=64 CP=1 SEQ=24K LBS=1 8N"
+
+[profiling]
+enable_profiling = false
+
+[metrics]
+log_freq = 1
+disable_color_printing = true
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2"
+hf_assets_path = "/mnt/data/home/nous/kimi_1t_sft/torchtitan/assets/hf/Kimi-K2-Base"
+
+[optimizer]
+name = "Muon"
+lr = 5.5e-6
+eps = 1e-8
+weight_decay = 0.01
+beta1 = 0.9
+beta2 = 0.999
+
+# Muon-specific parameters
+mu = 0.95                    # Momentum factor for Muon
+algorithm = "muon"           # Main algorithm to use for 2D matrices
+nesterov = false             # Whether to use Nesterov momentum
+adjust_lr = "rms_norm"       # How to adjust LR: "spectral_norm", "rms_norm", or null
+flatten = false              # Whether to flatten 3D+ tensors to 2D
+use_triton = true            # Whether to use Triton kernel for Newton-Schulz
+
+# Parameter-specific optimizer selection
+scalar_optimizer = "adamw"        # For 1D parameters (biases, layer norms)
+embedding_optimizer = "adamw"     # For embedding layers
+head_optimizer = "adamw"          # For model head/output layers
+head_lr_scaling = false            # Apply 1/sqrt(dim) scaling to head layers
+
+# Learning rate scaling factors
+scalar_lr_factor = 1            # LR multiplier for scalar parameters
+embedding_lr_factor = 1         # LR multiplier for embedding parameters
+head_lr_factor = 1.0            # LR multiplier for head parameters (after head_lr_scaling)
+routing_lr_factor = 1.0         # LR multiplier for routing parameters
+expert_lr_factor = 1.0
+
+[lr_scheduler]
+warmup_steps = 20
+decay_ratio = 0.8
+
+[training]
+dtype = "bfloat16"
+local_batch_size = 1
+seq_len = 24576
+steps = 1000
+enable_cpu_offload = true
+clear_cache_between_steps = true
+skip_optimizer_step = false
+aggressive_memory_mode = "maximum"
+dataset = "c4_test"
+
+[parallelism]
+data_parallel_shard_degree = -1
+data_parallel_replicate_degree = 1
+expert_parallel_degree = 64
+context_parallel_degree = 1
+context_parallel_load_balancer = "ptrr"
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = true
+components = ["loss"]
+
+[debug]
+moe_force_load_balance = true
+
+[comm]
+init_timeout_seconds = 1800
+train_timeout_seconds = 1800
+
+[checkpoint]
+enable = false
+#folder = "/mnt/data/shared/Kimi-K2-Base-BF16-DCP-EP64-DPS384"
+#interval = 100
+#last_save_model_only = true
+#export_dtype = "bfloat16"
+#async_mode = "disabled"
+#initial_load_multipart = true
+#initial_load_path = "/mnt/data/shared/Kimi-K2-Base-BF16-DCP-v2"
+#enable_first_step_checkpoint = true
