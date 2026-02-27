@@ -191,11 +191,14 @@ def apply_non_moe_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
+    # ColwiseParallel on Embedding shards the embedding dim and avoids the
+    # _MaskPartial mechanism (used by RowwiseParallel) which can fail in some
+    # environments. Safe here because Qwen3-Next never uses weight tying.
     parallelize_module(
         model,
         tp_mesh,
         {
-            "tok_embeddings": RowwiseParallel(
+            "tok_embeddings": ColwiseParallel(
                 input_layouts=Replicate(),
                 output_layouts=Shard(1),
             ),

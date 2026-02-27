@@ -191,14 +191,28 @@ def apply_non_moe_tp(
     # transformer block's inputs)
     # 2. Parallelize the root norm layer over the sequence dim
     # 3. Parallelize the final linear output layer
+    # RowwiseParallel on Embedding shards the vocab dim and uses _MaskPartial,
+    # which can fail in some environments. ColwiseParallel shards the embedding
+    # dim instead and avoids _MaskPartial entirely. We must keep RowwiseParallel
+    # when weight tying is enabled because the weight placements must match
+    # between the embedding (Shard(0) via RowwiseParallel) and the output
+    # linear (Shard(0) via ColwiseParallel).
+    if getattr(model, "model_args", None) and not model.model_args.enable_weight_tying:
+        embedding_parallel = ColwiseParallel(
+            input_layouts=Replicate(),
+            output_layouts=Shard(1),
+        )
+    else:
+        embedding_parallel = RowwiseParallel(
+            input_layouts=Replicate(),
+            output_layouts=Shard(1),
+        )
+
     parallelize_module(
         model,
         tp_mesh,
         {
-            "tok_embeddings": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
+            "tok_embeddings": embedding_parallel,
             "norm": SequenceParallel(),
             "output": ColwiseParallel(
                 input_layouts=Shard(1),
