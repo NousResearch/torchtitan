@@ -192,9 +192,11 @@ class MoEStateDictAdapter(StateDictAdapter):
             dtensor_placements=dtensor_placements,
             device_mesh=device_mesh,
         )
-        assert (
-            start_index is not None and end_index is not None
-        ), "Start index and end index can not be None on dim-0!"
+        # When no sharding on dim-0 (e.g. TP-only without EP/FSDP),
+        # all experts are local.
+        if start_index is None and end_index is None:
+            start_index = 0
+            end_index = num_experts
 
         # Step 2: Store indices for potential future use in from_hf()
         self.local_experts_indices[titan_abstract_key] = (start_index, end_index)
@@ -203,7 +205,10 @@ class MoEStateDictAdapter(StateDictAdapter):
         new_placements = []
         for i, name in enumerate(device_mesh.mesh_dim_names):
             placement = dtensor_placements[i]
-            if placement.dim == 0:
+            if isinstance(placement, Replicate):
+                # Already replicated, keep as-is
+                new_placements.append(Replicate())
+            elif hasattr(placement, "dim") and placement.dim == 0:
                 # Convert dim-0 sharding to replication for individual experts
                 new_placements.append(Replicate())
             elif isinstance(placement, Shard):
