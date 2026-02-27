@@ -45,12 +45,32 @@ def cross_entropy_loss_unreduced(
     ).view(label_shape)
 
 
+def _ensure_loss_parallel():
+    """Register loss_parallel DTensor strategies so that cross_entropy can
+    operate on vocab-sharded logits (Shard(-1)) without all-gathering them.
+
+    Normally the caller activates ``loss_parallel()`` as a context manager,
+    but external training frameworks (e.g. Psyche) may not do this.  We
+    register the strategies once at build time so they are available during
+    both ``torch.compile`` tracing and the backward pass.
+    """
+    try:
+        from torch.distributed.tensor.parallel import loss_parallel
+
+        loss_parallel().__enter__()
+    except (ImportError, RuntimeError, AttributeError):
+        pass
+
+
 def build_cross_entropy_loss(job_config: JobConfig, reduction: str = "mean", **kwargs):
     # Added reduction kwarg to support RL training
     del kwargs  # delete any unused arguments
     loss_fn = (
         cross_entropy_loss if reduction == "mean" else cross_entropy_loss_unreduced
     )
+
+    _ensure_loss_parallel()
+
     if job_config.compile.enable and "loss" in job_config.compile.components:
         logger.info("Compiling the loss function with torch.compile")
         loss_fn = torch.compile(loss_fn, backend=job_config.compile.backend)
