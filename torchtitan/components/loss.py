@@ -9,6 +9,7 @@ import functools
 from typing import Callable, TypeAlias
 
 import torch
+from torch.distributed.tensor import DTensor, Replicate
 
 from torchtitan.config import JobConfig
 from torchtitan.tools.logging import logger
@@ -16,20 +17,32 @@ from torchtitan.tools.logging import logger
 LossFunction: TypeAlias = Callable[..., torch.Tensor]
 
 
+def _labels_to_dtensor(pred: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """Convert labels to a replicated DTensor on pred's mesh when pred is a DTensor."""
+    if isinstance(pred, DTensor) and not isinstance(labels, DTensor):
+        return DTensor.from_local(
+            labels, device_mesh=pred.device_mesh, placements=[Replicate()]
+        )
+    return labels
+
+
 def cross_entropy_loss(pred: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """Common cross-entropy loss function for Transformer models training."""
-    return torch.nn.functional.cross_entropy(
-        pred.flatten(0, 1).float(), labels.flatten(0, 1)
-    )
+    pred = pred.flatten(0, 1).float()
+    labels = _labels_to_dtensor(pred, labels.flatten(0, 1))
+    return torch.nn.functional.cross_entropy(pred, labels)
 
 
 def cross_entropy_loss_unreduced(
     pred: torch.Tensor, labels: torch.Tensor
 ) -> torch.Tensor:
     """Common cross-entropy loss function for Transformer models training,"""
+    label_shape = labels.shape
+    pred = pred.flatten(0, 1).float()
+    labels = _labels_to_dtensor(pred, labels.flatten(0, 1))
     return torch.nn.functional.cross_entropy(
-        pred.flatten(0, 1).float(), labels.flatten(0, 1), reduction="none"
-    ).view(labels.shape)
+        pred, labels, reduction="none"
+    ).view(label_shape)
 
 
 def build_cross_entropy_loss(job_config: JobConfig, reduction: str = "mean", **kwargs):
