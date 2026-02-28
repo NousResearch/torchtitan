@@ -192,9 +192,11 @@ class MoEStateDictAdapter(StateDictAdapter):
             dtensor_placements=dtensor_placements,
             device_mesh=device_mesh,
         )
-        assert (
-            start_index is not None and end_index is not None
-        ), "Start index and end index can not be None on dim-0!"
+        # When only TP is applied (no EP), experts are not sharded on dim-0,
+        # meaning all experts are present on every rank.
+        if start_index is None or end_index is None:
+            start_index = 0
+            end_index = num_experts
 
         # Step 2: Store indices for potential future use in from_hf()
         self.local_experts_indices[titan_abstract_key] = (start_index, end_index)
