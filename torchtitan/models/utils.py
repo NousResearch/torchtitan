@@ -101,10 +101,10 @@ class MoEStateDictAdapter(StateDictAdapter):
         mesh_names = []
         dim_i_placements = []
 
-        # Find all the device mesh dimensios that shard on dim-i
+        # Find all the device mesh dimensions that shard on dim-i
         for i, name in enumerate(device_mesh.mesh_dim_names):
             placement = dtensor_placements[i]
-            if placement.dim == dim:
+            if hasattr(placement, "dim") and placement.dim == dim:
                 mesh_names.append(name)
                 dim_i_placements.append(placement)
 
@@ -192,9 +192,9 @@ class MoEStateDictAdapter(StateDictAdapter):
             dtensor_placements=dtensor_placements,
             device_mesh=device_mesh,
         )
-        # When only TP is applied (no EP), experts are not sharded on dim-0,
-        # meaning all experts are present on every rank.
-        if start_index is None or end_index is None:
+        # When no sharding on dim-0 (e.g. TP-only without EP/FSDP),
+        # all experts are local.
+        if start_index is None and end_index is None:
             start_index = 0
             end_index = num_experts
 
@@ -205,7 +205,10 @@ class MoEStateDictAdapter(StateDictAdapter):
         new_placements = []
         for i, name in enumerate(device_mesh.mesh_dim_names):
             placement = dtensor_placements[i]
-            if placement.dim == 0:
+            if isinstance(placement, Replicate):
+                # Already replicated, keep as-is
+                new_placements.append(Replicate())
+            elif hasattr(placement, "dim") and placement.dim == 0:
                 # Convert dim-0 sharding to replication for individual experts
                 new_placements.append(Replicate())
             elif isinstance(placement, Shard):
