@@ -697,6 +697,7 @@ def apply_moe_ep_tp(
                     max_tokens_factor=llep_config.max_tokens_factor,
                     min_tokens_per_gemm=llep_config.min_tokens_per_gemm,
                     adaptive_threshold=llep_config.adaptive_threshold,
+                    verbose=llep_config.verbose,
                 )
                 logger.info(
                     f"Enabling LLEP for expert parallelism "

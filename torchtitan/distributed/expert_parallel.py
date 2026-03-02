@@ -446,11 +446,13 @@ class ExpertParallelLLEP(BaseExpertParallel):
         max_tokens_factor: float = 1.1,
         min_tokens_per_gemm: int = 1024,
         adaptive_threshold: float = 0.0,
+        verbose: bool = False,
     ):
         super().__init__()
         self._max_tokens_factor = max_tokens_factor
         self._min_tokens_per_gemm = min_tokens_per_gemm
         self._adaptive_threshold = adaptive_threshold
+        self._verbose = verbose
         self._llep_state = None
 
     def _partition_fn(self, name: str, mod: nn.Module, device_mesh: DeviceMesh) -> None:
@@ -472,6 +474,7 @@ class ExpertParallelLLEP(BaseExpertParallel):
             max_tokens_factor=self._max_tokens_factor,
             min_tokens_per_gemm=self._min_tokens_per_gemm,
             adaptive_threshold=self._adaptive_threshold,
+            verbose=self._verbose,
         )
         self._llep_state = llep_state
 

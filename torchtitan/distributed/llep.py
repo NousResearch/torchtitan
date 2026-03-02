@@ -39,6 +39,9 @@ from torchtitan.tools.logging import logger
 # Debug logging (set LLEP_DEBUG=1 to enable per-step verbose logging)
 LLEP_DEBUG = os.environ.get("LLEP_DEBUG", "0") == "1"
 
+# Step counter for LLEP_DEBUG logging (module-level, incremented per dispatch call)
+_llep_step_counter = 0
+
 # Merge hidden+scores+expert_ids into single A2A call (set 0 to disable)
 LLEP_MERGE_A2A = os.environ.get("LLEP_MERGE_A2A", "1") == "1"
 
@@ -1441,6 +1444,7 @@ def llep_dispatch_tokens(
     max_tokens_factor: float = 1.1,
     min_tokens_per_gemm: int = 1024,
     adaptive_threshold: float = 0.0,
+    verbose: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor, LLEPState]:
     """EP pre-hook: LLEP planning + AllToAll dispatch. Does NOT access weights.
 
@@ -1505,12 +1509,24 @@ def llep_dispatch_tokens(
         use_lpt = imbalance >= adaptive_threshold
     torch.cuda.nvtx.range_pop()  # llep:2a_imbalance_check
 
-    if LLEP_DEBUG and ep_rank == 0:
-        expert_counts_list = global_expert_counts.cpu().tolist()
+    _log_verbose = verbose or LLEP_DEBUG
+    if _log_verbose:
+        global _llep_step_counter
+        _llep_step_counter += 1
+        _step = _llep_step_counter
+        # Compute native GPU loads (before LLEP redistribution)
+        _native_loads = (
+            global_expert_counts[:effective_num_experts]
+            .view(ep_size, num_local_experts)
+            .sum(dim=1)
+            .cpu()
+            .tolist()
+        )
         logger.info(
-            f"[LLEP] tokens={total_tokens} "
-            f"expert_counts={expert_counts_list} "
-            f"imbalance={imbalance:.2f} use_lpt={use_lpt}"
+            f"[LLEP rank={ep_rank} step={_step}] BEFORE: "
+            f"total_tokens={total_tokens} imbalance={imbalance:.2f}\n"
+            f"  native_gpu_loads={_native_loads}\n"
+            f"  expert_counts={global_expert_counts.cpu().tolist()}"
         )
 
     # ------------------------------------------------------------------
@@ -1535,6 +1551,27 @@ def llep_dispatch_tokens(
             weights_to_receive=[],
         )
     torch.cuda.nvtx.range_pop()  # llep:2b_lpt_plan
+
+    if _log_verbose:
+        _after_loads = plan.gpu_loads.cpu()
+        _after_loads_f = _after_loads.float()
+        _after_mean = _after_loads_f.mean().item()
+        _after_imbalance = (
+            (_after_loads_f.max().item() / _after_mean) if _after_mean > 0 else 1.0
+        )
+        _wt_lines = []
+        for wt in plan.weight_transfers:
+            _wt_lines.append(
+                f"    expert {wt.expert_id}: GPU {wt.src_rank}->{wt.dst_rank} "
+                f"(tokens {wt.token_start}-{wt.token_end})"
+            )
+        logger.info(
+            f"[LLEP rank={ep_rank} step={_step}] AFTER LPT: use_lpt={use_lpt} "
+            f"imbalance={imbalance:.2f}->{_after_imbalance:.2f}\n"
+            f"  llep_gpu_loads={_after_loads.tolist()}\n"
+            f"  weight_transfers ({len(plan.weight_transfers)}):\n"
+            + ("\n".join(_wt_lines) if _wt_lines else "    (none)")
+        )
 
     # ------------------------------------------------------------------
     # Step 4: Barrier before P2P to prevent cross-layer deadlock
@@ -1603,6 +1640,15 @@ def llep_dispatch_tokens(
 
     input_split_sizes = send_matrix_np[ep_rank].tolist()
     output_split_sizes = send_matrix_np[:, ep_rank].tolist()
+
+    if _log_verbose:
+        _sm_rows = [f"    {send_matrix_np[r].tolist()}" for r in range(ep_size)]
+        logger.info(
+            f"[LLEP rank={ep_rank} step={_step}] SEND_MATRIX (row=src, col=dst):\n"
+            + "\n".join(_sm_rows)
+            + f"\n  input_splits={input_split_sizes}"
+            + f"\n  output_splits={output_split_sizes}"
+        )
 
     torch.cuda.nvtx.range_pop()  # llep:4_compute_splits
 
@@ -1786,6 +1832,14 @@ def llep_dispatch_tokens(
         counts_padded = torch.zeros(0, dtype=torch.int64, device=device)
         unique_experts = torch.zeros(0, dtype=torch.int64, device=device)
         counts = torch.zeros(0, dtype=torch.int64, device=device)
+
+    if _log_verbose:
+        logger.info(
+            f"[LLEP rank={ep_rank} step={_step}] RECEIVED: "
+            f"total_recv={total_recv} "
+            f"experts={unique_experts.cpu().tolist()} "
+            f"counts={counts.cpu().tolist()}"
+        )
 
     torch.cuda.nvtx.range_pop()  # llep:7_sort_and_pad
 

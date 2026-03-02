@@ -92,6 +92,10 @@ class LLEPConfig:
     """λ (lambda): imbalance ratio (max_gpu_load / mean_gpu_load) to trigger LLEP.
     Below this ratio, standard EP is used instead. 0 = always use LLEP. Paper recommends 1.3 (Section 5.1)."""
 
+    verbose: bool = False
+    """Enable per-step distribution logging: before/after GPU loads, imbalance ratios,
+    weight transfers, send matrix, and received token counts. Also enabled by LLEP_DEBUG=1 env var."""
+
 
 @dataclass
 class MoEArgs:

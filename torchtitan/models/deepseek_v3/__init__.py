@@ -117,7 +117,32 @@ deepseekv3_args = {
             route_norm=True,
             route_scale=2.0,
             score_before_experts=False,
-
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=512,
+        qk_nope_head_dim=128,
+        qk_rope_head_dim=64,
+        v_head_dim=128,
+        mscale=0.70,
+    ),
+    # Debug model with 64 experts (8 per GPU with EP=8) and top_k=8 to force LLEP spilling
+    # 9.5B total params (1.6B active), sized for 8xB200 (~60% memory with lbs=6, seq=4096)
+    "debugmodel_ep8_llep": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=2048,
+        inter_dim=8192,
+        moe_inter_dim=1536,
+        n_layers=16,
+        n_dense_layers=1,
+        n_heads=16,
+        moe_args=MoEArgs(
+            num_experts=64,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="sigmoid",
+            route_norm=True,
+            route_scale=2.0,
+            score_before_experts=False,
         ),
         q_lora_rank=0,
         kv_lora_rank=512,
@@ -311,7 +336,6 @@ deepseekv3_args = {
             route_norm=True,
             route_scale=2.827,
             score_before_experts=False,
-
         ),
         q_lora_rank=0,
         kv_lora_rank=512,
@@ -339,7 +363,6 @@ deepseekv3_args = {
             route_norm=True,
             route_scale=2.827,
             score_before_experts=False,
-
         ),
         q_lora_rank=1536,
         kv_lora_rank=512,
@@ -369,7 +392,6 @@ deepseekv3_args = {
             route_norm=True,
             route_scale=2.827,
             score_before_experts=False,
-
         ),
         q_lora_rank=1536,
         kv_lora_rank=512,
