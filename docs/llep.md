@@ -80,7 +80,6 @@ These override TOML/code values at runtime (useful for tuning without config cha
 | `EP_MAX_TOKENS_FACTOR` | `max_tokens_factor` |
 | `EP_MIN_TOKENS_PER_GEMM` | `min_tokens_per_gemm` |
 | `EP_ADAPTIVE_THRESHOLD` | `adaptive_threshold` |
-| `LLEP_USE_GROUPED_MM` | Use grouped GEMM vs for-loop (default: 1) |
 | `LLEP_W_TRANSFER_AUTOGRAD` | Enable autograd for weight transfer (default: 1) |
 | `LLEP_MERGE_A2A` | Merge hidden+scores+ids into single AllToAll (default: 1) |
 | `LLEP_DEBUG` | Verbose per-step logging (default: 0). Equivalent to `[llep] verbose = true` |

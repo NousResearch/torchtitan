@@ -156,7 +156,7 @@ def test_gpu_imbalance_ratio():
 
 def test_swiglu_ffn():
     """Test SwiGLU FFN with native experts (no foreign)."""
-    from torchtitan.distributed.llep import llep_swiglu_ffn
+    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
 
     print("=== Test SwiGLU FFN ===")
 
@@ -173,7 +173,7 @@ def test_swiglu_ffn():
     x = torch.randn(num_tokens, dim, dtype=torch.bfloat16)
     expert_ids = torch.randint(0, num_experts, (num_tokens,))
 
-    out = llep_swiglu_ffn(
+    out = _llep_swiglu_ffn_forloop(
         x,
         expert_ids,
         w1,
@@ -213,7 +213,7 @@ def test_swiglu_ffn():
 
 def test_swiglu_ffn_with_foreign():
     """Test SwiGLU FFN with mixed native and foreign experts."""
-    from torchtitan.distributed.llep import llep_swiglu_ffn
+    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
 
     print("=== Test SwiGLU FFN with Foreign Experts ===")
 
@@ -238,7 +238,7 @@ def test_swiglu_ffn_with_foreign():
     # Mix of native (0, 1) and foreign (3) experts
     expert_ids = torch.tensor([0, 1, 3, 0, 1, 3, 0, 1, 3, 0, 1, 3, 0, 1, 3, 0])
 
-    out = llep_swiglu_ffn(
+    out = _llep_swiglu_ffn_forloop(
         x,
         expert_ids,
         w1_local,

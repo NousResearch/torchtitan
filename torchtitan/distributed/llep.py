@@ -49,9 +49,6 @@ LLEP_MERGE_A2A = os.environ.get("LLEP_MERGE_A2A", "1") == "1"
 # Set LLEP_W_TRANSFER_AUTOGRAD=1 to enable differentiable weight transfer + A2A
 LLEP_W_TRANSFER_AUTOGRAD = os.environ.get("LLEP_W_TRANSFER_AUTOGRAD", "1") == "1"
 
-# Use grouped GEMM (torch._grouped_mm) to replace the Python for-loop in SwiGLU FFN.
-# Set LLEP_USE_GROUPED_MM=0 to fall back to the original per-expert for-loop.
-LLEP_USE_GROUPED_MM = os.environ.get("LLEP_USE_GROUPED_MM", "1") == "1"
 
 # Token alignment for grouped_mm (must be 8 for bf16)
 _TOKEN_ALIGN = 8
@@ -59,9 +56,6 @@ _TOKEN_ALIGN = 8
 # Threshold for vectorized pad/unpad: use for-loop below this, vectorized above.
 # Benchmarked on B200: forloop faster for <32 experts, vectorized wins at 64+.
 _PAD_VECTORIZE_THRESHOLD = 32
-
-# Lazy-cached fused SiLU-gate function (avoids try/import on every forward call)
-_fused_silu_gate_fn = None
 
 # Lazy-cached Triton pad/unpad functions
 _triton_pad_fn = None
@@ -1178,128 +1172,8 @@ def _unpad_output(
     return out
 
 
-def _llep_swiglu_ffn_grouped_mm(
-    x: torch.Tensor,
-    expert_ids: torch.Tensor,
-    w1_local: torch.Tensor,
-    w2_local: torch.Tensor,
-    w3_local: torch.Tensor,
-    foreign_w1: dict[int, torch.Tensor] | None,
-    foreign_w2: dict[int, torch.Tensor] | None,
-    foreign_w3: dict[int, torch.Tensor] | None,
-    ep_rank: int,
-    num_local_experts: int,
-    foreign_w1_stacked: Optional[torch.Tensor] = None,
-    foreign_w2_stacked: Optional[torch.Tensor] = None,
-    foreign_w3_stacked: Optional[torch.Tensor] = None,
-    foreign_expert_id_mapping: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    """
-    SwiGLU FFN using torch._grouped_mm — replaces the Python for-loop.
-
-    3 batched kernel launches instead of 3*N per-expert launches.
-    """
-    if x.numel() == 0:
-        return torch.empty(0, w2_local.shape[1], device=x.device, dtype=x.dtype)
-
-    num_tokens, dim = x.shape
-    orig_dtype = x.dtype
-    compute_dtype = w1_local.dtype
-    if x.dtype != compute_dtype:
-        x = x.to(compute_dtype)
-
-    # Sort tokens by expert for contiguous access
-    torch.cuda.nvtx.range_push("ffn:sort_tokens")
-    sorted_expert_ids, sort_perm = expert_ids.sort(stable=True)
-    x_sorted = x[sort_perm]
-    unique_experts, counts = torch.unique_consecutive(
-        sorted_expert_ids, return_counts=True
-    )
-    torch.cuda.nvtx.range_pop()
-
-    # Pack weights for all active experts
-    torch.cuda.nvtx.range_push("ffn:pack_weights")
-    w1_packed, w2_packed, w3_packed, valid_mask = _pack_expert_weights(
-        unique_experts,
-        w1_local,
-        w2_local,
-        w3_local,
-        foreign_w1,
-        foreign_w2,
-        foreign_w3,
-        foreign_w1_stacked,
-        foreign_w2_stacked,
-        foreign_w3_stacked,
-        foreign_expert_id_mapping,
-        ep_rank,
-        num_local_experts,
-    )
-    torch.cuda.nvtx.range_pop()
-
-    # Pad tokens for grouped_mm alignment
-    torch.cuda.nvtx.range_push("ffn:pad")
-    x_padded, counts_padded = _pad_for_grouped_mm(x_sorted, counts)
-    offsets = torch.cumsum(counts_padded, dim=0, dtype=torch.int32)
-    torch.cuda.nvtx.range_pop()
-
-    # 3 grouped GEMMs + activation
-    torch.cuda.nvtx.range_push("ffn:grouped_mm_w1")
-    x1 = torch._grouped_mm(
-        x_padded.bfloat16(), w1_packed.bfloat16().transpose(-2, -1), offs=offsets
-    )
-    torch.cuda.nvtx.range_pop()
-
-    torch.cuda.nvtx.range_push("ffn:grouped_mm_w3")
-    x3 = torch._grouped_mm(
-        x_padded.bfloat16(), w3_packed.bfloat16().transpose(-2, -1), offs=offsets
-    )
-    torch.cuda.nvtx.range_pop()
-
-    # Fused activation: silu(x1) * x3 (cached import)
-    torch.cuda.nvtx.range_push("ffn:silu_gate")
-    global _fused_silu_gate_fn
-    if _fused_silu_gate_fn is None:
-        try:
-            from torchtitan.distributed.llep_kernels import fused_silu_gate
-
-            _fused_silu_gate_fn = fused_silu_gate
-        except (ImportError, RuntimeError):
-            _fused_silu_gate_fn = lambda x1, x3: F.silu(x1) * x3
-    h = _fused_silu_gate_fn(x1, x3)
-    torch.cuda.nvtx.range_pop()
-
-    torch.cuda.nvtx.range_push("ffn:grouped_mm_w2")
-    out_padded = torch._grouped_mm(
-        h, w2_packed.bfloat16().transpose(-2, -1), offs=offsets
-    )
-    torch.cuda.nvtx.range_pop()
-
-    # Unpad to original counts
-    torch.cuda.nvtx.range_push("ffn:unpad")
-    out_sorted = _unpad_output(out_padded, counts, counts_padded)
-    torch.cuda.nvtx.range_pop()
-
-    # Zero out invalid experts + cast + unsort
-    torch.cuda.nvtx.range_push("ffn:postprocess")
-    if not all(valid_mask):
-        offset = 0
-        counts_list = counts.tolist()
-        for i, valid in enumerate(valid_mask):
-            c = int(counts_list[i])
-            if not valid and c > 0:
-                out_sorted[offset : offset + c] = 0
-            offset += c
-
-    if out_sorted.dtype != orig_dtype:
-        out_sorted = out_sorted.to(orig_dtype)
-
-    inverse_perm = sort_perm.argsort()
-    torch.cuda.nvtx.range_pop()
-    return out_sorted[inverse_perm]
-
-
 # ---------------------------------------------------------------------------
-# SwiGLU FFN for native + foreign experts (original for-loop, used as fallback)
+# SwiGLU FFN for native + foreign experts (for-loop, used as fallback)
 # ---------------------------------------------------------------------------
 def _llep_swiglu_ffn_forloop(
     x: torch.Tensor,
@@ -1317,7 +1191,7 @@ def _llep_swiglu_ffn_forloop(
     foreign_w3_stacked: Optional[torch.Tensor] = None,
     foreign_expert_id_mapping: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """Original for-loop SwiGLU FFN (fallback when LLEP_USE_GROUPED_MM=0)."""
+    """For-loop SwiGLU FFN used as fallback path."""
     if x.numel() == 0:
         return torch.empty(0, w2_local.shape[1], device=x.device, dtype=x.dtype)
 
@@ -1377,61 +1251,6 @@ def _llep_swiglu_ffn_forloop(
     if result.dtype != orig_dtype:
         result = result.to(orig_dtype)
     return result
-
-
-# ---------------------------------------------------------------------------
-# SwiGLU FFN for native + foreign experts
-# ---------------------------------------------------------------------------
-def llep_swiglu_ffn(
-    x: torch.Tensor,  # (num_tokens, dim)
-    expert_ids: torch.Tensor,  # (num_tokens,) global expert IDs
-    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
-    w2_local: torch.Tensor,  # (num_local_experts, dim, hidden_dim)
-    w3_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
-    foreign_w1: dict[int, torch.Tensor] | None,
-    foreign_w2: dict[int, torch.Tensor] | None,
-    foreign_w3: dict[int, torch.Tensor] | None,
-    ep_rank: int,
-    num_local_experts: int,
-    # Stacked tensor interface (for autograd):
-    foreign_w1_stacked: Optional[torch.Tensor] = None,
-    foreign_w2_stacked: Optional[torch.Tensor] = None,
-    foreign_w3_stacked: Optional[torch.Tensor] = None,
-    foreign_expert_id_mapping: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    """
-    Run SwiGLU FFN on tokens using both native and foreign expert weights.
-
-    Groups tokens by expert, then for each expert:
-      h = silu(x @ w1.T) * (x @ w3.T)
-      out = h @ w2.T
-
-    When LLEP_USE_GROUPED_MM=1 (default), uses torch._grouped_mm to batch
-    all expert computations into 3 kernel launches instead of 3*N.
-    Set LLEP_USE_GROUPED_MM=0 to fall back to the original per-expert for-loop.
-    """
-    args = (
-        x,
-        expert_ids,
-        w1_local,
-        w2_local,
-        w3_local,
-        foreign_w1,
-        foreign_w2,
-        foreign_w3,
-        ep_rank,
-        num_local_experts,
-    )
-    kwargs = dict(
-        foreign_w1_stacked=foreign_w1_stacked,
-        foreign_w2_stacked=foreign_w2_stacked,
-        foreign_w3_stacked=foreign_w3_stacked,
-        foreign_expert_id_mapping=foreign_expert_id_mapping,
-    )
-
-    if LLEP_USE_GROUPED_MM and x.is_cuda:
-        return _llep_swiglu_ffn_grouped_mm(*args, **kwargs)
-    return _llep_swiglu_ffn_forloop(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -2008,7 +1827,7 @@ def llep_compute_with_weights(
                 output_padded, original_counts, num_tokens_per_expert
             )
         else:
-            # For-loop fallback: unpad first, use llep_swiglu_ffn
+            # For-loop fallback: unpad first, use _llep_swiglu_ffn_forloop
             original_counts = _get_original_counts(state)
             x_unpadded = _unpad_output(x, original_counts, num_tokens_per_expert)
             output = _llep_swiglu_ffn_forloop(
