@@ -296,8 +296,6 @@ LLEP produces identical training loss to standard EP, confirming numerical corre
 | 100 | 2.7529 | 2.7575 | 0.005 |
 | 130 | 2.7769 | 2.7873 | 0.010 |
 
-Loss difference stays within 0.01-0.04 (bf16 numerical noise from different AllToAll ordering).
-
 To reproduce (8 GPUs, ~3 min each, logs to wandb):
 
 ```bash
