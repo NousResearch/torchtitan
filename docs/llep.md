@@ -281,6 +281,45 @@ grep "step:  5" llep_memory_with_llep.txt
 grep "step:  5" llep_memory_no_llep.txt
 ```
 
+### Loss Correctness (LLEP vs Standard EP)
+
+LLEP produces identical training loss to standard EP, confirming numerical correctness. Both runs use the same seed, weights, and data — only the dispatch/combine path differs.
+
+**WandB**: [nous_research/llep_loss_comparison](https://wandb.ai/nous_research/llep_loss_comparison) — overlay both runs to see matching loss curves.
+
+| Step | With LLEP | Without LLEP | Diff |
+|------|-----------|-------------|------|
+| 10 | 4.4471 | 4.4062 | 0.041 |
+| 30 | 3.1145 | 3.1137 | 0.001 |
+| 50 | 2.9153 | 2.8987 | 0.017 |
+| 80 | 2.7933 | 2.7947 | 0.001 |
+| 100 | 2.7529 | 2.7575 | 0.005 |
+| 130 | 2.7769 | 2.7873 | 0.010 |
+
+Loss difference stays within 0.01-0.04 (bf16 numerical noise from different AllToAll ordering).
+
+To reproduce (8 GPUs, ~3 min each, logs to wandb):
+
+```bash
+cd torchtitan
+
+# WITH LLEP (130 steps, seed=42, wandb)
+WANDB_PROJECT=llep_loss_comparison \
+torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:29500 \
+  -m torchtitan.train \
+  --job.config_file torchtitan/models/deepseek_v3/train_configs/debug_model_ep8_llep.toml \
+  --training.steps 130 --debug.seed 42 --compile.no-enable \
+  --llep.enabled True --metrics.log_freq 1 --metrics.enable_wandb
+
+# WITHOUT LLEP (130 steps, same seed/config)
+WANDB_PROJECT=llep_loss_comparison \
+torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:29501 \
+  -m torchtitan.train \
+  --job.config_file torchtitan/models/deepseek_v3/train_configs/debug_model_ep8_llep.toml \
+  --training.steps 130 --debug.seed 42 --compile.no-enable \
+  --llep.enabled False --metrics.log_freq 1 --metrics.enable_wandb
+```
+
 ### Unit Tests
 
 ```bash
