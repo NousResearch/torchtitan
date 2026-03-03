@@ -438,7 +438,7 @@ class ExpertParallelLLEP(BaseExpertParallel):
     - AllToAll combine → unsort to original token order
 
     Weight transfer (P2P) happens inside GroupedExperts.forward() after
-    FSDP has unsharded the weights, via llep_compute_with_weights().
+    FSDP has unsharded the weights, via llep_prepare_weights().
     """
 
     def __init__(

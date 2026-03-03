@@ -44,10 +44,6 @@ _llep_step_counter = 0
 # Merge hidden+scores+expert_ids into single A2A call (set 0 to disable)
 LLEP_MERGE_A2A = os.environ.get("LLEP_MERGE_A2A", "1") == "1"
 
-# Enable autograd for weight transfer + A2A (supports backward pass)
-# Set LLEP_W_TRANSFER_AUTOGRAD=1 to enable differentiable weight transfer + A2A
-LLEP_W_TRANSFER_AUTOGRAD = os.environ.get("LLEP_W_TRANSFER_AUTOGRAD", "1") == "1"
-
 
 # Token alignment for grouped_mm (must be 8 for bf16)
 _TOKEN_ALIGN = 8
@@ -401,101 +397,6 @@ def compute_gpu_imbalance_ratio(
     if mean_load == 0:
         return 1.0
     return (gpu_loads.max() / mean_load).item()
-
-
-# ---------------------------------------------------------------------------
-# P2P Weight Transfer (for w1, w2, w3 - no bias)
-# ---------------------------------------------------------------------------
-def transfer_expert_weights(
-    ep_rank: int,
-    ep_group,
-    plan: LLEPPlan,
-    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
-    w2_local: torch.Tensor,  # (num_local_experts, dim, hidden_dim)
-    w3_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
-    num_local_experts: int,
-    return_handles: bool = False,
-) -> tuple[
-    dict[int, torch.Tensor],
-    dict[int, torch.Tensor],
-    dict[int, torch.Tensor],
-    Optional[list],
-]:
-    """
-    Transfer expert weights via P2P for LLEP weight spilling.
-
-    Sends native expert weights to helper GPUs and receives foreign
-    expert weights from their native GPUs.
-
-    Args:
-        return_handles: If True, return P2P handles without waiting.
-            Caller must wait on them before using the received weights.
-
-    Returns:
-        Tuple of (foreign_w1, foreign_w2, foreign_w3, handles).
-        handles is None when return_handles=False (transfers already completed).
-    """
-    foreign_w1: dict[int, torch.Tensor] = {}
-    foreign_w2: dict[int, torch.Tensor] = {}
-    foreign_w3: dict[int, torch.Tensor] = {}
-
-    # Build P2P op list for batch_isend_irecv
-    p2p_ops = []
-
-    # Receive first (post recvs before sends for MPI/NCCL efficiency)
-    for expert_id, src_rank in plan.weights_to_receive:
-        recv_w1 = torch.empty_like(w1_local[0])
-        recv_w2 = torch.empty_like(w2_local[0])
-        recv_w3 = torch.empty_like(w3_local[0])
-        p2p_ops.append(
-            dist.P2POp(dist.irecv, recv_w1, group_peer=src_rank, group=ep_group)
-        )
-        p2p_ops.append(
-            dist.P2POp(dist.irecv, recv_w2, group_peer=src_rank, group=ep_group)
-        )
-        p2p_ops.append(
-            dist.P2POp(dist.irecv, recv_w3, group_peer=src_rank, group=ep_group)
-        )
-        foreign_w1[expert_id] = recv_w1
-        foreign_w2[expert_id] = recv_w2
-        foreign_w3[expert_id] = recv_w3
-
-    # Then send (use % for safety — matches reference implementation)
-    for expert_id, dst_rank in plan.weights_to_send:
-        local_idx = expert_id % num_local_experts
-        p2p_ops.append(
-            dist.P2POp(
-                dist.isend,
-                w1_local[local_idx].contiguous(),
-                group_peer=dst_rank,
-                group=ep_group,
-            )
-        )
-        p2p_ops.append(
-            dist.P2POp(
-                dist.isend,
-                w2_local[local_idx].contiguous(),
-                group_peer=dst_rank,
-                group=ep_group,
-            )
-        )
-        p2p_ops.append(
-            dist.P2POp(
-                dist.isend,
-                w3_local[local_idx].contiguous(),
-                group_peer=dst_rank,
-                group=ep_group,
-            )
-        )
-
-    if p2p_ops:
-        handles = dist.batch_isend_irecv(p2p_ops)
-        if return_handles:
-            return foreign_w1, foreign_w2, foreign_w3, handles
-        for h in handles:
-            h.wait()
-
-    return foreign_w1, foreign_w2, foreign_w3, None
 
 
 # ---------------------------------------------------------------------------
@@ -878,9 +779,6 @@ def _pack_expert_weights(
     w1_local: torch.Tensor,
     w2_local: torch.Tensor,
     w3_local: torch.Tensor,
-    foreign_w1: dict[int, torch.Tensor] | None,
-    foreign_w2: dict[int, torch.Tensor] | None,
-    foreign_w3: dict[int, torch.Tensor] | None,
     foreign_w1_stacked: Optional[torch.Tensor],
     foreign_w2_stacked: Optional[torch.Tensor],
     foreign_w3_stacked: Optional[torch.Tensor],
@@ -891,7 +789,7 @@ def _pack_expert_weights(
     """
     Pack weights for active experts into contiguous (num_active, ...) tensors.
 
-    Uses differentiable indexing (torch.stack) to preserve autograd graph.
+    Uses differentiable indexing to preserve autograd graph.
 
     Returns:
         (w1_packed, w2_packed, w3_packed, valid_mask)
@@ -899,7 +797,6 @@ def _pack_expert_weights(
     """
     native_start = ep_rank * num_local_experts
     native_end = native_start + num_local_experts
-    use_stacked = foreign_expert_id_mapping is not None
     num_active = unique_experts.shape[0]
     device = w1_local.device
 
@@ -907,20 +804,16 @@ def _pack_expert_weights(
     is_native = (unique_experts >= native_start) & (unique_experts < native_end)
 
     # --- Native experts: batch index into w1/w2/w3_local ---
-    # Clamp to valid range for safe indexing (non-native entries are masked out by torch.where or zeroed)
     native_local_indices = (unique_experts - native_start).clamp(
         min=0, max=num_local_experts - 1
     )
 
     if (
-        use_stacked
+        foreign_expert_id_mapping is not None
         and foreign_w1_stacked is not None
         and foreign_w1_stacked.shape[0] > 0
     ):
         # --- Stacked foreign path (autograd-compatible) ---
-        # Selective indexing: only read native weights for native experts and
-        # foreign weights for foreign experts. Avoids materializing both full
-        # arrays in torch.where (halves memory bandwidth).
         stacked_indices = foreign_expert_id_mapping[unique_experts]  # (num_active,)
         is_valid_foreign = (~is_native) & (stacked_indices >= 0)
         is_invalid = (~is_native) & (stacked_indices < 0)
@@ -936,14 +829,14 @@ def _pack_expert_weights(
             num_active, *w3_local.shape[1:], device=device, dtype=w3_local.dtype
         )
 
-        # Fill native experts (selective gather from w_local)
+        # Fill native experts
         if is_native.any():
             native_pos = is_native.nonzero(as_tuple=True)[0]
             w1_packed[native_pos] = w1_local[native_local_indices[native_pos]]
             w2_packed[native_pos] = w2_local[native_local_indices[native_pos]]
             w3_packed[native_pos] = w3_local[native_local_indices[native_pos]]
 
-        # Fill valid foreign experts (selective gather from w_stacked)
+        # Fill valid foreign experts
         if is_valid_foreign.any():
             foreign_pos = is_valid_foreign.nonzero(as_tuple=True)[0]
             safe_stacked_idx = stacked_indices[foreign_pos].clamp(min=0)
@@ -951,51 +844,11 @@ def _pack_expert_weights(
             w2_packed[foreign_pos] = foreign_w2_stacked[safe_stacked_idx]
             w3_packed[foreign_pos] = foreign_w3_stacked[safe_stacked_idx]
 
-        # Invalid experts remain zero from initialization
         valid_mask = (~is_invalid).tolist()
         return w1_packed, w2_packed, w3_packed, valid_mask
 
-    elif foreign_w1 is not None:
-        # --- Dict-based foreign path (non-autograd, needs Python loop for dict lookups) ---
-        # Still vectorize native experts
-        w1_packed = torch.zeros(
-            num_active, *w1_local.shape[1:], device=device, dtype=w1_local.dtype
-        )
-        w2_packed = torch.zeros(
-            num_active, *w2_local.shape[1:], device=device, dtype=w2_local.dtype
-        )
-        w3_packed = torch.zeros(
-            num_active, *w3_local.shape[1:], device=device, dtype=w3_local.dtype
-        )
-
-        if is_native.any():
-            native_positions = is_native.nonzero(as_tuple=True)[0]
-            w1_packed[native_positions] = w1_local[
-                native_local_indices[native_positions]
-            ]
-            w2_packed[native_positions] = w2_local[
-                native_local_indices[native_positions]
-            ]
-            w3_packed[native_positions] = w3_local[
-                native_local_indices[native_positions]
-            ]
-
-        valid_mask = is_native.tolist()
-
-        # Fill foreign experts from dicts (only non-native)
-        foreign_positions = (~is_native).nonzero(as_tuple=True)[0]
-        for pos in foreign_positions:
-            eid = unique_experts[pos].item()
-            if eid in foreign_w1:
-                w1_packed[pos] = foreign_w1[eid]
-                w2_packed[pos] = foreign_w2[eid]
-                w3_packed[pos] = foreign_w3[eid]
-                valid_mask[pos] = True
-
-        return w1_packed, w2_packed, w3_packed, valid_mask
-
     else:
-        # --- No foreign weights at all: only native experts are valid ---
+        # --- No foreign weights: only native experts are valid ---
         w1_packed = torch.zeros(
             num_active, *w1_local.shape[1:], device=device, dtype=w1_local.dtype
         )
@@ -1497,8 +1350,6 @@ def llep_dispatch_tokens(
     elif dtype == torch.float16 and effective_num_experts > 2048:
         can_merge = False
 
-    use_autograd_a2a = LLEP_W_TRANSFER_AUTOGRAD
-
     # NOTE: Always call AllToAll even if total_send=0 and total_recv=0 on this
     # rank.  AllToAll is a collective — all ranks must participate or NCCL hangs.
     if can_merge:
@@ -1508,37 +1359,17 @@ def llep_dispatch_tokens(
             dim=1,
         )  # (total_send, dim + 1)
 
-        if use_autograd_a2a:
-            merged_recv = a2a_autograd(
-                merged_send, output_split_sizes, input_split_sizes, ep_group
-            )
-        else:
-            merged_recv = torch.empty(total_recv, dim + 1, device=device, dtype=dtype)
-            dist.all_to_all_single(
-                merged_recv,
-                merged_send,
-                output_split_sizes,
-                input_split_sizes,
-                group=ep_group,
-            )
+        merged_recv = a2a_autograd(
+            merged_send, output_split_sizes, input_split_sizes, ep_group
+        )
 
         recv_hidden = merged_recv[:, :dim]
         recv_experts = merged_recv[:, dim].to(torch.int64)
     else:
         # Separate A2A calls
-        if use_autograd_a2a:
-            recv_hidden = a2a_autograd(
-                sorted_hidden, output_split_sizes, input_split_sizes, ep_group
-            )
-        else:
-            recv_hidden = torch.empty(total_recv, dim, device=device, dtype=dtype)
-            dist.all_to_all_single(
-                recv_hidden,
-                sorted_hidden,
-                output_split_sizes,
-                input_split_sizes,
-                group=ep_group,
-            )
+        recv_hidden = a2a_autograd(
+            sorted_hidden, output_split_sizes, input_split_sizes, ep_group
+        )
         # Expert indices: always non-differentiable
         recv_experts = torch.empty(total_recv, device=device, dtype=torch.int64)
         dist.all_to_all_single(
@@ -1626,9 +1457,8 @@ def llep_prepare_weights(
 ]:
     """P2P weight transfer + pack weights for active experts.
 
-    Extracts the weight preparation logic from the old llep_compute_with_weights
-    so that it can be called from GroupedExperts.forward() directly, enabling
-    a unified compute path for both standard EP and LLEP.
+    Called from GroupedExperts.forward() directly, enabling a unified
+    compute path for both standard EP and LLEP.
 
     Args:
         w1_local, w2_local, w3_local: Unsharded local expert weights.
@@ -1637,7 +1467,7 @@ def llep_prepare_weights(
     Returns:
         (w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor)
         - Packed weights are None if no tokens were received.
-        - gradient_anchor is None when LLEP_W_TRANSFER_AUTOGRAD is False.
+        - gradient_anchor ensures all ranks enter backward for P2P weight transfer.
     """
     torch.cuda.nvtx.range_push("llep_prepare_weights")
 
@@ -1646,40 +1476,23 @@ def llep_prepare_weights(
     # ------------------------------------------------------------------
     torch.cuda.nvtx.range_push("llep:8_p2p_weight_transfer")
 
-    gradient_anchor = None
-
-    if LLEP_W_TRANSFER_AUTOGRAD:
-        (
-            foreign_w1_stacked,
-            foreign_w2_stacked,
-            foreign_w3_stacked,
-            foreign_expert_id_mapping,
-            gradient_anchor,
-        ) = transfer_expert_weights_autograd(
-            state.ep_rank,
-            state.ep_group,
-            state.plan,
-            w1_local,
-            w2_local,
-            w3_local,
-            state.num_local_experts,
-            state.num_experts,
-            return_handles=False,
-        )
-        foreign_w1 = foreign_w2 = foreign_w3 = None
-    else:
-        foreign_w1, foreign_w2, foreign_w3, _ = transfer_expert_weights(
-            state.ep_rank,
-            state.ep_group,
-            state.plan,
-            w1_local,
-            w2_local,
-            w3_local,
-            state.num_local_experts,
-            return_handles=False,
-        )
-        foreign_w1_stacked = foreign_w2_stacked = foreign_w3_stacked = None
-        foreign_expert_id_mapping = None
+    (
+        foreign_w1_stacked,
+        foreign_w2_stacked,
+        foreign_w3_stacked,
+        foreign_expert_id_mapping,
+        gradient_anchor,
+    ) = transfer_expert_weights_autograd(
+        state.ep_rank,
+        state.ep_group,
+        state.plan,
+        w1_local,
+        w2_local,
+        w3_local,
+        state.num_local_experts,
+        state.num_experts,
+        return_handles=False,
+    )
 
     torch.cuda.nvtx.range_pop()  # llep:8_p2p_weight_transfer
 
@@ -1699,9 +1512,6 @@ def llep_prepare_weights(
             w1_local,
             w2_local,
             w3_local,
-            foreign_w1,
-            foreign_w2,
-            foreign_w3,
             foreign_w1_stacked,
             foreign_w2_stacked,
             foreign_w3_stacked,
@@ -1714,91 +1524,26 @@ def llep_prepare_weights(
         valid_mask = []
 
         # Touch weights for autograd graph when no tokens received
-        if LLEP_W_TRANSFER_AUTOGRAD:
-            weight_touch = (w1_local.sum() + w2_local.sum() + w3_local.sum()) * 0.0
-            if foreign_w1_stacked is not None and foreign_w1_stacked.numel() > 0:
-                weight_touch = (
-                    weight_touch
-                    + (
-                        foreign_w1_stacked.sum()
-                        + foreign_w2_stacked.sum()
-                        + foreign_w3_stacked.sum()
-                    )
-                    * 0.0
+        weight_touch = (w1_local.sum() + w2_local.sum() + w3_local.sum()) * 0.0
+        if foreign_w1_stacked is not None and foreign_w1_stacked.numel() > 0:
+            weight_touch = (
+                weight_touch
+                + (
+                    foreign_w1_stacked.sum()
+                    + foreign_w2_stacked.sum()
+                    + foreign_w3_stacked.sum()
                 )
-            if gradient_anchor is not None:
-                gradient_anchor = gradient_anchor + weight_touch
-            else:
-                gradient_anchor = weight_touch
+                * 0.0
+            )
+        if gradient_anchor is not None:
+            gradient_anchor = gradient_anchor + weight_touch
+        else:
+            gradient_anchor = weight_touch
 
     torch.cuda.nvtx.range_pop()  # llep:9_pack_weights
     torch.cuda.nvtx.range_pop()  # llep_prepare_weights
 
     return w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor
-
-
-def llep_compute_with_weights(
-    x: torch.Tensor,  # (padded_tokens, dim) padded tokens from dispatch
-    num_tokens_per_expert: torch.Tensor,  # (num_active_experts,) padded counts
-    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim) from FSDP unshard
-    w2_local: torch.Tensor,  # (num_local_experts, dim, hidden_dim)
-    w3_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
-    state: LLEPState,
-) -> torch.Tensor:
-    """Thin wrapper: prepare_weights -> compute -> store state for combine.
-
-    This delegates to llep_prepare_weights for P2P + packing, then calls
-    _run_experts_grouped_mm for the SwiGLU FFN. Returns PADDED output;
-    llep_combine_output handles unpadding + zero-invalid.
-
-    Maintained for backward compatibility with tests that call the
-    dispatch -> compute -> combine sequence directly.
-
-    Args:
-        x: Padded tokens from llep_dispatch_tokens, sorted by expert.
-        num_tokens_per_expert: Padded counts per active expert.
-        w1_local, w2_local, w3_local: Unsharded local expert weights.
-        state: LLEPState from dispatch.
-
-    Returns:
-        Expert output tensor (padded, expert-sorted order). The combine
-        step will zero-invalid experts and unpad.
-    """
-    from torchtitan.models.moe.moe import _run_experts_grouped_mm
-
-    torch.cuda.nvtx.range_push("llep_compute_with_weights")
-
-    # Step 1+2: P2P weight transfer + pack
-    w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor = llep_prepare_weights(
-        w1_local, w2_local, w3_local, state
-    )
-
-    # Store on state for combine step (zero-invalid + unpad)
-    state.valid_mask = valid_mask
-    state.padded_counts = num_tokens_per_expert
-    state.gradient_anchor = gradient_anchor
-
-    # Step 3: Run SwiGLU FFN using packed weights
-    torch.cuda.nvtx.range_push("llep:10_swiglu_ffn")
-
-    if x.numel() > 0 and w1_packed is not None:
-        output = _run_experts_grouped_mm(
-            w1_packed,
-            w2_packed,
-            w3_packed,
-            x,
-            num_tokens_per_expert,
-        )
-    else:
-        output = torch.empty(0, state.dim, device=x.device, dtype=state.dtype)
-
-    # Add gradient anchor to ensure all ranks enter backward for P2P
-    if gradient_anchor is not None:
-        output = output + gradient_anchor
-
-    torch.cuda.nvtx.range_pop()  # llep:10_swiglu_ffn
-    torch.cuda.nvtx.range_pop()  # llep_compute_with_weights
-    return output
 
 
 def _get_original_counts(state: LLEPState) -> torch.Tensor:
@@ -1836,8 +1581,6 @@ def llep_combine_output(
     dim = state.dim
     dtype = state.dtype
     ep_group = state.ep_group
-    use_autograd_a2a = LLEP_W_TRANSFER_AUTOGRAD
-
     # ------------------------------------------------------------------
     # Step 0: Zero invalid experts + unpad (moved from compute step)
     # ------------------------------------------------------------------
@@ -1879,22 +1622,12 @@ def llep_combine_output(
     # ------------------------------------------------------------------
     torch.cuda.nvtx.range_push("llep:10_alltoall_combine")
     # NOTE: Always call AllToAll — it's a collective, all ranks must participate.
-    if use_autograd_a2a:
-        send_output = a2a_autograd(
-            expert_output.contiguous(),
-            state.input_split_sizes,
-            state.output_split_sizes,
-            ep_group,
-        )
-    else:
-        send_output = torch.empty(state.total_send, dim, device=device, dtype=dtype)
-        dist.all_to_all_single(
-            send_output,
-            expert_output.contiguous(),
-            state.input_split_sizes,
-            state.output_split_sizes,
-            group=ep_group,
-        )
+    send_output = a2a_autograd(
+        expert_output.contiguous(),
+        state.input_split_sizes,
+        state.output_split_sizes,
+        ep_group,
+    )
     torch.cuda.nvtx.range_pop()  # llep:10_alltoall_combine
 
     # ------------------------------------------------------------------

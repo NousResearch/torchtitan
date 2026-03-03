@@ -26,7 +26,7 @@ The hook-based API decomposes LLEP into three steps that integrate with the exis
 ```python
 from torchtitan.distributed.llep import (
     llep_dispatch_tokens,
-    llep_compute_with_weights,
+    llep_prepare_weights,
     llep_combine_output,
 )
 
@@ -38,12 +38,11 @@ dispatched_tokens, padded_counts, state = llep_dispatch_tokens(
     adaptive_threshold=1.3,
 )
 
-# Inside GroupedExperts.forward: P2P weight transfer + compute
-output = llep_compute_with_weights(
-    dispatched_tokens, padded_counts,
+# Inside GroupedExperts.forward: P2P weight transfer + pack
+w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor = llep_prepare_weights(
     w1, w2, w3, state,
-    use_grouped_mm=True,
 )
+# Then run grouped_mm with packed weights (same compute as standard EP)
 
 # EP post-hook: combine results
 combined = llep_combine_output(output, state)
@@ -80,7 +79,6 @@ These override TOML/code values at runtime (useful for tuning without config cha
 | `EP_MAX_TOKENS_FACTOR` | `max_tokens_factor` |
 | `EP_MIN_TOKENS_PER_GEMM` | `min_tokens_per_gemm` |
 | `EP_ADAPTIVE_THRESHOLD` | `adaptive_threshold` |
-| `LLEP_W_TRANSFER_AUTOGRAD` | Enable autograd for weight transfer (default: 1) |
 | `LLEP_MERGE_A2A` | Merge hidden+scores+ids into single AllToAll (default: 1) |
 | `LLEP_DEBUG` | Verbose per-step logging (default: 0). Equivalent to `[llep] verbose = true` |
 

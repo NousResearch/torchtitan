@@ -7,7 +7,7 @@
 
 """
 Comprehensive correctness tests for the hook-based LLEP flow:
-    llep_dispatch_tokens -> llep_compute_with_weights -> llep_combine_output
+    llep_dispatch_tokens -> llep_prepare_weights -> grouped_mm -> llep_combine_output
 
 Tests that the hook-based decomposition produces numerically identical
 results to standard EP (all-to-all reference).
@@ -401,9 +401,10 @@ def run_hooks_test(
     """
     from torchtitan.distributed.llep import (
         llep_combine_output,
-        llep_compute_with_weights,
         llep_dispatch_tokens,
+        llep_prepare_weights,
     )
+    from torchtitan.models.moe.moe import _run_experts_grouped_mm
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -486,14 +487,18 @@ def run_hooks_test(
         min_tokens_per_gemm=min_tokens_per_gemm,
         adaptive_threshold=adaptive_threshold,
     )
-    output = llep_compute_with_weights(
-        dispatched,
-        padded_counts,
-        w1_local,
-        w2_local,
-        w3_local,
-        state,
+    # Inline: prepare_weights -> grouped_mm -> combine (mirrors GroupedExperts.forward)
+    w1_p, w2_p, w3_p, state.valid_mask, gradient_anchor = llep_prepare_weights(
+        w1_local, w2_local, w3_local, state
     )
+    state.padded_counts = padded_counts
+    state.gradient_anchor = gradient_anchor
+    if dispatched.numel() > 0 and w1_p is not None:
+        output = _run_experts_grouped_mm(w1_p, w2_p, w3_p, dispatched, padded_counts)
+    else:
+        output = torch.empty(0, dim, device=device, dtype=dtype)
+    if gradient_anchor is not None:
+        output = output + gradient_anchor
     combined = llep_combine_output(output, state)
 
     hooks_result = _postprocess_hooks_output(
@@ -556,9 +561,10 @@ def _run_backward_check(
     """Run backward pass and compare gradients against single-GPU reference."""
     from torchtitan.distributed.llep import (
         llep_combine_output,
-        llep_compute_with_weights,
         llep_dispatch_tokens,
+        llep_prepare_weights,
     )
+    from torchtitan.models.moe.moe import _run_experts_grouped_mm
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -608,7 +614,18 @@ def _run_backward_check(
         min_tokens_per_gemm=min_tokens_per_gemm,
         adaptive_threshold=adaptive_threshold,
     )
-    out = llep_compute_with_weights(disp, pc, w1_bwd, w2_bwd, w3_bwd, st)
+    # Inline: prepare_weights -> grouped_mm -> combine (mirrors GroupedExperts.forward)
+    w1_p, w2_p, w3_p, st.valid_mask, grad_anchor = llep_prepare_weights(
+        w1_bwd, w2_bwd, w3_bwd, st
+    )
+    st.padded_counts = pc
+    st.gradient_anchor = grad_anchor
+    if disp.numel() > 0 and w1_p is not None:
+        out = _run_experts_grouped_mm(w1_p, w2_p, w3_p, disp, pc)
+    else:
+        out = torch.empty(0, dim, device=disp.device, dtype=disp.dtype)
+    if grad_anchor is not None:
+        out = out + grad_anchor
     comb = llep_combine_output(out, st)
     result = _postprocess_hooks_output(comb, sorted_idx, num_tokens, top_k, dim)
     result.sum().backward()
