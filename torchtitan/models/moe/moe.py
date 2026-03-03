@@ -437,35 +437,45 @@ class GroupedExperts(nn.Module):
             w2 = self.w2
             w3 = self.w3
 
+        # LLEP: P2P weight transfer + pack (only extra step vs standard EP)
+        gradient_anchor = None
         if llep_state is not None:
-            # LLEP: P2P weight transfer + pack + compute using shared function
-            from torchtitan.distributed.llep import llep_compute_with_weights
+            from torchtitan.distributed.llep import llep_prepare_weights
 
-            return llep_compute_with_weights(
-                x,
-                num_tokens_per_expert,
-                w1,
-                w2,
-                w3,
-                llep_state,
-                self.use_grouped_mm,
+            w1, w2, w3, llep_state.valid_mask, gradient_anchor = llep_prepare_weights(
+                w1, w2, w3, llep_state
             )
+            llep_state.padded_counts = num_tokens_per_expert
+            llep_state.gradient_anchor = gradient_anchor
 
-        if self.use_grouped_mm:
-            # NOTE: If EP is not used, we need to pad the indices
-            #       to prepare for grouped_mm;
-            #       otherwise, EP will handle the padding.
-            if (
+        # UNIFIED compute — same path for both standard EP and LLEP
+        # When w1 is None (LLEP with no tokens received), skip compute
+        # and produce an empty output; the gradient anchor still gets added.
+        if w1 is None:
+            # No tokens received on this rank (LLEP edge case)
+            output = torch.empty(
+                0, llep_state.dim, device=x.device, dtype=llep_state.dtype
+            )
+        elif self.use_grouped_mm:
+            if llep_state is None and (
                 not isinstance(self.w1, DTensor)
                 # pyrefly: ignore[not-iterable]
                 or "ep" not in self.w1.device_mesh.mesh_dim_names
             ):
+                # No EP: need padding wrapper
                 run_experts_fn = indices_padding_wrapper(_run_experts_grouped_mm)
             else:
+                # EP or LLEP: padding already handled by dispatch hooks
                 run_experts_fn = _run_experts_grouped_mm
-            return run_experts_fn(w1, w2, w3, x, num_tokens_per_expert)
+            output = run_experts_fn(w1, w2, w3, x, num_tokens_per_expert)
         else:
-            return _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
+            output = _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
+
+        # LLEP: gradient anchor for backward P2P
+        if gradient_anchor is not None:
+            output = output + gradient_anchor
+
+        return output
 
     def init_weights(self, init_std: float, n_layers: int):
         std_in = moe_init_std(self.w1.shape[-1], n_layers)

@@ -21,7 +21,6 @@ Run multi-GPU test:
 """
 
 import torch
-import torch.nn.functional as F
 
 
 def test_lpt_planning():
@@ -154,128 +153,9 @@ def test_gpu_imbalance_ratio():
     print("  PASSED\n")
 
 
-def test_swiglu_ffn():
-    """Test SwiGLU FFN with native experts (no foreign)."""
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    print("=== Test SwiGLU FFN ===")
-
-    torch.manual_seed(42)
-    dim = 64
-    hidden_dim = 128
-    num_experts = 4
-    num_tokens = 32
-
-    w1 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.bfloat16)
-    w2 = torch.randn(num_experts, dim, hidden_dim, dtype=torch.bfloat16)
-    w3 = torch.randn(num_experts, hidden_dim, dim, dtype=torch.bfloat16)
-
-    x = torch.randn(num_tokens, dim, dtype=torch.bfloat16)
-    expert_ids = torch.randint(0, num_experts, (num_tokens,))
-
-    out = _llep_swiglu_ffn_forloop(
-        x,
-        expert_ids,
-        w1,
-        w2,
-        w3,
-        {},
-        {},
-        {},  # No foreign experts
-        ep_rank=0,
-        num_local_experts=num_experts,
-    )
-
-    print(f"  Input shape: {x.shape}")
-    print(f"  Output shape: {out.shape}")
-    print(f"  Output dtype: {out.dtype}")
-    assert out.shape == (
-        num_tokens,
-        dim,
-    ), f"Expected {(num_tokens, dim)}, got {out.shape}"
-    assert not torch.isnan(out).any(), "Output contains NaN"
-
-    # Verify against manual computation for one expert
-    eid = expert_ids[0].item()
-    mask = expert_ids == eid
-    x_expert = x[mask]
-    h = F.silu(x_expert.to(torch.bfloat16) @ w1[eid].T)
-    h = h * (x_expert.to(torch.bfloat16) @ w3[eid].T)
-    expected = (h @ w2[eid].T).to(x.dtype)
-    actual = out[mask]
-
-    max_diff = (expected - actual).abs().max().item()
-    print(f"  Max diff vs manual: {max_diff}")
-    assert max_diff < 1e-3, f"FFN output mismatch: max_diff={max_diff}"
-
-    print("  PASSED\n")
-
-
-def test_swiglu_ffn_with_foreign():
-    """Test SwiGLU FFN with mixed native and foreign experts."""
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    print("=== Test SwiGLU FFN with Foreign Experts ===")
-
-    torch.manual_seed(42)
-    dim = 64
-    hidden_dim = 128
-    num_local_experts = 2
-    ep_rank = 0
-    num_tokens = 16
-
-    # Native experts (0, 1)
-    w1_local = torch.randn(num_local_experts, hidden_dim, dim, dtype=torch.bfloat16)
-    w2_local = torch.randn(num_local_experts, dim, hidden_dim, dtype=torch.bfloat16)
-    w3_local = torch.randn(num_local_experts, hidden_dim, dim, dtype=torch.bfloat16)
-
-    # Foreign expert (expert 3 from GPU 1)
-    foreign_w1 = {3: torch.randn(hidden_dim, dim, dtype=torch.bfloat16)}
-    foreign_w2 = {3: torch.randn(dim, hidden_dim, dtype=torch.bfloat16)}
-    foreign_w3 = {3: torch.randn(hidden_dim, dim, dtype=torch.bfloat16)}
-
-    x = torch.randn(num_tokens, dim, dtype=torch.bfloat16)
-    # Mix of native (0, 1) and foreign (3) experts
-    expert_ids = torch.tensor([0, 1, 3, 0, 1, 3, 0, 1, 3, 0, 1, 3, 0, 1, 3, 0])
-
-    out = _llep_swiglu_ffn_forloop(
-        x,
-        expert_ids,
-        w1_local,
-        w2_local,
-        w3_local,
-        foreign_w1,
-        foreign_w2,
-        foreign_w3,
-        ep_rank=ep_rank,
-        num_local_experts=num_local_experts,
-    )
-
-    print(f"  Input shape: {x.shape}")
-    print(f"  Output shape: {out.shape}")
-    assert out.shape == (num_tokens, dim)
-    assert not torch.isnan(out).any(), "Output contains NaN"
-
-    # Verify foreign expert computation
-    mask = expert_ids == 3
-    x_foreign = x[mask]
-    h = F.silu(x_foreign.to(torch.bfloat16) @ foreign_w1[3].T)
-    h = h * (x_foreign.to(torch.bfloat16) @ foreign_w3[3].T)
-    expected = (h @ foreign_w2[3].T).to(x.dtype)
-    actual = out[mask]
-
-    max_diff = (expected - actual).abs().max().item()
-    print(f"  Max diff for foreign expert: {max_diff}")
-    assert max_diff < 1e-3, f"Foreign expert mismatch: max_diff={max_diff}"
-
-    print("  PASSED\n")
-
-
 if __name__ == "__main__":
     print("Running LLEP unit tests...\n")
     test_lpt_planning()
     test_lpt_balanced_case()
     test_gpu_imbalance_ratio()
-    test_swiglu_ffn()
-    test_swiglu_ffn_with_foreign()
     print("All unit tests passed!")

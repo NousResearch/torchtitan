@@ -32,7 +32,6 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.distributed as dist
-import torch.nn.functional as F
 
 from torchtitan.tools.logging import logger
 
@@ -138,6 +137,13 @@ class LLEPState:
     top_k: int
     dim: int
     dtype: torch.dtype
+
+    # Set during forward (prepare_weights) for use in combine
+    padded_counts: Optional[torch.Tensor] = None  # padded token counts per expert
+    valid_mask: Optional[
+        list
+    ] = None  # valid_mask[i] True if expert i has valid weights
+    gradient_anchor: Optional[torch.Tensor] = None  # gradient anchor for backward P2P
 
 
 # ---------------------------------------------------------------------------
@@ -1173,87 +1179,6 @@ def _unpad_output(
 
 
 # ---------------------------------------------------------------------------
-# SwiGLU FFN for native + foreign experts (for-loop, used as fallback)
-# ---------------------------------------------------------------------------
-def _llep_swiglu_ffn_forloop(
-    x: torch.Tensor,
-    expert_ids: torch.Tensor,
-    w1_local: torch.Tensor,
-    w2_local: torch.Tensor,
-    w3_local: torch.Tensor,
-    foreign_w1: dict[int, torch.Tensor] | None,
-    foreign_w2: dict[int, torch.Tensor] | None,
-    foreign_w3: dict[int, torch.Tensor] | None,
-    ep_rank: int,
-    num_local_experts: int,
-    foreign_w1_stacked: Optional[torch.Tensor] = None,
-    foreign_w2_stacked: Optional[torch.Tensor] = None,
-    foreign_w3_stacked: Optional[torch.Tensor] = None,
-    foreign_expert_id_mapping: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
-    """For-loop SwiGLU FFN used as fallback path."""
-    if x.numel() == 0:
-        return torch.empty(0, w2_local.shape[1], device=x.device, dtype=x.dtype)
-
-    num_tokens, dim = x.shape
-    orig_dtype = x.dtype
-    native_start = ep_rank * num_local_experts
-    native_end = native_start + num_local_experts
-
-    compute_dtype = w1_local.dtype
-    if x.dtype != compute_dtype:
-        x = x.to(compute_dtype)
-
-    sorted_expert_ids, sort_perm = expert_ids.sort(stable=True)
-    x_sorted = x[sort_perm]
-
-    unique_experts, counts = torch.unique_consecutive(
-        sorted_expert_ids, return_counts=True
-    )
-    offsets = torch.zeros(len(counts) + 1, dtype=torch.int64, device=x.device)
-    offsets[1:] = counts.cumsum(0)
-
-    out_sorted = torch.empty_like(x_sorted)
-
-    for idx in range(len(unique_experts)):
-        eid = unique_experts[idx].item()
-        start = offsets[idx].item()
-        end = offsets[idx + 1].item()
-        x_slice = x_sorted[start:end]
-
-        if native_start <= eid < native_end:
-            local_idx = eid - native_start
-            w1 = w1_local[local_idx]
-            w2 = w2_local[local_idx]
-            w3 = w3_local[local_idx]
-        elif foreign_expert_id_mapping is not None:
-            stacked_idx = foreign_expert_id_mapping[eid].item()
-            if stacked_idx >= 0:
-                w1 = foreign_w1_stacked[stacked_idx]
-                w2 = foreign_w2_stacked[stacked_idx]
-                w3 = foreign_w3_stacked[stacked_idx]
-            else:
-                out_sorted[start:end] = 0
-                continue
-        elif foreign_w1 is not None and eid in foreign_w1:
-            w1 = foreign_w1[eid]
-            w2 = foreign_w2[eid]
-            w3 = foreign_w3[eid]
-        else:
-            out_sorted[start:end] = 0
-            continue
-
-        h = F.silu(x_slice @ w1.T) * (x_slice @ w3.T)
-        out_sorted[start:end] = h @ w2.T
-
-    inverse_perm = sort_perm.argsort()
-    result = out_sorted[inverse_perm]
-    if result.dtype != orig_dtype:
-        result = result.to(orig_dtype)
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Composable LLEP functions (used as EP hooks)
 # ---------------------------------------------------------------------------
 def llep_dispatch_tokens(
@@ -1687,40 +1612,37 @@ def llep_dispatch_tokens(
     return recv_hidden_padded, counts_padded, llep_state
 
 
-def llep_compute_with_weights(
-    x: torch.Tensor,  # (padded_tokens, dim) padded tokens from dispatch
-    num_tokens_per_expert: torch.Tensor,  # (num_active_experts,) padded counts
-    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim) from FSDP unshard
+def llep_prepare_weights(
+    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
     w2_local: torch.Tensor,  # (num_local_experts, dim, hidden_dim)
     w3_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
     state: LLEPState,
-    use_grouped_mm: bool = True,
-) -> torch.Tensor:
-    """Inside GroupedExperts.forward(): P2P weight transfer + pack + compute.
+) -> tuple[
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    Optional[torch.Tensor],
+    list,
+    Optional[torch.Tensor],
+]:
+    """P2P weight transfer + pack weights for active experts.
 
-    Called after FSDP has unsharded the weights. Transfers weights to helper
-    GPUs via P2P, packs native + foreign into contiguous weight tensors,
-    then calls _run_experts_grouped_mm (the shared SwiGLU compute function).
-
-    The input tokens are already sorted by expert and padded from the dispatch
-    step. We pack the weights to match the expert ordering.
+    Extracts the weight preparation logic from the old llep_compute_with_weights
+    so that it can be called from GroupedExperts.forward() directly, enabling
+    a unified compute path for both standard EP and LLEP.
 
     Args:
-        x: Padded tokens from llep_dispatch_tokens, sorted by expert.
-        num_tokens_per_expert: Padded counts per active expert.
         w1_local, w2_local, w3_local: Unsharded local expert weights.
-        state: LLEPState from dispatch.
-        use_grouped_mm: Whether to use grouped_mm or for-loop.
+        state: LLEPState from dispatch (needs recv_experts, plan, etc.).
 
     Returns:
-        Expert output tensor (num_recv_tokens, dim) in expert-sorted order.
+        (w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor)
+        - Packed weights are None if no tokens were received.
+        - gradient_anchor is None when LLEP_W_TRANSFER_AUTOGRAD is False.
     """
-    from torchtitan.models.moe.moe import _run_experts_grouped_mm
-
-    torch.cuda.nvtx.range_push("llep_compute_with_weights")
+    torch.cuda.nvtx.range_push("llep_prepare_weights")
 
     # ------------------------------------------------------------------
-    # Step 1: P2P weight transfer (weights now available from FSDP unshard)
+    # Step 1: P2P weight transfer
     # ------------------------------------------------------------------
     torch.cuda.nvtx.range_push("llep:8_p2p_weight_transfer")
 
@@ -1742,7 +1664,7 @@ def llep_compute_with_weights(
             w3_local,
             state.num_local_experts,
             state.num_experts,
-            return_handles=False,  # synchronous — no overlap opportunity here
+            return_handles=False,
         )
         foreign_w1 = foreign_w2 = foreign_w3 = None
     else:
@@ -1766,11 +1688,10 @@ def llep_compute_with_weights(
     # ------------------------------------------------------------------
     torch.cuda.nvtx.range_push("llep:9_pack_weights")
 
-    # Get unique experts from recv_experts (already sorted)
     if state.recv_experts.numel() > 0:
         unique_experts = torch.unique_consecutive(state.recv_experts)
     else:
-        unique_experts = torch.zeros(0, dtype=torch.int64, device=x.device)
+        unique_experts = torch.zeros(0, dtype=torch.int64, device=w1_local.device)
 
     if unique_experts.numel() > 0:
         w1_packed, w2_packed, w3_packed, valid_mask = _pack_expert_weights(
@@ -1792,63 +1713,7 @@ def llep_compute_with_weights(
         w1_packed = w2_packed = w3_packed = None
         valid_mask = []
 
-    torch.cuda.nvtx.range_pop()  # llep:9_pack_weights
-
-    # ------------------------------------------------------------------
-    # Step 3: Run SwiGLU FFN using packed weights
-    # ------------------------------------------------------------------
-    torch.cuda.nvtx.range_push("llep:10_swiglu_ffn")
-
-    if x.numel() > 0 and w1_packed is not None:
-        if use_grouped_mm and x.is_cuda:
-            # x is already padded and sorted by expert from dispatch
-            # num_tokens_per_expert contains padded counts
-            output_padded = _run_experts_grouped_mm(
-                w1_packed,
-                w2_packed,
-                w3_packed,
-                x,
-                num_tokens_per_expert,
-            )
-
-            # Zero out invalid experts
-            if not all(valid_mask):
-                offset = 0
-                counts_list = num_tokens_per_expert.tolist()
-                for i, valid in enumerate(valid_mask):
-                    c = int(counts_list[i])
-                    if not valid and c > 0:
-                        output_padded[offset : offset + c] = 0
-                    offset += c
-
-            # Unpad to get original counts
-            original_counts = _get_original_counts(state)
-            output = _unpad_output(
-                output_padded, original_counts, num_tokens_per_expert
-            )
-        else:
-            # For-loop fallback: unpad first, use _llep_swiglu_ffn_forloop
-            original_counts = _get_original_counts(state)
-            x_unpadded = _unpad_output(x, original_counts, num_tokens_per_expert)
-            output = _llep_swiglu_ffn_forloop(
-                x_unpadded,
-                state.recv_experts.to(torch.int64),
-                w1_local,
-                w2_local,
-                w3_local,
-                foreign_w1,
-                foreign_w2,
-                foreign_w3,
-                state.ep_rank,
-                state.num_local_experts,
-                foreign_w1_stacked=foreign_w1_stacked,
-                foreign_w2_stacked=foreign_w2_stacked,
-                foreign_w3_stacked=foreign_w3_stacked,
-                foreign_expert_id_mapping=foreign_expert_id_mapping,
-            )
-    else:
-        output = torch.empty(0, state.dim, device=x.device, dtype=state.dtype)
-        # Touch weights for autograd graph recording
+        # Touch weights for autograd graph when no tokens received
         if LLEP_W_TRANSFER_AUTOGRAD:
             weight_touch = (w1_local.sum() + w2_local.sum() + w3_local.sum()) * 0.0
             if foreign_w1_stacked is not None and foreign_w1_stacked.numel() > 0:
@@ -1861,14 +1726,75 @@ def llep_compute_with_weights(
                     )
                     * 0.0
                 )
-            output = output + weight_touch
+            if gradient_anchor is not None:
+                gradient_anchor = gradient_anchor + weight_touch
+            else:
+                gradient_anchor = weight_touch
+
+    torch.cuda.nvtx.range_pop()  # llep:9_pack_weights
+    torch.cuda.nvtx.range_pop()  # llep_prepare_weights
+
+    return w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor
+
+
+def llep_compute_with_weights(
+    x: torch.Tensor,  # (padded_tokens, dim) padded tokens from dispatch
+    num_tokens_per_expert: torch.Tensor,  # (num_active_experts,) padded counts
+    w1_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim) from FSDP unshard
+    w2_local: torch.Tensor,  # (num_local_experts, dim, hidden_dim)
+    w3_local: torch.Tensor,  # (num_local_experts, hidden_dim, dim)
+    state: LLEPState,
+) -> torch.Tensor:
+    """Thin wrapper: prepare_weights -> compute -> store state for combine.
+
+    This delegates to llep_prepare_weights for P2P + packing, then calls
+    _run_experts_grouped_mm for the SwiGLU FFN. Returns PADDED output;
+    llep_combine_output handles unpadding + zero-invalid.
+
+    Maintained for backward compatibility with tests that call the
+    dispatch -> compute -> combine sequence directly.
+
+    Args:
+        x: Padded tokens from llep_dispatch_tokens, sorted by expert.
+        num_tokens_per_expert: Padded counts per active expert.
+        w1_local, w2_local, w3_local: Unsharded local expert weights.
+        state: LLEPState from dispatch.
+
+    Returns:
+        Expert output tensor (padded, expert-sorted order). The combine
+        step will zero-invalid experts and unpad.
+    """
+    from torchtitan.models.moe.moe import _run_experts_grouped_mm
+
+    torch.cuda.nvtx.range_push("llep_compute_with_weights")
+
+    # Step 1+2: P2P weight transfer + pack
+    w1_packed, w2_packed, w3_packed, valid_mask, gradient_anchor = llep_prepare_weights(
+        w1_local, w2_local, w3_local, state
+    )
+
+    # Store on state for combine step (zero-invalid + unpad)
+    state.valid_mask = valid_mask
+    state.padded_counts = num_tokens_per_expert
+    state.gradient_anchor = gradient_anchor
+
+    # Step 3: Run SwiGLU FFN using packed weights
+    torch.cuda.nvtx.range_push("llep:10_swiglu_ffn")
+
+    if x.numel() > 0 and w1_packed is not None:
+        output = _run_experts_grouped_mm(
+            w1_packed,
+            w2_packed,
+            w3_packed,
+            x,
+            num_tokens_per_expert,
+        )
+    else:
+        output = torch.empty(0, state.dim, device=x.device, dtype=state.dtype)
 
     # Add gradient anchor to ensure all ranks enter backward for P2P
     if gradient_anchor is not None:
         output = output + gradient_anchor
-
-    if output.dtype != state.dtype:
-        output = output.to(state.dtype)
 
     torch.cuda.nvtx.range_pop()  # llep:10_swiglu_ffn
     torch.cuda.nvtx.range_pop()  # llep_compute_with_weights
@@ -1887,11 +1813,19 @@ def llep_combine_output(
     expert_output: torch.Tensor,  # output from GroupedExperts.forward
     state: LLEPState,
 ) -> torch.Tensor:
-    """EP post-hook: AllToAll combine to route outputs back.
+    """EP post-hook: zero-invalid + unpad + AllToAll combine to route outputs back.
+
+    When called after the unified forward path, expert_output is still padded
+    (aligned to _TOKEN_ALIGN per expert group). This function:
+    1. Zeros out invalid expert outputs (experts without weights)
+    2. Unpads to recover original token counts
+    3. Undoes expert sort (back to A2A-received order)
+    4. AllToAll combine to route outputs back
+    5. Unsorts to original token order
 
     Args:
-        expert_output: Output from expert computation.
-        state: LLEPState from dispatch.
+        expert_output: Output from expert computation (may be padded).
+        state: LLEPState from dispatch (with padded_counts/valid_mask set by forward).
 
     Returns:
         Combined output in original token order.
@@ -1903,6 +1837,31 @@ def llep_combine_output(
     dtype = state.dtype
     ep_group = state.ep_group
     use_autograd_a2a = LLEP_W_TRANSFER_AUTOGRAD
+
+    # ------------------------------------------------------------------
+    # Step 0: Zero invalid experts + unpad (moved from compute step)
+    # ------------------------------------------------------------------
+    if state.padded_counts is not None and state.valid_mask is not None:
+        # Zero out invalid experts (experts without weights)
+        if state.valid_mask and not all(state.valid_mask):
+            offset = 0
+            counts_list = state.padded_counts.tolist()
+            for i, valid in enumerate(state.valid_mask):
+                c = int(counts_list[i])
+                if not valid and c > 0:
+                    expert_output[offset : offset + c] = 0
+                offset += c
+
+        # Unpad to original counts
+        if expert_output.numel() > 0:
+            original_counts = _get_original_counts(state)
+            if original_counts.numel() > 0:
+                expert_output = _unpad_output(
+                    expert_output, original_counts, state.padded_counts
+                )
+
+    if expert_output.dtype != dtype:
+        expert_output = expert_output.to(dtype)
 
     # ------------------------------------------------------------------
     # Step 1: Undo expert sort (back to A2A-received order for reverse A2A)

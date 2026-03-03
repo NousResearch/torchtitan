@@ -13,8 +13,7 @@ numerically correct results compared to reference implementations.
 
 Test categories:
 1. Triton fused_silu_gate kernel (single-process, 4 tests)
-2. Numerical stability (4 tests)
-3. Performance benchmarks (1 test)
+2. Performance benchmarks (1 test)
 
 Run with torchrun (requires >= 1 GPU):
     torchrun --nproc_per_node=1 tests/unit_tests/test_llep_correctness.py
@@ -61,7 +60,7 @@ def test_fused_silu_gate_vs_pytorch():
         print(f"  max_diff={max_diff:.6f}")
     assert max_diff < 1e-3, f"max_diff={max_diff:.6f}"
     if rank == 0:
-        print(f"  PASSED")
+        print("  PASSED")
 
 
 def test_fused_silu_gate_backward():
@@ -100,7 +99,7 @@ def test_fused_silu_gate_backward():
     assert grad_x3_diff < 2e-2, f"grad_x3 diff={grad_x3_diff:.6f}"
 
     if rank == 0:
-        print(f"  PASSED")
+        print("  PASSED")
 
 
 def test_fused_silu_gate_various_shapes():
@@ -133,7 +132,7 @@ def test_fused_silu_gate_various_shapes():
         ), f"shape=({num_tokens},{hidden_size}): max_diff={max_diff:.6f}"
 
     if rank == 0:
-        print(f"  PASSED")
+        print("  PASSED")
 
 
 def test_fused_silu_gate_determinism():
@@ -156,257 +155,11 @@ def test_fused_silu_gate_determinism():
         print(f"  5 runs bitwise identical: {all_match}")
     assert all_match, "Determinism check failed"
     if rank == 0:
-        print(f"  PASSED")
+        print("  PASSED")
 
 
 # ---------------------------------------------------------------------------
-# Category 2: Numerical Stability
-# ---------------------------------------------------------------------------
-def test_numerical_bf16_vs_fp32():
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    device = torch.device(f"cuda:{rank}")
-
-    if rank == 0:
-        print(f"\n{'='*70}\n  Numerical: bf16 vs fp32 reference\n{'='*70}")
-
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    torch.manual_seed(42)
-    dim, hidden_dim, num_local_experts, num_tokens = 64, 128, 4, 32
-
-    w1 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    w2 = (
-        torch.randn(
-            num_local_experts, dim, hidden_dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    w3 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    x = torch.randn(num_tokens, dim, device=device, dtype=torch.float32) * 0.1
-    expert_ids = torch.arange(num_tokens, device=device) % num_local_experts
-
-    # fp32 reference
-    out_fp32 = _llep_swiglu_ffn_forloop(
-        x.clone(),
-        expert_ids,
-        w1,
-        w2,
-        w3,
-        None,
-        None,
-        None,
-        0,
-        num_local_experts,
-    )
-
-    # bf16
-    out_bf16 = _llep_swiglu_ffn_forloop(
-        x.bfloat16(),
-        expert_ids,
-        w1.bfloat16(),
-        w2.bfloat16(),
-        w3.bfloat16(),
-        None,
-        None,
-        None,
-        0,
-        num_local_experts,
-    )
-
-    max_diff = (out_fp32 - out_bf16.float()).abs().max().item()
-    if rank == 0:
-        print(f"  bf16 vs fp32: max_diff={max_diff:.6f}")
-    assert max_diff < 0.05, f"bf16 vs fp32 too large: {max_diff:.6f}"
-    if rank == 0:
-        print(f"  PASSED")
-
-
-def test_numerical_large_values():
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    device = torch.device(f"cuda:{rank}")
-
-    if rank == 0:
-        print(f"\n{'='*70}\n  Numerical: Large input values\n{'='*70}")
-
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    torch.manual_seed(42)
-    dim, hidden_dim, num_local_experts, num_tokens = 64, 128, 4, 32
-
-    w1 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    w2 = (
-        torch.randn(
-            num_local_experts, dim, hidden_dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    w3 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    x = (
-        torch.randn(num_tokens, dim, device=device, dtype=torch.bfloat16) * 10.0
-    )  # Large values
-    expert_ids = torch.arange(num_tokens, device=device) % num_local_experts
-
-    out = _llep_swiglu_ffn_forloop(
-        x,
-        expert_ids,
-        w1,
-        w2,
-        w3,
-        None,
-        None,
-        None,
-        0,
-        num_local_experts,
-    )
-
-    has_nan = torch.isnan(out).any().item()
-    has_inf = torch.isinf(out).any().item()
-    if rank == 0:
-        print(f"  NaN: {has_nan}, Inf: {has_inf}")
-    assert not has_nan, "Output contains NaN"
-    assert not has_inf, "Output contains Inf"
-    if rank == 0:
-        print(f"  PASSED")
-
-
-def test_numerical_near_zero():
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    device = torch.device(f"cuda:{rank}")
-
-    if rank == 0:
-        print(f"\n{'='*70}\n  Numerical: Near-zero input values\n{'='*70}")
-
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    torch.manual_seed(42)
-    dim, hidden_dim, num_local_experts, num_tokens = 64, 128, 4, 32
-
-    w1 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    w2 = (
-        torch.randn(
-            num_local_experts, dim, hidden_dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    w3 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.bfloat16
-        )
-        * 0.02
-    )
-    x = torch.randn(num_tokens, dim, device=device, dtype=torch.bfloat16) * 1e-6
-    expert_ids = torch.arange(num_tokens, device=device) % num_local_experts
-
-    out = _llep_swiglu_ffn_forloop(
-        x,
-        expert_ids,
-        w1,
-        w2,
-        w3,
-        None,
-        None,
-        None,
-        0,
-        num_local_experts,
-    )
-
-    has_nan = torch.isnan(out).any().item()
-    if rank == 0:
-        print(f"  NaN: {has_nan}")
-    assert not has_nan, "Output contains NaN for near-zero input"
-    if rank == 0:
-        print(f"  PASSED")
-
-
-def test_numerical_fp32_precision():
-    rank = dist.get_rank() if dist.is_initialized() else 0
-    device = torch.device(f"cuda:{rank}")
-
-    if rank == 0:
-        print(f"\n{'='*70}\n  Numerical: fp32 precision\n{'='*70}")
-
-    from torchtitan.distributed.llep import _llep_swiglu_ffn_forloop
-
-    torch.manual_seed(42)
-    dim, hidden_dim, num_local_experts, num_tokens = 64, 128, 4, 32
-
-    w1 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    w2 = (
-        torch.randn(
-            num_local_experts, dim, hidden_dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    w3 = (
-        torch.randn(
-            num_local_experts, hidden_dim, dim, device=device, dtype=torch.float32
-        )
-        * 0.02
-    )
-    x = torch.randn(num_tokens, dim, device=device, dtype=torch.float32) * 0.1
-    expert_ids = torch.arange(num_tokens, device=device) % num_local_experts
-
-    out_forloop = _llep_swiglu_ffn_forloop(
-        x.clone(),
-        expert_ids,
-        w1,
-        w2,
-        w3,
-        None,
-        None,
-        None,
-        0,
-        num_local_experts,
-    )
-
-    # Manually compute reference
-    out_ref = torch.empty_like(x)
-    for i in range(num_tokens):
-        eid = expert_ids[i].item()
-        xi = x[i : i + 1]
-        h = F.silu(xi @ w1[eid].T) * (xi @ w3[eid].T)
-        out_ref[i : i + 1] = h @ w2[eid].T
-
-    max_diff = (out_forloop - out_ref).abs().max().item()
-    if rank == 0:
-        print(f"  fp32 forloop vs manual: max_diff={max_diff:.8f}")
-    assert max_diff < 1e-5, f"fp32 precision: max_diff={max_diff:.8f}"
-    if rank == 0:
-        print(f"  PASSED")
-
-
-# ---------------------------------------------------------------------------
-# Category 3: Performance Benchmarks
+# Category 2: Performance Benchmarks
 # ---------------------------------------------------------------------------
 def test_benchmark_triton_silu_gate():
     rank = dist.get_rank() if dist.is_initialized() else 0
@@ -462,7 +215,7 @@ def test_benchmark_triton_silu_gate():
             )
 
     if rank == 0:
-        print(f"  DONE (benchmark only, no assertions)")
+        print("  DONE (benchmark only, no assertions)")
 
 
 # ---------------------------------------------------------------------------
@@ -474,12 +227,7 @@ TEST_REGISTRY = {
     "fused_silu_gate_backward": test_fused_silu_gate_backward,
     "fused_silu_gate_shapes": test_fused_silu_gate_various_shapes,
     "fused_silu_gate_determinism": test_fused_silu_gate_determinism,
-    # Category 2: Numerical stability
-    "numerical_bf16_vs_fp32": test_numerical_bf16_vs_fp32,
-    "numerical_large_values": test_numerical_large_values,
-    "numerical_near_zero": test_numerical_near_zero,
-    "numerical_fp32_precision": test_numerical_fp32_precision,
-    # Category 3: Benchmarks
+    # Category 2: Benchmarks
     "benchmark_triton": test_benchmark_triton_silu_gate,
 }
 
@@ -514,7 +262,7 @@ def main():
 
     if rank == 0:
         print(f"\n{'#'*70}")
-        print(f"  LLEP Correctness Test Suite")
+        print("  LLEP Correctness Test Suite")
         print(f"  world_size={world_size}")
         print(f"{'#'*70}")
 
@@ -552,7 +300,7 @@ def main():
             f"  Results: {passed} passed, {failed} failed out of {passed + failed} tests"
         )
         if errors:
-            print(f"\n  Failed tests:")
+            print("\n  Failed tests:")
             for name, err in errors:
                 print(f"    {name}: {err}")
         print(f"{'#'*70}\n")

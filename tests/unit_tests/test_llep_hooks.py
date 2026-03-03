@@ -493,7 +493,6 @@ def run_hooks_test(
         w2_local,
         w3_local,
         state,
-        use_grouped_mm=True,
     )
     combined = llep_combine_output(output, state)
 
@@ -609,9 +608,7 @@ def _run_backward_check(
         min_tokens_per_gemm=min_tokens_per_gemm,
         adaptive_threshold=adaptive_threshold,
     )
-    out = llep_compute_with_weights(
-        disp, pc, w1_bwd, w2_bwd, w3_bwd, st, use_grouped_mm=True
-    )
+    out = llep_compute_with_weights(disp, pc, w1_bwd, w2_bwd, w3_bwd, st)
     comb = llep_combine_output(out, st)
     result = _postprocess_hooks_output(comb, sorted_idx, num_tokens, top_k, dim)
     result.sum().backward()
@@ -924,7 +921,7 @@ def main():
 
     if rank == 0:
         print(f"\n{'#'*70}")
-        print(f"  LLEP Hook Comprehensive Test Suite")
+        print("  LLEP Hook Comprehensive Test Suite")
         print(f"  world_size={world_size}")
         print(f"{'#'*70}")
 
@@ -981,7 +978,7 @@ def main():
             f"  Results: {passed} passed, {failed} failed, {skipped} skipped out of {total} tests"
         )
         if errors:
-            print(f"\n  Failed:")
+            print("\n  Failed:")
             for name, err in errors:
                 print(f"    {name}: {err}")
         print(f"{'='*70}\n")

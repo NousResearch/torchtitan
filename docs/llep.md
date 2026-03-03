@@ -207,19 +207,19 @@ torchrun --nproc_per_node=8 --rdzv-endpoint=localhost:29500 \
 
 | | With LLEP | Without LLEP | Delta |
 |---|---|---|---|
-| Mean TPS | ~16,200 | ~14,900 | **+8.7%** |
-| Mean MFU | 8.2% | 7.5% | +9.3% |
+| Mean TPS | ~16,270 | ~15,120 | **+7.6%** |
+| Mean MFU | 8.2% | 7.6% | +7.9% |
 
 **Memory** (per-GPU at step 20):
 
 | | With LLEP | Without LLEP |
 |---|---|---|
-| Active range | 103-107 GiB (58-60%) | 93-111 GiB (52-62%) |
-| Reserved range | 115-118 GiB (64-66%) | 106-168 GiB (60-**94%**) |
-| Max reserved | 118 GiB | **168 GiB** (near OOM) |
-| Spread (reserved) | ~3 GiB | **62 GiB** |
+| Active range | 105-107 GiB (59-60%) | 93-124 GiB (52-**69%**) |
+| Reserved range | 116-120 GiB (65-67%) | 143-173 GiB (80-**97%**) |
+| Max reserved | 120 GiB | **173 GiB** (near OOM) |
+| Spread (reserved) | ~4 GiB | **30 GiB** |
 
-Without LLEP, the most-loaded GPU hits 94% reserved memory (near OOM) while the least-loaded sits at 60%. LLEP keeps all GPUs in a tight 64-66% band. LLEP is both faster (less straggler waiting from load imbalance) and safer (no GPU near OOM).
+Without LLEP, the most-loaded GPU hits 97% reserved memory (near OOM) while the least-loaded sits at 80%. LLEP keeps all GPUs in a tight 65-67% band. LLEP is both faster (less straggler waiting from load imbalance) and safer (no GPU near OOM).
 
 ### Per-GPU Memory Breakdown (step 5)
 
@@ -229,35 +229,35 @@ Detailed per-GPU view showing the memory imbalance that LLEP eliminates:
 
 | GPU | Active (GiB) | Active % | Reserved (GiB) | Reserved % | TPS |
 |-----|-------------|----------|----------------|------------|-----|
-| 0 | 106.36 | 59.6% | 119.27 | 66.9% | 16,158 |
-| 1 | 104.56 | 58.6% | 115.71 | 64.9% | 16,195 |
-| 2 | 107.17 | 60.1% | 117.41 | 65.8% | 16,170 |
-| 3 | 104.99 | 58.9% | 113.94 | 63.9% | 16,127 |
-| 4 | 104.06 | 58.3% | 118.19 | 66.3% | 16,164 |
-| 5 | 106.05 | 59.5% | 117.53 | 65.9% | 15,698 |
-| 6 | 106.60 | 59.8% | 119.01 | 66.7% | 16,205 |
-| 7 | 105.99 | 59.4% | 117.96 | 66.1% | 16,225 |
-| **Spread** | **3.1** | | **5.3** | | |
+| 0 | 104.29 | 58.5% | 115.74 | 64.9% | 16,088 |
+| 1 | 104.40 | 58.5% | 120.20 | 67.4% | 16,078 |
+| 2 | 104.98 | 58.9% | 116.29 | 65.2% | 16,087 |
+| 3 | 105.24 | 59.0% | 115.59 | 64.8% | 15,978 |
+| 4 | 105.48 | 59.1% | 116.83 | 65.5% | 16,082 |
+| 5 | 105.64 | 59.2% | 118.05 | 66.2% | 15,975 |
+| 6 | 107.10 | 60.1% | 116.87 | 65.5% | 16,082 |
+| 7 | 107.45 | 60.2% | 118.10 | 66.2% | 15,955 |
+| **Spread** | **3.2** | | **4.6** | | |
 
 **Without LLEP** — wildly imbalanced, one GPU near OOM:
 
 | GPU | Active (GiB) | Active % | Reserved (GiB) | Reserved % | TPS |
 |-----|-------------|----------|----------------|------------|-----|
-| 0 | 120.88 | 67.8% | 133.50 | 74.9% | 13,967 |
-| 1 | 123.34 | **69.2%** | 131.20 | 73.6% | 13,988 |
-| 2 | 98.38 | 55.2% | 132.71 | 74.4% | 13,961 |
-| 3 | 100.26 | 56.2% | 143.61 | 80.5% | 13,959 |
-| 4 | 72.77 | **40.8%** | 118.05 | 66.2% | 13,987 |
-| 5 | 112.71 | 63.2% | 158.73 | 89.0% | 13,962 |
-| 6 | 105.93 | 59.4% | 165.68 | **92.9%** | 13,987 |
-| 7 | 107.93 | 60.5% | 161.10 | **90.3%** | 13,902 |
-| **Spread** | **50.6** | | **47.6** | | |
+| 0 | 100.20 | 56.2% | 131.74 | 73.9% | 15,636 |
+| 1 | 104.78 | 58.7% | 148.46 | 83.2% | 15,655 |
+| 2 | 110.80 | 62.1% | 147.52 | 82.7% | 15,655 |
+| 3 | 118.87 | **66.6%** | 165.93 | **93.0%** | 15,640 |
+| 4 | 123.88 | **69.5%** | 137.88 | 77.3% | 15,633 |
+| 5 | 91.15 | **51.1%** | 132.84 | 74.5% | 15,616 |
+| 6 | 93.18 | 52.2% | 152.99 | 85.8% | 15,600 |
+| 7 | 99.20 | 55.6% | 149.78 | 84.0% | 15,583 |
+| **Spread** | **32.7** | | **33.2** | | |
 
 Key observations:
-- Without LLEP, GPU 6 reserves **165.7 GiB (92.9%)** of 178 GiB — one more imbalanced step away from OOM.
-- GPU 4 is nearly idle at 40.8% active while GPU 1 is at 69.2% — a **28.4 percentage point** gap.
-- LLEP compresses the active memory spread from **50.6 GiB to 3.1 GiB** (16x reduction).
-- Every GPU with LLEP runs at ~16,100+ TPS vs ~13,960 without — the straggler GPU drags everyone down.
+- Without LLEP, GPU 3 reserves **165.9 GiB (93.0%)** of 178 GiB — one more imbalanced step away from OOM.
+- GPU 5 is nearly idle at 51.1% active while GPU 4 is at 69.5% — an **18.4 percentage point** gap.
+- LLEP compresses the active memory spread from **32.7 GiB to 3.2 GiB** (10x reduction).
+- With LLEP every GPU runs at ~16,000+ TPS vs ~15,600 without — the straggler GPU drags everyone down.
 
 To reproduce this comparison:
 
@@ -346,3 +346,4 @@ torchrun --nproc_per_node=2 tests/unit_tests/test_llep_hooks.py --list
 | `test_llep.py` | 5 | LPT planning, SwiGLU FFN (single-process) |
 | `test_llep_correctness.py` | 17 | Grouped MM vs for-loop, Triton fused_silu_gate, numerical stability, benchmarks |
 | `test_llep_hooks.py` | 59 | Hook-based flow (`dispatch` -> `compute` -> `combine`) across top_k, hyperparams, dimensions, backward, edge cases |
+| `test_moe_ep_e2e.py` | 32 | Real MoE.forward() E2E: single-GPU ref vs EP vs LLEP (forward + backward, pytest parametrize) |
