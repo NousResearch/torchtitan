@@ -162,7 +162,7 @@ async def _chat_completion(request_dict: dict, raw_request: Request) -> Response
     max_tokens = request_dict.get("max_tokens", 16)
     top_p = request_dict.get("top_p", 1.0)
 
-    tokenizer = engine.get_tokenizer()
+    tokenizer = await engine.get_tokenizer()
     prompt = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
