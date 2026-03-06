@@ -12,6 +12,7 @@ change `vllm/entrypoints/openai/api_server.py` instead.
 import asyncio
 import json
 import ssl
+import time
 from argparse import Namespace
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -141,6 +142,99 @@ async def _generate(request_dict: dict, raw_request: Request) -> Response:
         ret["prompt_token_ids"] = prompt_token_ids
         ret["token_ids"] = output_token_ids
     return JSONResponse(ret)
+
+
+@app.post("/v1/chat/completions")
+async def create_chat_completion(request: Request) -> Response:
+    """OpenAI-compatible chat completions endpoint."""
+    request_dict = await request.json()
+    return await _chat_completion(request_dict, raw_request=request)
+
+
+@with_cancellation
+async def _chat_completion(request_dict: dict, raw_request: Request) -> Response:
+    assert engine is not None
+
+    messages = request_dict.get("messages", [])
+    model = request_dict.get("model", "")
+    n = request_dict.get("n", 1)
+    temperature = request_dict.get("temperature", 1.0)
+    max_tokens = request_dict.get("max_tokens", 16)
+    top_p = request_dict.get("top_p", 1.0)
+
+    tokenizer = engine.get_tokenizer()
+    prompt = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+
+    sampling_params = SamplingParams(
+        n=n,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        top_p=top_p,
+        output_kind=RequestOutputKind.FINAL_ONLY,
+    )
+    request_id = random_uuid()
+
+    final_output = None
+    try:
+        async for request_output in engine.generate(
+            prompt, sampling_params, request_id
+        ):
+            final_output = request_output
+    except asyncio.CancelledError:
+        return Response(status_code=499)
+
+    assert final_output is not None
+
+    choices = []
+    for i, output in enumerate(final_output.outputs):
+        choices.append(
+            {
+                "index": i,
+                "message": {
+                    "role": "assistant",
+                    "content": output.text,
+                },
+                "finish_reason": output.finish_reason,
+            }
+        )
+
+    prompt_tokens = len(final_output.prompt_token_ids)
+    completion_tokens = sum(len(o.token_ids) for o in final_output.outputs)
+
+    response = {
+        "id": f"chatcmpl-{request_id}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model,
+        "choices": choices,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+    return JSONResponse(response)
+
+
+@app.get("/v1/models")
+async def list_models() -> Response:
+    """OpenAI-compatible models listing endpoint."""
+    assert engine is not None
+    model_name = app.state.args.model if hasattr(app.state, "args") else "unknown"
+    return JSONResponse(
+        {
+            "object": "list",
+            "data": [
+                {
+                    "id": model_name,
+                    "object": "model",
+                    "owned_by": "local",
+                }
+            ],
+        }
+    )
 
 
 def build_app(args: Namespace) -> FastAPI:

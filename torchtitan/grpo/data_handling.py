@@ -303,9 +303,9 @@ def data_worker(
 class OnlineDataHandler:
     def __init__(self):
         if int(os.environ.get("SLURM_NODEID", "0")) == 0:
-            self.server_url = "http://localhost:8000"
+            self.server_url = "http://localhost:8001"
         else:
-            self.server_url = f'http://{os.environ["head_node_ip"]}:8000'
+            self.server_url = f'http://{os.environ["head_node_ip"]}:8001'
         if torch.distributed.get_rank() == 0:
             self.queue = Queue()
         else:

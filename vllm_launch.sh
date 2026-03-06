@@ -3,20 +3,21 @@ printenv
 ulimit -n 32000
 # if NODEID == 0...
 if [[ "$SLURM_NODEID" -eq 0 ]]; then
+    # Kill any stale run-api or env server processes from previous jobs
+    pkill -f 'run-api' || true
+    fuser -k 8001/tcp || true
+    sleep 1
     # Create the trajectory handler stuff
     echo "Starting job at $(date)"
-    source ${API_ENV}/bin/activate
     # Start trajectory handler
     echo "Starting trajectory handler..."
-    run-api > ${LOGDIR}/api.log 2>&1 &
-    python $PYTHON_SCRIPT serve --slurm=True $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
-    deactivate
+    ${API_ENV}/bin/run-api --port 8001 > ${LOGDIR}/api.log 2>&1 &
+    ${API_ENV}/bin/python $PYTHON_SCRIPT serve --slurm=True $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
     echo "Started trajectory handler..."
 fi
 echo $SLURM_NODEID ", " $NUM_TRAINING_NODES
 # now, if we're within the number of nodes allocated to training...
 if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
-    source ${TRAIN_ENV}/bin/activate
     cd $TRAIN_PATH
     nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
     nodes_array=($nodes)
@@ -52,7 +53,7 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 #    dcgmi profile --pause
     # adjust sbatch --ntasks and sbatch --nodes above and --nnodes below
     # to your specific node count, and update target launch file.
-    torchrun --nproc_per_node 8 --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
+    ${TRAIN_ENV}/bin/torchrun --nproc_per_node 8 --nnodes ${NUM_TRAINING_NODES} --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
 -m torchtitan.grpo_train --job.config_file ${CONFIG_FILE}  --grpo.sglang_slurm_num_nodes ${NUM_INFERENCE_NODES} ${TRAINING_ARGS}
     scancel $SLURM_JOBID
 #    dcgmi profile --resume
@@ -62,12 +63,13 @@ else
     # Setup 8 vllm instances with model in vllm venv
     echo "Starting vllm instances..."
 
-    # Startup wandb monitoring...
-    source ${API_ENV}/bin/activate
-    API_ADDR="http://${head_node_ip}:8000"
-    inference-node-wandb-watcher --api_addr ${API_ADDR} --tp 1 --node_num ${SLURM_NODEID} > ${LOGDIR}/wandb_${SLURM_NODEID}.log 2>&1  &
+    export TRITON_CACHE_DIR=${LOGDIR}/cache/triton_${SLURM_JOB_ID}_${SLURM_NODEID}
+    mkdir -p ${TRITON_CACHE_DIR}
 
-    source ${VLLM_ENV}/bin/activate
+    # Startup wandb monitoring...
+    API_ADDR="http://${head_node_ip}:8000"
+    ${API_ENV}/bin/inference-node-wandb-watcher --api_addr ${API_ADDR} --tp 1 --node_num ${SLURM_NODEID} > ${LOGDIR}/wandb_${SLURM_NODEID}.log 2>&1  &
+
 
     PORT_BASE=9000
 
@@ -80,10 +82,11 @@ else
         LOG_ID=$((GPU_ID + LOG_OFFSET))
         PORT=$((PORT_BASE + i))
         echo "Starting vllm instance on GPU $GPU_ID, logdir $LOG_ID, port $PORT"
-        CUDA_VISIBLE_DEVICES=$GPU_ID nohup python -m torchtitan.grpo.vllm_handling.vllm_runner \
+        CUDA_VISIBLE_DEVICES=$GPU_ID nohup ${VLLM_ENV}/bin/python -m torchtitan.grpo.vllm_handling.vllm_runner \
           --model $MODEL_NAME \
           --host 0.0.0.0 \
-          --gpu-memory-utilization 0.75 \
+          --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.80} \
+          --max-model-len ${VLLM_MAX_MODEL_LEN:-65536} \
           --dtype="bfloat16" \
           --log-level="error" \
           --port $PORT > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1 &
@@ -93,7 +96,7 @@ else
     LOG_ID=$((GPU_ID + LOG_OFFSET))
     PORT=$((PORT_BASE + 7))
     echo "Starting vllm instance on GPU 7, port 9007"
-    CUDA_VISIBLE_DEVICES=7 nohup python -m torchtitan.grpo.vllm_handling.vllm_runner \
+    CUDA_VISIBLE_DEVICES=7 nohup ${VLLM_ENV}/bin/python -m torchtitan.grpo.vllm_handling.vllm_runner \
       --model $MODEL_NAME \
       --host 0.0.0.0 \
       --gpu-memory-utilization 0.75 \
