@@ -371,10 +371,10 @@ def send_param(
     logger.debug(f"Attempting to send {object_list}")
     obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
     torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
-    # setup tensor list
+    # setup tensor list - ALL entries must be the same shape for NCCL allgather
     tensor_list = [
         torch.zeros(
-            local_param.shape if indx < (dp_shard_degree * tp_degree) else 1,
+            local_param.shape,
             dtype=desired_dtype,
             device=local_param.device,
         )

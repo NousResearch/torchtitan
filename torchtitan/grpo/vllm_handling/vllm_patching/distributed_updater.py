@@ -390,10 +390,10 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            # setup tensor list
+            # setup tensor list - ALL entries must be the same shape for NCCL allgather
             tensor_list = [
                 torch.zeros(
-                    local_shape if indx < num_training_gpus else 1,
+                    local_shape,
                     dtype=target_dtype,
                     device=state_dict[name].device,
                 )
@@ -401,7 +401,7 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             ]
             torch.distributed.all_gather(
                 tensor_list,
-                torch.zeros(1, dtype=target_dtype, device=state_dict[name].device),
+                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
                 group=nccl_group,
             )
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
