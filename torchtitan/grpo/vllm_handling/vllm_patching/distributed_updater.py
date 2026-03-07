@@ -369,6 +369,7 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         qkv_bias_buffer = {}
         w1w3_buffer = {}
         while True:
+          try:
             object_list = [
                 None,
             ]
@@ -549,3 +550,12 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             else:
                 _debug_diff(name, state_dict[name].data, tensor)
                 state_dict[name].data.copy_(tensor)
+          except Exception as e:
+            import traceback
+            print(
+                f"[WEIGHT UPDATER FATAL] rank={rank} crashed processing "
+                f"tt_indx={tt_indx}, name={name}: {e}",
+                flush=True,
+            )
+            traceback.print_exc()
+            raise

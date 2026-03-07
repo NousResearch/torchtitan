@@ -99,7 +99,8 @@ else
     CUDA_VISIBLE_DEVICES=7 nohup ${VLLM_ENV}/bin/python -m torchtitan.grpo.vllm_handling.vllm_runner \
       --model $MODEL_NAME \
       --host 0.0.0.0 \
-      --gpu-memory-utilization 0.75 \
+      --gpu-memory-utilization ${VLLM_GPU_MEM_UTIL:-0.80} \
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-65536} \
       --dtype="bfloat16" \
       --log-level="error" \
       --port 9007 > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1
