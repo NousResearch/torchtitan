@@ -326,15 +326,7 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         rank=local_rank,
     )
     logger.info(f"SGlang GLOO process group created, local_rank: {local_rank}")
-    nccl_group = init_process_group(
-        backend="nccl",
-        init_method=f"tcp://{hostname}:{sglang_port}",
-        world_size=total_group_size,
-        group_name="weight_update_group",
-        rank=local_rank,
-    )
-    logger.info(f"SGlang NCCL process group created, local_rank: {local_rank}")
-    return nccl_group, gloo_group
+    return gloo_group
 
 
 @env_fix_wrapper
@@ -347,30 +339,16 @@ def send_param(
     dp_shard_degree,
     total_group_size,
     sglang_gloo_group,
-    sglang_nccl_group,
     param_indx,
 ):
-    if torch.distributed.get_rank() == 0:
-        object_list = [
-            {
-                "name": name,
-                "shape": param_shape,
-                "local_shape": local_param.shape,
-                "dtype": weight_dtypes[name],
-            }
-        ]
-    else:
-        object_list = [
-            None,
-        ]
     desired_dtype = (
         weight_dtypes[name]
         if isinstance(weight_dtypes[name], torch.dtype)
         else getattr(torch, weight_dtypes[name])
     )
-    logger.debug(f"Attempting to send {object_list}")
-    obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
-    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
+    logger.debug(f"Attempting to send param {name}")
+    obj_indx = torch.LongTensor([param_indx])
+    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_gloo_group)
     cpu_param = local_param.to(device="cpu", dtype=desired_dtype).contiguous()
     cpu_list = [
         torch.zeros(local_param.shape, dtype=desired_dtype, device="cpu")
@@ -381,7 +359,7 @@ def send_param(
 
 
 @env_fix_wrapper
-def send_wait(sglang_nccl_group, device):
+def send_wait(sglang_gloo_group, device):
     logger.debug("Sending wait signal to sglang...")
-    indx_tensor = torch.LongTensor([-1]).to(device=device)
-    torch.distributed.broadcast(indx_tensor, 0, group=sglang_nccl_group)
+    indx_tensor = torch.LongTensor([-1])
+    torch.distributed.broadcast(indx_tensor, 0, group=sglang_gloo_group)

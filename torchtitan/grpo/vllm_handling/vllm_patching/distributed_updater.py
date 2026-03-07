@@ -353,14 +353,6 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         group_name="gloo_group",
     )
     print("Created Gloo group", flush=True)
-    nccl_group = init_process_group(
-        backend="nccl",
-        init_method=f"tcp://{master_addr}",
-        world_size=total_group_size,
-        rank=rank,
-        group_name="weight_update_group",
-    )
-    print("Created NCCL Process group", flush=True)
     print("Initialized process group", flush=True)
     my_device = list(state_dict.values())[0].device
     with torch.no_grad():
@@ -373,8 +365,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             object_list = [
                 None,
             ]
-            obj_indx = torch.zeros(1, dtype=torch.long).to(device=my_device)
-            torch.distributed.broadcast(obj_indx, group_src=0, group=nccl_group)
+            obj_indx = torch.zeros(1, dtype=torch.long)
+            torch.distributed.broadcast(obj_indx, group_src=0, group=gloo_group)
             tt_indx = obj_indx.item()
             if tt_indx == -1:
                 continue
