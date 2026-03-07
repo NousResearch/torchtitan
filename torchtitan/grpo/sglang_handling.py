@@ -371,17 +371,13 @@ def send_param(
     logger.debug(f"Attempting to send {object_list}")
     obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
     torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
-    tensor_list = [
-        torch.zeros(
-            local_param.shape,
-            dtype=desired_dtype,
-            device=local_param.device,
-        )
-        for indx in range(total_group_size)
+    cpu_param = local_param.to(device="cpu", dtype=desired_dtype).contiguous()
+    cpu_list = [
+        torch.zeros(local_param.shape, dtype=desired_dtype, device="cpu")
+        for _ in range(total_group_size)
     ]
-    torch.distributed.all_gather(
-        tensor_list, local_param.to(desired_dtype), group=sglang_nccl_group
-    )
+    torch.distributed.all_gather(cpu_list, cpu_param, group=sglang_gloo_group)
+    tensor_list = [t.to(device=local_param.device) for t in cpu_list]
 
 
 @env_fix_wrapper

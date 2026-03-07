@@ -390,23 +390,17 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            tensor_list = [
-                torch.zeros(
-                    local_shape,
-                    dtype=target_dtype,
-                    device=state_dict[name].device,
-                )
-                for indx in range(total_group_size)
+            cpu_list = [
+                torch.zeros(local_shape, dtype=target_dtype, device="cpu")
+                for _ in range(total_group_size)
             ]
+            cpu_dummy = torch.zeros(local_shape, dtype=target_dtype, device="cpu")
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Calling all_gather for {tt_name}...", flush=True)
-            torch.distributed.all_gather(
-                tensor_list,
-                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
-                group=nccl_group,
-            )
+                print(f"[DIAG] Calling gloo all_gather for {tt_name}...", flush=True)
+            torch.distributed.all_gather(cpu_list, cpu_dummy, group=gloo_group)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
                 print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
+            tensor_list = [t.to(device=state_dict[name].device) for t in cpu_list]
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
             # Now merge them together...
             # First, data parallel...
