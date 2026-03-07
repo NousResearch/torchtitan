@@ -391,6 +391,14 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     flush=True,
                 )
             # setup tensor list - ALL entries must be the same shape for NCCL allgather
+            if SGLANG_UPDATE_PROC_DEBUG == 1:
+                free_mem, total_mem = torch.cuda.mem_get_info(state_dict[name].device)
+                print(
+                    f"[DIAG] Before tensor_list alloc: free={free_mem/1e9:.2f}GB, "
+                    f"total={total_mem/1e9:.2f}GB, "
+                    f"alloc_needed={total_group_size}x{local_shape}x{target_dtype}",
+                    flush=True,
+                )
             tensor_list = [
                 torch.zeros(
                     local_shape,
@@ -399,11 +407,15 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                 )
                 for indx in range(total_group_size)
             ]
+            if SGLANG_UPDATE_PROC_DEBUG == 1:
+                print(f"[DIAG] tensor_list allocated, calling all_gather...", flush=True)
             torch.distributed.all_gather(
                 tensor_list,
                 torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
                 group=nccl_group,
             )
+            if SGLANG_UPDATE_PROC_DEBUG == 1:
+                print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
             # Now merge them together...
             # First, data parallel...
