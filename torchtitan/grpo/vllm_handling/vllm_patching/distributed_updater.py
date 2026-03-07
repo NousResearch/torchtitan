@@ -374,9 +374,6 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                 None,
             ]
             obj_indx = torch.zeros(1, dtype=torch.long).to(device=my_device)
-            if SGLANG_UPDATE_PROC_DEBUG == 1:
-                torch.cuda.synchronize(my_device)
-                print(f"[DIAG] About to call broadcast (waiting for param index)...", flush=True)
             torch.distributed.broadcast(obj_indx, group_src=0, group=nccl_group)
             tt_indx = obj_indx.item()
             if tt_indx == -1:
@@ -393,32 +390,17 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            # setup tensor list - ALL entries must be the same shape for NCCL allgather
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                free_mem, total_mem = torch.cuda.mem_get_info(state_dict[name].device)
-                print(
-                    f"[DIAG] Before tensor_list alloc: free={free_mem/1e9:.2f}GB, "
-                    f"total={total_mem/1e9:.2f}GB, "
-                    f"alloc_needed={total_group_size}x{local_shape}x{target_dtype}",
-                    flush=True,
+                print(f"[DIAG] Starting broadcast-based weight gather for {tt_name}...", flush=True)
+            tensor_list = []
+            for src_rank in range(num_training_gpus):
+                buf = torch.zeros(
+                    local_shape, dtype=target_dtype, device=state_dict[name].device
                 )
-            tensor_list = [
-                torch.zeros(
-                    local_shape,
-                    dtype=target_dtype,
-                    device=state_dict[name].device,
-                )
-                for indx in range(total_group_size)
-            ]
+                torch.distributed.broadcast(buf, group_src=src_rank, group=nccl_group)
+                tensor_list.append(buf)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] tensor_list allocated, calling all_gather...", flush=True)
-            torch.distributed.all_gather(
-                tensor_list,
-                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
-                group=nccl_group,
-            )
-            if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
+                print(f"[DIAG] Weight gather completed for {tt_name}", flush=True)
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
             # Now merge them together...
             # First, data parallel...
