@@ -116,7 +116,7 @@ def pad_data_to_good_offset(
             labels.append(label_item[1:])
             rewards.append(item["scores"][i])
             masks.append(item["masks"][i][1:])
-            if item["inference_logprobs"] is None:
+            if item.get("inference_logprobs") is None:
                 inf_logps.append(np.full(item["masks"][i].shape, 1.0, dtype=np.float32))
             else:
                 item["inference_logprobs"][i] = np.concatenate(

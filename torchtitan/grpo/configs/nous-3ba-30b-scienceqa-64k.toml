@@ -19,7 +19,7 @@ enable_wandb = true
 [model]
 name = "qwen3"
 flavor = "30B-A3B"
-hf_assets_path = "/home/mormio/torchtitan/assets/hf/Qwen3-30B-A3B-Instruct-2507"
+hf_assets_path = "/data/home/mormio/torchtitan/assets/hf/Qwen3-30B-A3B-Instruct-2507"
 # converters = "float8"
 
 [optimizer]
