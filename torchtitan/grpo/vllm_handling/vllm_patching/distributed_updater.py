@@ -80,7 +80,7 @@ def init_process_group(
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
-        [],
+        list(range(world_size)),
         backend,
         store,
         group_name=group_name,
@@ -390,17 +390,23 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Starting broadcast-based weight gather for {tt_name}...", flush=True)
-            tensor_list = []
-            for src_rank in range(num_training_gpus):
-                buf = torch.zeros(
-                    local_shape, dtype=target_dtype, device=state_dict[name].device
+            tensor_list = [
+                torch.zeros(
+                    local_shape,
+                    dtype=target_dtype,
+                    device=state_dict[name].device,
                 )
-                torch.distributed.broadcast(buf, group_src=src_rank, group=nccl_group)
-                tensor_list.append(buf)
+                for indx in range(total_group_size)
+            ]
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Weight gather completed for {tt_name}", flush=True)
+                print(f"[DIAG] Calling all_gather for {tt_name}...", flush=True)
+            torch.distributed.all_gather(
+                tensor_list,
+                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
+                group=nccl_group,
+            )
+            if SGLANG_UPDATE_PROC_DEBUG == 1:
+                print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
             # Now merge them together...
             # First, data parallel...

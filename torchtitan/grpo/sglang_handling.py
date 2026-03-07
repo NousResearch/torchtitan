@@ -146,7 +146,7 @@ def init_process_group(
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
-        [],
+        list(range(world_size)),
         backend,
         store,
         group_name=group_name,
@@ -371,15 +371,17 @@ def send_param(
     logger.debug(f"Attempting to send {object_list}")
     obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
     torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
-    num_training = dp_shard_degree * tp_degree
-    local_param_cast = local_param.to(desired_dtype)
-    tensor_list = []
-    for src_rank in range(num_training):
-        buf = local_param_cast.clone() if src_rank == torch.distributed.get_rank() else torch.zeros(
-            local_param.shape, dtype=desired_dtype, device=local_param.device
+    tensor_list = [
+        torch.zeros(
+            local_param.shape,
+            dtype=desired_dtype,
+            device=local_param.device,
         )
-        torch.distributed.broadcast(buf, group_src=src_rank, group=sglang_nccl_group)
-        tensor_list.append(buf)
+        for indx in range(total_group_size)
+    ]
+    torch.distributed.all_gather(
+        tensor_list, local_param.to(desired_dtype), group=sglang_nccl_group
+    )
 
 
 @env_fix_wrapper
