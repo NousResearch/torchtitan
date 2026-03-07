@@ -374,6 +374,9 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                 None,
             ]
             obj_indx = torch.zeros(1, dtype=torch.long).to(device=my_device)
+            if SGLANG_UPDATE_PROC_DEBUG == 1:
+                torch.cuda.synchronize(my_device)
+                print(f"[DIAG] About to call broadcast (waiting for param index)...", flush=True)
             torch.distributed.broadcast(obj_indx, group_src=0, group=nccl_group)
             tt_indx = obj_indx.item()
             if tt_indx == -1:
