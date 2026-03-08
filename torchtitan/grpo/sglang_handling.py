@@ -66,18 +66,12 @@ def env_fix_for_distributed():
     os.environ.pop("CUDA_MODULE_LOADING", None)
     os.environ["NCCL_CUMEM_ENABLE"] = "0"
     os.environ["NCCL_NVLS_ENABLE"] = "0"
-    os.environ["NCCL_SHM_DISABLE"] = "1"
-    os.environ["NCCL_P2P_DISABLE"] = "1"
     keys_to_remove = [
         key for key in os.environ
         if "TORCH_ELASTIC" in key or "TORCHELASTIC" in key or "TORCH_NCCL" in key
     ]
     for key in keys_to_remove:
         os.environ.pop(key)
-    # Preserve heartbeat timeout so NCCL watchdog can detect hangs
-    heartbeat = export_env.get("TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC")
-    if heartbeat:
-        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = heartbeat
     return export_env
 
 
@@ -337,46 +331,15 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         rank=local_rank,
     )
     logger.info(f"SGlang GLOO process group created, local_rank: {local_rank}")
-
-    torch.cuda.synchronize()
-
-    nccl_group = init_process_group(
-        backend="nccl",
-        init_method=f"tcp://{hostname}:{sglang_port}",
-        world_size=total_group_size,
-        group_name="weight_update_group",
-        rank=local_rank,
-        device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
-    )
-    logger.info(f"SGlang NCCL process group created, local_rank: {local_rank}")
-
-    # Warmup: force NCCL Simple protocol channel initialization.
-    # Without this, channels are lazily created on the first large transfer,
-    # which has been observed to hang in cross-group custom PG setups.
-    device = torch.device(f"cuda:{torch.cuda.current_device()}")
-    warmup_size = 256 * 1024  # 1MB in float32 -- large enough to trigger Simple protocol
-    warmup_tensor = torch.zeros(warmup_size, device=device)
-    warmup_list = [torch.zeros_like(warmup_tensor) for _ in range(total_group_size)]
-    logger.info("Starting NCCL warmup all_gather...")
-    torch.distributed.all_gather(warmup_list, warmup_tensor, group=nccl_group)
-    torch.cuda.synchronize()
-    del warmup_tensor, warmup_list
-    logger.info("NCCL warmup all_gather completed successfully")
-
-    return nccl_group, gloo_group
+    return gloo_group
 
 
 @env_fix_wrapper
 def send_param(
-    local_param,
+    param,
     name,
-    param_shape,
     weight_dtypes,
-    tp_degree,
-    dp_shard_degree,
-    total_group_size,
     sglang_gloo_group,
-    sglang_nccl_group,
     param_indx,
 ):
     desired_dtype = (
@@ -385,23 +348,16 @@ def send_param(
         else getattr(torch, weight_dtypes[name])
     )
     logger.debug(f"Attempting to send param {name}")
-    obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
-    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
-    tensor_list = [
-        torch.zeros(
-            local_param.shape,
-            dtype=desired_dtype,
-            device=local_param.device,
-        )
-        for _ in range(total_group_size)
-    ]
-    torch.distributed.all_gather(
-        tensor_list, local_param.to(desired_dtype), group=sglang_nccl_group
-    )
+    obj_indx = torch.LongTensor([param_indx])
+    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_gloo_group)
+    full_tensor = param.full_tensor()
+    cpu_param = full_tensor.to(desired_dtype).cpu()
+    del full_tensor
+    torch.distributed.broadcast(cpu_param, group_src=0, group=sglang_gloo_group)
 
 
 @env_fix_wrapper
-def send_wait(sglang_nccl_group, device):
+def send_wait(sglang_gloo_group, device):
     logger.debug("Sending wait signal to sglang...")
-    indx_tensor = torch.LongTensor([-1]).to(device=device)
-    torch.distributed.broadcast(indx_tensor, 0, group=sglang_nccl_group)
+    indx_tensor = torch.LongTensor([-1])
+    torch.distributed.broadcast(indx_tensor, 0, group=sglang_gloo_group)

@@ -358,32 +358,6 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         group_name="gloo_group",
     )
     print("Created Gloo group", flush=True)
-    torch.cuda.synchronize()
-
-    os.environ["NCCL_SHM_DISABLE"] = "1"
-    os.environ["NCCL_P2P_DISABLE"] = "1"
-
-    nccl_group = init_process_group(
-        backend="nccl",
-        init_method=f"tcp://{master_addr}",
-        world_size=total_group_size,
-        rank=rank,
-        group_name="weight_update_group",
-        device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
-    )
-    print("Created NCCL Process group", flush=True)
-
-    # Warmup: force NCCL Simple protocol channel initialization
-    device = torch.device(f"cuda:{torch.cuda.current_device()}")
-    warmup_size = 256 * 1024  # 1MB in float32
-    warmup_tensor = torch.zeros(warmup_size, device=device)
-    warmup_list = [torch.zeros_like(warmup_tensor) for _ in range(total_group_size)]
-    print("Starting NCCL warmup all_gather...", flush=True)
-    torch.distributed.all_gather(warmup_list, warmup_tensor, group=nccl_group)
-    torch.cuda.synchronize()
-    del warmup_tensor, warmup_list
-    print("NCCL warmup all_gather completed successfully", flush=True)
-
     print("Initialized process group", flush=True)
     my_device = list(state_dict.values())[0].device
     with torch.no_grad():
@@ -396,8 +370,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             object_list = [
                 None,
             ]
-            obj_indx = torch.zeros(1, dtype=torch.long).to(device=my_device)
-            torch.distributed.broadcast(obj_indx, group_src=0, group=nccl_group)
+            obj_indx = torch.zeros(1, dtype=torch.long)
+            torch.distributed.broadcast(obj_indx, group_src=0, group=gloo_group)
             tt_indx = obj_indx.item()
             if tt_indx == -1:
                 continue
@@ -413,48 +387,13 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            tensor_list = [
-                torch.zeros(
-                    local_shape,
-                    dtype=target_dtype,
-                    device=state_dict[name].device,
-                )
-                for _ in range(total_group_size)
-            ]
+            full_recv = torch.zeros(shape, dtype=target_dtype)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Calling NCCL all_gather for {tt_name}...", flush=True)
-            torch.distributed.all_gather(
-                tensor_list,
-                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
-                group=nccl_group,
-            )
+                print(f"[DIAG] Calling gloo broadcast for {tt_name}...", flush=True)
+            torch.distributed.broadcast(full_recv, group_src=0, group=gloo_group)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
-            tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
-            # Now merge them together...
-            # First, data parallel...
-            if json_data["dp_shard_degree"] > 1:
-                tensor_parallel_tensors = []
-                for i in range(json_data["tp_degree"]):
-                    tensor_parallel_tensors.append(
-                        torch.cat(tensor_list[i :: json_data["tp_degree"]], dim=0)
-                    )
-                if json_data["tp_degree"] > 1:
-                    if tensor_parallel_tensors[0].shape == state_dict[name].shape:
-                        tensor = tensor_parallel_tensors[0].contiguous()
-                    else:
-                        tensor = torch.cat(
-                            tensor_parallel_tensors,
-                            dim=json_data["param_mappings"][tt_name]["tp_shard_dim"],
-                        ).contiguous()
-                else:
-                    tensor = tensor_parallel_tensors[0].contiguous()
-            else:
-                # No fsdp?
-                tensor = torch.cat(
-                    tensor_list,
-                    dim=json_data["param_mappings"][tt_name]["tp_shard_dim"],
-                ).contiguous()
+                print(f"[DIAG] broadcast completed for {tt_name}", flush=True)
+            tensor = full_recv.to(device=state_dict[name].device)
             if tensor.dtype != state_dict[name].dtype:
                 tensor = tensor.to(state_dict[name].dtype)
 
