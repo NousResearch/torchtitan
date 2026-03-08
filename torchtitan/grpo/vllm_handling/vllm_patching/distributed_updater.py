@@ -358,6 +358,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         group_name="gloo_group",
     )
     print("Created Gloo group", flush=True)
+    torch.cuda.synchronize()
+
     nccl_group = init_process_group(
         backend="nccl",
         init_method=f"tcp://{master_addr}",
@@ -367,6 +369,18 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
     )
     print("Created NCCL Process group", flush=True)
+
+    # Warmup: force NCCL Simple protocol channel initialization
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    warmup_size = 256 * 1024  # 1MB in float32
+    warmup_tensor = torch.zeros(warmup_size, device=device)
+    warmup_list = [torch.zeros_like(warmup_tensor) for _ in range(total_group_size)]
+    print("Starting NCCL warmup all_gather...", flush=True)
+    torch.distributed.all_gather(warmup_list, warmup_tensor, group=nccl_group)
+    torch.cuda.synchronize()
+    del warmup_tensor, warmup_list
+    print("NCCL warmup all_gather completed successfully", flush=True)
+
     print("Initialized process group", flush=True)
     my_device = list(state_dict.values())[0].device
     with torch.no_grad():

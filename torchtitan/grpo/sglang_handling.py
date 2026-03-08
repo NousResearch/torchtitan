@@ -72,6 +72,10 @@ def env_fix_for_distributed():
     ]
     for key in keys_to_remove:
         os.environ.pop(key)
+    # Preserve heartbeat timeout so NCCL watchdog can detect hangs
+    heartbeat = export_env.get("TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC")
+    if heartbeat:
+        os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = heartbeat
     return export_env
 
 
@@ -331,6 +335,9 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         rank=local_rank,
     )
     logger.info(f"SGlang GLOO process group created, local_rank: {local_rank}")
+
+    torch.cuda.synchronize()
+
     nccl_group = init_process_group(
         backend="nccl",
         init_method=f"tcp://{hostname}:{sglang_port}",
@@ -340,6 +347,20 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
     )
     logger.info(f"SGlang NCCL process group created, local_rank: {local_rank}")
+
+    # Warmup: force NCCL Simple protocol channel initialization.
+    # Without this, channels are lazily created on the first large transfer,
+    # which has been observed to hang in cross-group custom PG setups.
+    device = torch.device(f"cuda:{torch.cuda.current_device()}")
+    warmup_size = 256 * 1024  # 1MB in float32 -- large enough to trigger Simple protocol
+    warmup_tensor = torch.zeros(warmup_size, device=device)
+    warmup_list = [torch.zeros_like(warmup_tensor) for _ in range(total_group_size)]
+    logger.info("Starting NCCL warmup all_gather...")
+    torch.distributed.all_gather(warmup_list, warmup_tensor, group=nccl_group)
+    torch.cuda.synchronize()
+    del warmup_tensor, warmup_list
+    logger.info("NCCL warmup all_gather completed successfully")
+
     return nccl_group, gloo_group
 
 
