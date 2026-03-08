@@ -360,6 +360,9 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
     print("Created Gloo group", flush=True)
     torch.cuda.synchronize()
 
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+    os.environ["NCCL_P2P_DISABLE"] = "1"
+
     nccl_group = init_process_group(
         backend="nccl",
         init_method=f"tcp://{master_addr}",

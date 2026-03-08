@@ -66,6 +66,8 @@ def env_fix_for_distributed():
     os.environ.pop("CUDA_MODULE_LOADING", None)
     os.environ["NCCL_CUMEM_ENABLE"] = "0"
     os.environ["NCCL_NVLS_ENABLE"] = "0"
+    os.environ["NCCL_SHM_DISABLE"] = "1"
+    os.environ["NCCL_P2P_DISABLE"] = "1"
     keys_to_remove = [
         key for key in os.environ
         if "TORCH_ELASTIC" in key or "TORCHELASTIC" in key or "TORCH_NCCL" in key
