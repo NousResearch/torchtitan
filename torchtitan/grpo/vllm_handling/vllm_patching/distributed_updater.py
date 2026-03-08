@@ -413,7 +413,6 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             )
             if SGLANG_UPDATE_PROC_DEBUG == 1:
                 print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
-            tensor_list = [t.to(device=state_dict[name].device) for t in cpu_list]
             tensor_list = tensor_list[:num_training_gpus]  # remove dummy tensors
             # Now merge them together...
             # First, data parallel...
