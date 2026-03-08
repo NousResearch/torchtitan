@@ -520,7 +520,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             len(job_config.grpo.sglang_urls) * job_config.grpo.sglang_tp
         )
         local_rank = self.dp_shard_rank * self.tp_degree + self.tp_rank
-        self.sglang_gloo_group = None
+        self.sglang_nccl_group, self.sglang_gloo_group = None, None
         self.weight_dtypes = {}
         if self.dp_replicate_rank == 0:
             logger.debug("Grabbing sglang dtypes...")
@@ -535,7 +535,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             logger.debug(
                 f"total: {self.total_group_size}, rank: {self.dp_shard_rank * self.tp_degree + self.tp_rank}, pg_server: {hostname}"
             )
-            self.sglang_gloo_group = setup_group(
+            self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
                 hostname, job_config.grpo.sglang_port, self.total_group_size, local_rank
             )
         if job_config.grpo.ptx_mixin_batchsize > 0:
@@ -730,7 +730,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             get_time,
             dump_time,
         ) = self.data_handler.data_handling(
-            self.sglang_gloo_group,
+            self.sglang_nccl_group,
             self.cp_degree,
             self.dp_degree,
             self.dp_replicate_rank,
@@ -1375,6 +1375,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         self.dp_shard_degree,
                         self.total_group_size,
                         self.sglang_gloo_group,
+                        self.sglang_nccl_group,
                         self.param_name_to_send_list.index(name),
                     )
         # To account for fun with updating sglang...

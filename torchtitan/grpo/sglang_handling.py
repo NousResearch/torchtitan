@@ -99,6 +99,7 @@ def init_process_group(
     store: Optional = None,
     group_name: str = None,
     pg_options: Optional[Any] = None,
+    device_id: Optional[Any] = None,
 ):
     from torch.distributed.distributed_c10d import (
         _new_process_group_helper,
@@ -143,6 +144,9 @@ def init_process_group(
     # Use tuple comparison to avoid lexicographic issues (e.g. "2.10" < "2.6" as strings)
     _ver = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
     pg_options_param_name = "backend_options" if _ver >= (2, 6) else "pg_options"
+    extra_kwargs = {}
+    if device_id is not None:
+        extra_kwargs["device_id"] = device_id
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -152,6 +156,7 @@ def init_process_group(
         group_name=group_name,
         **{pg_options_param_name: pg_options},
         timeout=timeout,
+        **extra_kwargs,
     )
 
     _world.pg_group_ranks[pg] = {i: i for i in range(world_size)}
@@ -326,7 +331,16 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         rank=local_rank,
     )
     logger.info(f"SGlang GLOO process group created, local_rank: {local_rank}")
-    return gloo_group
+    nccl_group = init_process_group(
+        backend="nccl",
+        init_method=f"tcp://{hostname}:{sglang_port}",
+        world_size=total_group_size,
+        group_name="weight_update_group",
+        rank=local_rank,
+        device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
+    )
+    logger.info(f"SGlang NCCL process group created, local_rank: {local_rank}")
+    return nccl_group, gloo_group
 
 
 @env_fix_wrapper
@@ -339,6 +353,7 @@ def send_param(
     dp_shard_degree,
     total_group_size,
     sglang_gloo_group,
+    sglang_nccl_group,
     param_indx,
 ):
     desired_dtype = (
@@ -347,19 +362,23 @@ def send_param(
         else getattr(torch, weight_dtypes[name])
     )
     logger.debug(f"Attempting to send param {name}")
-    obj_indx = torch.LongTensor([param_indx])
-    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_gloo_group)
-    cpu_param = local_param.to(device="cpu", dtype=desired_dtype).contiguous()
-    cpu_list = [
-        torch.zeros(local_param.shape, dtype=desired_dtype, device="cpu")
+    obj_indx = torch.LongTensor([param_indx]).to(device=local_param.device)
+    torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_nccl_group)
+    tensor_list = [
+        torch.zeros(
+            local_param.shape,
+            dtype=desired_dtype,
+            device=local_param.device,
+        )
         for _ in range(total_group_size)
     ]
-    torch.distributed.all_gather(cpu_list, cpu_param, group=sglang_gloo_group)
-    tensor_list = [t.to(device=local_param.device) for t in cpu_list]
+    torch.distributed.all_gather(
+        tensor_list, local_param.to(desired_dtype), group=sglang_nccl_group
+    )
 
 
 @env_fix_wrapper
-def send_wait(sglang_gloo_group, device):
+def send_wait(sglang_nccl_group, device):
     logger.debug("Sending wait signal to sglang...")
-    indx_tensor = torch.LongTensor([-1])
-    torch.distributed.broadcast(indx_tensor, 0, group=sglang_gloo_group)
+    indx_tensor = torch.LongTensor([-1]).to(device=device)
+    torch.distributed.broadcast(indx_tensor, 0, group=sglang_nccl_group)

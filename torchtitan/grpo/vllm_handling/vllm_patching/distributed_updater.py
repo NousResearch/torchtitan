@@ -33,6 +33,7 @@ def init_process_group(
     store: Optional = None,
     group_name: str = None,
     pg_options: Optional[Any] = None,
+    device_id: Optional[Any] = None,
 ):
     from torch.distributed.distributed_c10d import (
         _new_process_group_helper,
@@ -77,6 +78,9 @@ def init_process_group(
     # Use tuple comparison to avoid lexicographic issues (e.g. "2.10" < "2.6" as strings)
     _ver = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
     pg_options_param_name = "backend_options" if _ver >= (2, 6) else "pg_options"
+    extra_kwargs = {}
+    if device_id is not None:
+        extra_kwargs["device_id"] = device_id
     pg, _ = _new_process_group_helper(
         world_size,
         rank,
@@ -86,6 +90,7 @@ def init_process_group(
         group_name=group_name,
         **{pg_options_param_name: pg_options},
         timeout=timeout,
+        **extra_kwargs,
     )
 
     _world.pg_group_ranks[pg] = {i: i for i in range(world_size)}
@@ -353,6 +358,15 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         group_name="gloo_group",
     )
     print("Created Gloo group", flush=True)
+    nccl_group = init_process_group(
+        backend="nccl",
+        init_method=f"tcp://{master_addr}",
+        world_size=total_group_size,
+        rank=rank,
+        group_name="weight_update_group",
+        device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
+    )
+    print("Created NCCL Process group", flush=True)
     print("Initialized process group", flush=True)
     my_device = list(state_dict.values())[0].device
     with torch.no_grad():
@@ -365,8 +379,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
             object_list = [
                 None,
             ]
-            obj_indx = torch.zeros(1, dtype=torch.long)
-            torch.distributed.broadcast(obj_indx, group_src=0, group=gloo_group)
+            obj_indx = torch.zeros(1, dtype=torch.long).to(device=my_device)
+            torch.distributed.broadcast(obj_indx, group_src=0, group=nccl_group)
             tt_indx = obj_indx.item()
             if tt_indx == -1:
                 continue
@@ -382,14 +396,21 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            cpu_list = [
-                torch.zeros(local_shape, dtype=target_dtype, device="cpu")
+            tensor_list = [
+                torch.zeros(
+                    local_shape,
+                    dtype=target_dtype,
+                    device=state_dict[name].device,
+                )
                 for _ in range(total_group_size)
             ]
-            cpu_dummy = torch.zeros(local_shape, dtype=target_dtype, device="cpu")
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Calling gloo all_gather for {tt_name}...", flush=True)
-            torch.distributed.all_gather(cpu_list, cpu_dummy, group=gloo_group)
+                print(f"[DIAG] Calling NCCL all_gather for {tt_name}...", flush=True)
+            torch.distributed.all_gather(
+                tensor_list,
+                torch.zeros(local_shape, dtype=target_dtype, device=state_dict[name].device),
+                group=nccl_group,
+            )
             if SGLANG_UPDATE_PROC_DEBUG == 1:
                 print(f"[DIAG] all_gather completed for {tt_name}", flush=True)
             tensor_list = [t.to(device=state_dict[name].device) for t in cpu_list]
