@@ -331,7 +331,20 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
         rank=local_rank,
     )
     logger.info(f"SGlang GLOO process group created, local_rank: {local_rank}")
-    return gloo_group
+
+    os.environ["NCCL_PROTO"] = "LL"
+    nccl_group = init_process_group(
+        backend="nccl",
+        init_method=f"tcp://{hostname}:{sglang_port + 1}",
+        world_size=total_group_size,
+        group_name="nccl_group",
+        rank=local_rank,
+        device_id=torch.device(f"cuda:{torch.cuda.current_device()}"),
+    )
+    os.environ.pop("NCCL_PROTO", None)
+    logger.info(f"SGlang NCCL (LL proto) process group created, local_rank: {local_rank}")
+
+    return gloo_group, nccl_group
 
 
 @env_fix_wrapper
@@ -340,6 +353,7 @@ def send_param(
     name,
     weight_dtypes,
     sglang_gloo_group,
+    sglang_nccl_group,
     param_indx,
 ):
     desired_dtype = (
@@ -351,9 +365,9 @@ def send_param(
     obj_indx = torch.LongTensor([param_indx])
     torch.distributed.broadcast(obj_indx, group_src=0, group=sglang_gloo_group)
     full_tensor = param.full_tensor()
-    cpu_param = full_tensor.to(desired_dtype).cpu()
+    gpu_param = full_tensor.to(desired_dtype)
     del full_tensor
-    torch.distributed.broadcast(cpu_param, group_src=0, group=sglang_gloo_group)
+    torch.distributed.broadcast(gpu_param, group_src=0, group=sglang_nccl_group)
 
 
 @env_fix_wrapper

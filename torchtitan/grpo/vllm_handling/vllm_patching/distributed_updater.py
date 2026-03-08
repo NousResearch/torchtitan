@@ -358,7 +358,21 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         group_name="gloo_group",
     )
     print("Created Gloo group", flush=True)
-    print("Initialized process group", flush=True)
+
+    os.environ["NCCL_PROTO"] = "LL"
+    os.environ["NCCL_CUMEM_ENABLE"] = "0"
+    os.environ["NCCL_NVLS_ENABLE"] = "0"
+    nccl_group = init_process_group(
+        backend="nccl",
+        init_method=f"tcp://{master_gloo_addr}",
+        world_size=total_group_size,
+        rank=rank,
+        group_name="nccl_group",
+        device_id=torch.device(f"cuda:{tp_rank}"),
+    )
+    os.environ.pop("NCCL_PROTO", None)
+    print("Created NCCL group (LL proto)", flush=True)
+    print("Initialized process groups", flush=True)
     my_device = list(state_dict.values())[0].device
     with torch.no_grad():
         qkv_buffer = {}
@@ -387,13 +401,13 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
                     f"assumed local shape: {local_shape}, target dtype: {target_dtype}",
                     flush=True,
                 )
-            full_recv = torch.zeros(shape, dtype=target_dtype)
+            full_recv = torch.zeros(shape, dtype=target_dtype, device=my_device)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
-                print(f"[DIAG] Calling gloo broadcast for {tt_name}...", flush=True)
-            torch.distributed.broadcast(full_recv, group_src=0, group=gloo_group)
+                print(f"[DIAG] Calling NCCL broadcast for {tt_name}...", flush=True)
+            torch.distributed.broadcast(full_recv, group_src=0, group=nccl_group)
             if SGLANG_UPDATE_PROC_DEBUG == 1:
                 print(f"[DIAG] broadcast completed for {tt_name}", flush=True)
-            tensor = full_recv.to(device=state_dict[name].device)
+            tensor = full_recv
             if tensor.dtype != state_dict[name].dtype:
                 tensor = tensor.to(state_dict[name].dtype)
 
