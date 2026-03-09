@@ -686,6 +686,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"PP data group (size={pp_data_group_size}, "
                 f"rank={pp_data_local_rank})"
             )
+            # assumes 8 GPUs per node, which should be the case for anything we're deploying this to
             hostname = "localhost" if pp_data_local_rank < 8 else get_hostname_url()
             # Signal group (heartbeat + start-update)
             self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
@@ -777,6 +778,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 model_args.n_layers,
                 iw,
                 ow,
+                vllm_mode=self.sglang_pp > 1,
             )
 
         # Determine this rank's virtual stage indices
@@ -869,6 +871,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         to avoid unnecessary shape re-inference P2P overhead (expensive at
         high PP degrees).
         """
+        # TODO: Ensure private variables are used the same when updating torch versions
         new_shape = input_ids.shape
         if (
             hasattr(self, "_pp_cached_input_shape")

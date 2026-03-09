@@ -94,6 +94,7 @@ class PatchedGPUModelRunner(GPUModelRunner):
         pp_rank = get_pp_group().rank_in_group
         pp_size = self.parallel_config.pipeline_parallel_size
         ep_rank = get_ep_group().rank_in_group
+        # TODO: update this whenever vllm changes how ep is handled instead of requiring ep == tp in this version of vllm
         ep_size = self.parallel_config.tensor_parallel_size
         gpu_id = torch.cuda.device(self.device).idx
         self.mdl_distributed_proc = ctx.Process(
@@ -105,7 +106,7 @@ class PatchedGPUModelRunner(GPUModelRunner):
                 tp_rank,
                 self.parallel_config.tensor_parallel_size,
                 ep_rank,
-                self.parallel_config.tensor_parallel_size,
+                ep_size,
                 gpu_id,
                 pp_rank,
                 pp_size,
