@@ -142,7 +142,7 @@ class Attention(nn.Module):
 
     """
 
-    def __init__(self, model_args: Qwen3ModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: Qwen3ModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
@@ -350,7 +350,7 @@ class TransformerBlock(nn.Module):
 
     """
 
-    def __init__(self, layer_id: int, model_args: Qwen3ModelArgs, peft_config: PEFT):
+    def __init__(self, layer_id: int, model_args: Qwen3ModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.dim = model_args.dim
@@ -447,7 +447,7 @@ class Qwen3Model(nn.Module, ModelProtocol):
 
     """
 
-    def __init__(self, model_args: Qwen3ModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: Qwen3ModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size

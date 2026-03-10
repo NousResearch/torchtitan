@@ -186,7 +186,7 @@ class Attention(nn.Module):
 
     """
 
-    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.n_heads = model_args.n_heads
         self.n_kv_heads = (
@@ -470,7 +470,7 @@ class Transformer(nn.Module, ModelProtocol):
 
     """
 
-    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size

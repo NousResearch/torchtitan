@@ -163,7 +163,7 @@ class Attention(nn.Module):
     - LoRA is only applied to the output projection (wo) to avoid redundancy.
     """
 
-    def __init__(self, model_args: DeepSeekV3ModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: DeepSeekV3ModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.dim = model_args.dim
         self.n_heads = model_args.n_heads
@@ -412,7 +412,7 @@ class DeepSeekV3Model(nn.Module, ModelProtocol):
     DeepSeek-V3 Transformer model with attention and feed-forward layers.
     """
 
-    def __init__(self, model_args: DeepSeekV3ModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: DeepSeekV3ModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.max_seq_len = model_args.max_seq_len
         self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)

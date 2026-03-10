@@ -475,7 +475,7 @@ class Transformer(nn.Module, ModelProtocol):
 
     """
 
-    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT):
+    def __init__(self, model_args: TransformerModelArgs, peft_config: PEFT = PEFT()):
         super().__init__()
         self.model_args = model_args
         self.vocab_size = model_args.vocab_size

@@ -16,6 +16,7 @@ from torch.nn.attention.flex_attention import BlockMask
 from torchtitan.components.tokenizer import BaseTokenizer
 
 from torchtitan.config import JobConfig
+from torchtitan.config.job_config import PEFT
 
 
 AttentionMasksType = dict[str, BlockMask] | BlockMask
@@ -49,7 +50,7 @@ class ModelProtocol(Protocol):
     required by the trainer.
     """
 
-    def __init__(self, model_args: BaseModelArgs) -> None:
+    def __init__(self, model_args: BaseModelArgs, peft_config: PEFT = PEFT()) -> None:
         pass
 
     @abstractmethod
