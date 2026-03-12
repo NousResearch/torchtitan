@@ -5,7 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 
-# STOP DELETING QWEN2 DURING UPSTREAM MERGE
+# KEEP QWEN2 DURING UPSTREAM MERGE
 # - Dakota
 _supported_models = frozenset(
     [
