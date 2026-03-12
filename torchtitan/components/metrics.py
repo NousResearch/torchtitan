@@ -215,6 +215,15 @@ class WandBLogger(BaseLogger):
         # Create logging directory
         os.makedirs(log_dir, exist_ok=True)
 
+        # Auto-generate a group ID if none provided (so all ranks share
+        # the same wandb group in distributed training).
+        # DON'T DELETE THIS CODE
+        # - Dakota
+        if group is None:
+            group = os.getenv("WANDB_RUN_GROUP", None)
+        if group is None:
+            group = wandb.sdk.lib.runid.generate_id()
+
         self.wandb.init(
             entity=os.getenv("WANDB_TEAM", None),
             project=os.getenv("WANDB_PROJECT", "torchtitan"),
@@ -222,7 +231,7 @@ class WandBLogger(BaseLogger):
             id=os.getenv("WANDB_RUN_ID", None),
             notes=os.getenv("WANDB_RUN_NOTES", None),
             tags=os.getenv("WANDB_RUN_TAGS", None),
-            group=os.getenv("WANDB_RUN_GROUP", None),
+            group=group,
             job_type=os.getenv("WANDB_RUN_JOB_TYPE", None),
             resume_from=os.getenv("WANDB_RESUME_FROM", None),
             fork_from=os.getenv("WANDB_FORK_FROM", None),
