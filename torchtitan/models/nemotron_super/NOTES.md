@@ -159,3 +159,67 @@ The original `nemotron_super_args` dict had several values that didn't match the
 | score_func        | sigmoid   | softmax  |                                  |
 
 These have been corrected in the current config to match the HF reference.
+
+
+## State dict adapter naming assumptions
+
+The adapter (`state_dict_adapter.py`) maps between HF's 88 flat layers and our
+40-block layout. Each block = (Mamba2, [Attention], MoE).
+
+### Assumed torchtitan module names
+
+These are the names the model implementation should use. If they change,
+update the adapter maps (`_mamba_map`, `_attn_map`, `_moe_map`, `_global_map`).
+
+```
+tok_embeddings.weight
+
+layers.{i}.mamba_norm.weight
+layers.{i}.mamba.in_proj.{weight,bias}
+layers.{i}.mamba.conv1d.{weight,bias}
+layers.{i}.mamba.dt_bias
+layers.{i}.mamba.A_log
+layers.{i}.mamba.D
+layers.{i}.mamba.norm.weight               # internal gated RMSNorm
+layers.{i}.mamba.out_proj.{weight,bias}
+
+layers.{i}.attn_norm.weight                # only if i in attn_layer_idxs
+layers.{i}.attention.wq.weight
+layers.{i}.attention.wk.weight
+layers.{i}.attention.wv.weight
+layers.{i}.attention.wo.weight
+
+layers.{i}.moe_norm.weight
+layers.{i}.moe.router.weight
+layers.{i}.moe.router.e_score_correction_bias
+layers.{i}.moe.experts.up_proj            # 3D param (num_experts, inter, in)
+layers.{i}.moe.experts.down_proj           # 3D param (num_experts, in, inter)
+layers.{i}.moe.shared_experts.up_proj.weight
+layers.{i}.moe.shared_experts.down_proj.weight
+layers.{i}.moe.latent_in.{weight,bias}    # fc1_latent_proj
+layers.{i}.moe.latent_out.{weight,bias}   # fc2_latent_proj
+
+norm.weight
+output.weight
+```
+
+### HF flat layer index mapping
+
+HF uses `model.layers.{flat_idx}` where flat_idx runs 0-87. For each of
+our 40 blocks, the flat indices are assigned sequentially:
+
+- Block without attention: flat M, flat E (2 flat layers)
+- Block with attention: flat M, flat *, flat E (3 flat layers)
+
+The block-level pre-norm (`model.layers.{f}.norm.weight`) maps to
+`{sublayer}_norm.weight` based on which sublayer type owns that flat index.
+
+### Open questions
+
+- Do we need the `e_score_correction_bias` buffer? It's initialized to zeros
+  and is a buffer (not parameter) in HF. May need special handling for DCP.
+- Expert weights are raw 3D nn.Parameters in HF, not nn.Linear. Our model
+  may wrap them differently depending on whether we use GroupedExperts or
+  a custom NemotronH expert module.
+- Mamba norm is `Zamba2RMSNormGated` (takes gate arg in forward). Our FLA-based
+  mamba may handle this differently -- norm.weight mapping might need adjustment.

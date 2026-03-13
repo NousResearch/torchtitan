@@ -18,7 +18,7 @@ from torchtitan.protocols.train_spec import TrainSpec
 from .infra.parallelize import parallelize_qwen3
 from .model.args import NemotronSuperModelArgs
 from .model.model import Qwen3Model
-from .model.state_dict_adapter import Qwen3StateDictAdapter
+from .model.state_dict_adapter import NemotronSuperStateDictAdapter
 
 __all__ = [
     "parallelize_qwen3",
@@ -106,5 +106,5 @@ def get_train_spec() -> TrainSpec:
         build_tokenizer_fn=build_hf_tokenizer,
         build_loss_fn=build_cross_entropy_loss,
         build_validator_fn=build_validator,
-        state_dict_adapter=Qwen3StateDictAdapter,
+        state_dict_adapter=NemotronSuperStateDictAdapter,
     )

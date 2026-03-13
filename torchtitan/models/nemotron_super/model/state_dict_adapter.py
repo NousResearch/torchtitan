@@ -5,185 +5,222 @@
 # LICENSE file in the root directory of this source tree.
 
 """
-This script is adapted from torchtitan/models/llama3/model/state_dict_adapter.py.
+State dict adapter for Nemotron Super (NemotronH).
 
-We can use this script to adapt the checkpoint from HF to the format that we can load into the torchtitan model and vice versa.
-This can enable us to do a parity test with the HF implementation and make sure that our results are
-aligned with the HF implementation.
+Maps between HF's flat layer indexing (88 layers, each one type) and our
+block-based layout (40 layers, each = mamba + [attn] + moe).
 
+See NOTES.md "State dict adapter naming assumptions" for the assumed
+torchtitan module naming conventions.
 """
+
 import re
 from typing import Any
 
-from torch.distributed.tensor import DTensor
-from torchtitan.models.utils import MoEStateDictAdapter
+from torchtitan.protocols.state_dict_adapter import StateDictAdapter
 
-from .args import Qwen3ModelArgs
+from .args import NemotronSuperModelArgs
 
 
-class Qwen3StateDictAdapter(MoEStateDictAdapter):
-    def __init__(self, model_args: Qwen3ModelArgs, hf_assets_path: str | None):
+class NemotronSuperStateDictAdapter(StateDictAdapter):
+    def __init__(
+        self,
+        model_args: NemotronSuperModelArgs,
+        hf_assets_path: str | None,
+    ):
         super().__init__(model_args, hf_assets_path)
-        self.from_hf_map = {
-            "model.embed_tokens.weight": "tok_embeddings.weight",
-            # Attention module
-            "model.layers.{}.self_attn.q_proj.weight": "layers.{}.attention.wq.weight",
-            "model.layers.{}.self_attn.k_proj.weight": "layers.{}.attention.wk.weight",
-            "model.layers.{}.self_attn.v_proj.weight": "layers.{}.attention.wv.weight",
-            "model.layers.{}.self_attn.o_proj.weight": "layers.{}.attention.wo.weight",
-            "model.layers.{}.self_attn.q_norm.weight": "layers.{}.attention.q_norm.weight",
-            "model.layers.{}.self_attn.k_norm.weight": "layers.{}.attention.k_norm.weight",
-            "model.layers.{}.self_attn.rotary_emb.inv_freq": None,
-            # MLP module for non-MoE
-            "model.layers.{}.mlp.gate_proj.weight": "layers.{}.feed_forward.w1.weight",
-            "model.layers.{}.mlp.up_proj.weight": "layers.{}.feed_forward.w3.weight",
-            "model.layers.{}.mlp.down_proj.weight": "layers.{}.feed_forward.w2.weight",
-            # Transformer layer
-            "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
-            "model.layers.{}.post_attention_layernorm.weight": "layers.{}.ffn_norm.weight",
-            # MoE
-            "model.layers.{}.mlp.experts.{}.gate_proj.weight": "layers.{}.moe.experts.w1",
-            "model.layers.{}.mlp.experts.{}.up_proj.weight": "layers.{}.moe.experts.w3",
-            "model.layers.{}.mlp.experts.{}.down_proj.weight": "layers.{}.moe.experts.w2",
-            "model.layers.{}.mlp.gate.weight": "layers.{}.moe.router.gate.weight",
-            "model.norm.weight": "norm.weight",
+        self.model_args = model_args
+
+        attn_set = set(model_args.attn_layer_idxs)
+
+        # Build flat HF index -> (block_idx, sublayer_type) mapping
+        # HF pattern: for each block, flat layers are M, [*], E
+        self.flat_to_block: dict[int, tuple[int, str]] = {}
+        self.block_to_flat: dict[int, dict[str, int]] = {}
+        flat_idx = 0
+        for block_idx in range(model_args.n_layers):
+            self.block_to_flat[block_idx] = {}
+
+            self.flat_to_block[flat_idx] = (block_idx, "mamba")
+            self.block_to_flat[block_idx]["mamba"] = flat_idx
+            flat_idx += 1
+
+            if block_idx in attn_set:
+                self.flat_to_block[flat_idx] = (block_idx, "attn")
+                self.block_to_flat[block_idx]["attn"] = flat_idx
+                flat_idx += 1
+
+            self.flat_to_block[flat_idx] = (block_idx, "moe")
+            self.block_to_flat[block_idx]["moe"] = flat_idx
+            flat_idx += 1
+
+        # HF key -> torchtitan key mappings, keyed by sublayer type.
+        # {flat_layer} is the HF flat index, {block} is our block index.
+        # None value means skip (don't load).
+
+        self._mamba_map = {
+            "model.layers.{flat}.norm.weight": "layers.{block}.mamba_norm.weight",
+            "model.layers.{flat}.mixer.in_proj.weight": "layers.{block}.mamba.in_proj.weight",
+            "model.layers.{flat}.mixer.in_proj.bias": "layers.{block}.mamba.in_proj.bias",
+            "model.layers.{flat}.mixer.conv1d.weight": "layers.{block}.mamba.conv1d.weight",
+            "model.layers.{flat}.mixer.conv1d.bias": "layers.{block}.mamba.conv1d.bias",
+            "model.layers.{flat}.mixer.dt_bias": "layers.{block}.mamba.dt_bias",
+            "model.layers.{flat}.mixer.A_log": "layers.{block}.mamba.A_log",
+            "model.layers.{flat}.mixer.D": "layers.{block}.mamba.D",
+            "model.layers.{flat}.mixer.norm.weight": "layers.{block}.mamba.norm.weight",
+            "model.layers.{flat}.mixer.out_proj.weight": "layers.{block}.mamba.out_proj.weight",
+            "model.layers.{flat}.mixer.out_proj.bias": "layers.{block}.mamba.out_proj.bias",
+        }
+
+        self._attn_map = {
+            "model.layers.{flat}.norm.weight": "layers.{block}.attn_norm.weight",
+            "model.layers.{flat}.mixer.q_proj.weight": "layers.{block}.attention.wq.weight",
+            "model.layers.{flat}.mixer.k_proj.weight": "layers.{block}.attention.wk.weight",
+            "model.layers.{flat}.mixer.v_proj.weight": "layers.{block}.attention.wv.weight",
+            "model.layers.{flat}.mixer.o_proj.weight": "layers.{block}.attention.wo.weight",
+        }
+
+        self._moe_map = {
+            "model.layers.{flat}.norm.weight": "layers.{block}.moe_norm.weight",
+            "model.layers.{flat}.mixer.gate.weight": "layers.{block}.moe.router.weight",
+            "model.layers.{flat}.mixer.gate.e_score_correction_bias": "layers.{block}.moe.router.e_score_correction_bias",
+            "model.layers.{flat}.mixer.experts.up_proj": "layers.{block}.moe.experts.up_proj",
+            "model.layers.{flat}.mixer.experts.down_proj": "layers.{block}.moe.experts.down_proj",
+            "model.layers.{flat}.mixer.shared_experts.up_proj.weight": "layers.{block}.moe.shared_experts.up_proj.weight",
+            "model.layers.{flat}.mixer.shared_experts.up_proj.bias": "layers.{block}.moe.shared_experts.up_proj.bias",
+            "model.layers.{flat}.mixer.shared_experts.down_proj.weight": "layers.{block}.moe.shared_experts.down_proj.weight",
+            "model.layers.{flat}.mixer.shared_experts.down_proj.bias": "layers.{block}.moe.shared_experts.down_proj.bias",
+            "model.layers.{flat}.mixer.fc1_latent_proj.weight": "layers.{block}.moe.latent_in.weight",
+            "model.layers.{flat}.mixer.fc1_latent_proj.bias": "layers.{block}.moe.latent_in.bias",
+            "model.layers.{flat}.mixer.fc2_latent_proj.weight": "layers.{block}.moe.latent_out.weight",
+            "model.layers.{flat}.mixer.fc2_latent_proj.bias": "layers.{block}.moe.latent_out.bias",
+        }
+
+        self._global_map = {
+            "model.embeddings.weight": "tok_embeddings.weight",
+            "model.norm_f.weight": "norm.weight",
             "lm_head.weight": "output.weight",
         }
 
+        # Build the full from_hf lookup: hf_key_template -> (sublayer_type, titan_key_template)
+        # We need this for the generic key matching in from_hf/to_hf.
+        self._hf_to_titan: dict[str, str] = {}
+        self._titan_to_hf: dict[str, str] = {}
+        for sublayer, mapping in [("mamba", self._mamba_map), ("attn", self._attn_map), ("moe", self._moe_map)]:
+            for hf_tmpl, titan_tmpl in mapping.items():
+                if titan_tmpl is not None:
+                    # Store with sublayer prefix for disambiguation
+                    self._hf_to_titan[hf_tmpl] = titan_tmpl
+                    self._titan_to_hf[titan_tmpl] = hf_tmpl
+
+    def _hf_key_to_flat_idx(self, key: str) -> int | None:
+        """Extract flat layer index from an HF key like 'model.layers.42.mixer.X'."""
+        m = re.match(r"model\.layers\.(\d+)\.", key)
+        return int(m.group(1)) if m else None
+
+    def _titan_key_to_block_idx(self, key: str) -> int | None:
+        """Extract block index from a titan key like 'layers.7.mamba.X'."""
+        m = re.match(r"layers\.(\d+)\.", key)
+        return int(m.group(1)) if m else None
+
+    def _sublayer_from_titan_key(self, key: str) -> str | None:
+        """Determine sublayer type from a titan key."""
+        m = re.match(r"layers\.\d+\.(\w+)", key)
+        if not m:
+            return None
+        prefix = m.group(1)
+        if prefix in ("mamba", "mamba_norm"):
+            return "mamba"
+        elif prefix in ("attention", "attn_norm"):
+            return "attn"
+        elif prefix in ("moe", "moe_norm"):
+            return "moe"
+        return None
+
+    def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
+        state_dict = {}
+
+        for hf_key, value in hf_state_dict.items():
+            # Global keys (embeddings, final norm, lm_head)
+            if hf_key in self._global_map:
+                state_dict[self._global_map[hf_key]] = value
+                continue
+
+            # Layer keys - extract flat index
+            flat_idx = self._hf_key_to_flat_idx(hf_key)
+            if flat_idx is None:
+                continue
+
+            if flat_idx not in self.flat_to_block:
+                continue
+
+            block_idx, sublayer = self.flat_to_block[flat_idx]
+
+            # Build the template key by replacing the flat index
+            hf_tmpl = re.sub(r"(model\.layers\.)\d+\.", r"\g<1>{flat}.", hf_key)
+
+            # Look up in the appropriate sublayer map
+            sublayer_map = {"mamba": self._mamba_map, "attn": self._attn_map, "moe": self._moe_map}
+            mapping = sublayer_map.get(sublayer, {})
+            titan_tmpl = mapping.get(hf_tmpl)
+
+            if titan_tmpl is None:
+                # Key not in our mapping - skip
+                continue
+
+            titan_key = titan_tmpl.replace("{block}", str(block_idx))
+            state_dict[titan_key] = value
+
+        return state_dict
+
     def to_hf(self, state_dict: dict[str, Any]) -> dict[str, Any]:
-        """
-        1. Convert between the HF shape and the torchtitan shape.
-        2. Split the GroupedExperts' weight into separate expert's wegiht.
-        """
-        to_hf_map = {v: k for k, v in self.from_hf_map.items()}
+        # Build reverse global map
+        reverse_global = {v: k for k, v in self._global_map.items()}
+
         hf_state_dict = {}
 
-        for key, value in state_dict.items():
-            if "moe.experts" in key:
-                abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
-                if abstract_key not in to_hf_map:
-                    continue
-                # pyrefly: ignore [missing-attribute]
-                layer_num = re.search(r"\d+", key).group(0)
-                new_abstract_key = to_hf_map[abstract_key]
+        for titan_key, value in state_dict.items():
+            # Global keys
+            if titan_key in reverse_global:
+                hf_state_dict[reverse_global[titan_key]] = value
+                continue
 
-                # Store the GroupedExperts Weight metadata for from_hf()
-                if isinstance(value, DTensor):
-                    self.grouped_expert_weight_placements[
-                        abstract_key
-                    ] = value.placements
-                    self.grouped_expert_weight_shape[abstract_key] = value.shape
-                    self.grouped_expert_weight_mesh[abstract_key] = value.device_mesh
+            # Layer keys - extract block index and sublayer type
+            block_idx = self._titan_key_to_block_idx(titan_key)
+            if block_idx is None:
+                continue
 
-                    # Split GroupedExperts weight to local individual expert weights
-                    local_expert_fqn = self._get_local_experts_weights(
-                        new_abstract_key,
-                        abstract_key,
-                        layer_num,
-                        value,
-                    )
-                    hf_state_dict.update(local_expert_fqn)
+            sublayer = self._sublayer_from_titan_key(titan_key)
+            if sublayer is None:
+                continue
 
-                else:
-                    # keep this path for offline conversion
-                    split_values = self._split_experts_weights(
-                        value,
-                        # pyrefly: ignore [missing-attribute]
-                        self.model_args.moe_args.num_experts,
-                    )
+            # Get the flat HF index for this block + sublayer
+            flat_indices = self.block_to_flat.get(block_idx, {})
+            flat_idx = flat_indices.get(sublayer)
+            if flat_idx is None:
+                continue
 
-                    # pyrefly: ignore [missing-attribute]
-                    for expert_num in range(self.model_args.moe_args.num_experts):
-                        new_key = new_abstract_key.format(layer_num, expert_num)
-                        hf_state_dict[new_key] = split_values[expert_num].squeeze()
+            # Build template and look up reverse mapping
+            titan_tmpl = re.sub(r"(layers\.)\d+\.", r"\g<1>{block}.", titan_key)
 
-            elif "layers" in key:
-                abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
-                if abstract_key not in to_hf_map:
-                    continue
-                # pyrefly: ignore [missing-attribute]
-                layer_num = re.search(r"\d+", key).group(0)
-                new_key = to_hf_map[abstract_key]
-                new_key = new_key.format(layer_num)
-                hf_state_dict[new_key] = value
+            sublayer_map = {"mamba": self._mamba_map, "attn": self._attn_map, "moe": self._moe_map}
+            mapping = sublayer_map.get(sublayer, {})
 
-            else:
-                if key not in to_hf_map:
-                    continue
-                # pyrefly: ignore [missing-attribute]
-                if self.model_args.enable_weight_tying and key == "output.weight":
-                    continue
-                new_key = to_hf_map[key]
-                hf_state_dict[new_key] = value
+            # Reverse lookup
+            hf_tmpl = None
+            for h, t in mapping.items():
+                if t == titan_tmpl:
+                    hf_tmpl = h
+                    break
+
+            if hf_tmpl is None:
+                continue
+
+            hf_key = hf_tmpl.replace("{flat}", str(flat_idx))
+            hf_state_dict[hf_key] = value
 
         return hf_state_dict
 
-    def from_hf(self, hf_state_dict: dict[str, Any]) -> dict[str, Any]:
-        """
-        1. Convert between the HF shape and the torchtitan shape.
-        2. Concate separate expert's wegiht into GroupedExperts' weight.
-        """
 
-        state_dict = {}
-        expert_weights_by_layer = {}  # {layer: {abstract_key: {expert_id: tensor}}}
-
-        if (
-            # pyrefly: ignore [missing-attribute]
-            self.model_args.enable_weight_tying
-            and "lm_head.weight" not in hf_state_dict
-        ):
-            assert "model.embed_tokens.weight" in hf_state_dict
-            hf_state_dict["lm_head.weight"] = hf_state_dict["model.embed_tokens.weight"]
-
-        for key, value in hf_state_dict.items():
-            if "mlp.experts" in key:
-                abstract_key = re.sub(r"(\d+)", "{}", key, count=2)
-                layer_num, expert_num = re.findall(r"\d+", key)
-                titan_abstract_key = self.from_hf_map[abstract_key]
-                assert titan_abstract_key is not None
-                new_key = titan_abstract_key.format(layer_num)
-
-                # Store the expert's weight in expert_weights_by_layer for concatenating later.
-                if layer_num not in expert_weights_by_layer:
-                    expert_weights_by_layer[layer_num] = {}
-                if titan_abstract_key not in expert_weights_by_layer[layer_num]:
-                    expert_weights_by_layer[layer_num][titan_abstract_key] = {}
-                expert_weights_by_layer[layer_num][titan_abstract_key][
-                    int(expert_num)
-                ] = value
-
-                # Use stored metadata to decide path (online vs offline)
-                # Online mode: local_experts_indices was populated during to_hf()
-                if titan_abstract_key in self.local_experts_indices:
-                    stacked_value = self._concatenate_expert_weights_dtensor(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                    )
-                else:  # keep this path to be compatible with offline conversion
-                    stacked_value = self._concatenate_expert_weights(
-                        expert_weights_by_layer,
-                        titan_abstract_key,
-                        layer_num,
-                        # pyrefly: ignore [missing-attribute]
-                        self.model_args.moe_args.num_experts,
-                    )
-
-                if stacked_value is not None:
-                    state_dict[new_key] = stacked_value
-
-            elif "layers" in key:
-                abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
-                # pyrefly: ignore [missing-attribute]
-                layer_num = re.search(r"\d+", key).group(0)
-                new_key = self.from_hf_map[abstract_key]
-                # pyrefly: ignore [missing-attribute]
-                new_key = new_key.format(layer_num)
-                state_dict[new_key] = value
-
-            else:
-                new_key = self.from_hf_map[key]
-                # pyrefly: ignore [unsupported-operation]
-                state_dict[new_key] = value
-
-        return state_dict
+# Alias for backward compat with existing __init__.py imports
+Qwen3StateDictAdapter = NemotronSuperStateDictAdapter
