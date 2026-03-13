@@ -30,7 +30,6 @@ def moe_init_std(dim_in: int, n_layers: int) -> float:
     return (2 / (dim_in * n_layers)) ** 0.5
 
 
-
 @dataclass
 class LLEPConfig:
     """Least-Loaded Expert Parallelism (LLEP) configuration.
@@ -66,6 +65,18 @@ class MoEArgs:
     num_experts: int = 8
     num_shared_experts: int = 1
     shared_gate: bool = False
+
+    # expert MLP architecture
+    gated_experts: bool = True  # True=SwiGLU (gate+up+down), False=plain MLP (up+down)
+    expert_act: str = "silu"  # activation fn for experts (e.g. "silu", "relu2")
+    expert_intermediate_size: int | None = (
+        None  # per-expert intermediate dim (None = use model hidden_dim)
+    )
+    shared_expert_intermediate_size: int | None = None  # shared expert intermediate dim
+    latent_size: int | None = (
+        None  # latent bottleneck dim before/after experts (None = no projection)
+    )
+    expert_bias: bool = False  # bias in expert MLP linear layers
 
     # router
     score_func: Literal["softmax", "sigmoid"] = "sigmoid"
