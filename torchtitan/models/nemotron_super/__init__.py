@@ -17,13 +17,13 @@ from torchtitan.protocols.train_spec import TrainSpec
 
 from .infra.parallelize import parallelize_qwen3
 from .model.args import NemotronSuperModelArgs
-from .model.model import Qwen3Model
+from .model.model import NemotronSuperModel
 from .model.state_dict_adapter import NemotronSuperStateDictAdapter
 
 __all__ = [
     "parallelize_qwen3",
     "NemotronSuperModelArgs",
-    "Qwen3Model",
+    "NemotronSuperModel",
     "nemotron_super_args",
 ]
 
@@ -96,7 +96,7 @@ nemotron_super_args = {
 
 def get_train_spec() -> TrainSpec:
     return TrainSpec(
-        model_cls=Qwen3Model,
+        model_cls=NemotronSuperModel,
         model_args=nemotron_super_args,
         parallelize_fn=parallelize_qwen3,
         pipelining_fn=None,

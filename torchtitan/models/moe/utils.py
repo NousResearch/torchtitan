@@ -81,9 +81,10 @@ def indices_padding_wrapper(func: Callable) -> Callable:
     def wrapper(
         w1: torch.Tensor,
         w2: torch.Tensor,
-        w3: torch.Tensor,
+        w3: torch.Tensor | None,
         x: torch.Tensor,
         num_tokens_per_expert: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
         num_local_experts = w1.shape[0]
         ep_degree = num_tokens_per_expert.shape[0] // num_local_experts
@@ -92,7 +93,7 @@ def indices_padding_wrapper(func: Callable) -> Callable:
             x, num_tokens_per_expert, ep_degree, num_local_experts
         )
 
-        out = func(w1, w2, w3, x, num_tokens_per_expert)
+        out = func(w1, w2, w3, x, num_tokens_per_expert, **kwargs)
 
         out = _unpermute(out, input_shape, permuted_indices)
 

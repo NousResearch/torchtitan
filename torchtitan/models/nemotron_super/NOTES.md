@@ -164,7 +164,7 @@ These have been corrected in the current config to match the HF reference.
 ## State dict adapter naming assumptions
 
 The adapter (`state_dict_adapter.py`) maps between HF's 88 flat layers and our
-40-block layout. Each block = (Mamba2, [Attention], MoE).
+40-layer layout. Each layer = (Mamba2, [Attention], MoE).
 
 ### Assumed torchtitan module names
 
@@ -189,7 +189,7 @@ layers.{i}.attention.wk.weight
 layers.{i}.attention.wv.weight
 layers.{i}.attention.wo.weight
 
-layers.{i}.moe_norm.weight
+layers.{i}.ffn_norm.weight
 layers.{i}.moe.router.weight
 layers.{i}.moe.router.e_score_correction_bias
 layers.{i}.moe.experts.up_proj            # 3D param (num_experts, inter, in)
@@ -206,13 +206,14 @@ output.weight
 ### HF flat layer index mapping
 
 HF uses `model.layers.{flat_idx}` where flat_idx runs 0-87. For each of
-our 40 blocks, the flat indices are assigned sequentially:
+our 40 layers, the flat indices are assigned sequentially:
 
-- Block without attention: flat M, flat E (2 flat layers)
-- Block with attention: flat M, flat *, flat E (3 flat layers)
+- Layer without attention: flat M, flat E (2 flat HF layers)
+- Layer with attention: flat M, flat *, flat E (3 flat HF layers)
 
-The block-level pre-norm (`model.layers.{f}.norm.weight`) maps to
-`{sublayer}_norm.weight` based on which sublayer type owns that flat index.
+The per-sublayer pre-norm (`model.layers.{f}.norm.weight`) maps to
+`mamba_norm`, `attn_norm`, or `ffn_norm` based on which sublayer type
+owns that flat index.
 
 ### Open questions
 
@@ -223,3 +224,98 @@ The block-level pre-norm (`model.layers.{f}.norm.weight`) maps to
   a custom NemotronH expert module.
 - Mamba norm is `Zamba2RMSNormGated` (takes gate arg in forward). Our FLA-based
   mamba may handle this differently -- norm.weight mapping might need adjustment.
+
+
+## Forward pass comparison: model.py vs hf_ref.py
+
+Line-by-line comparison of our implementation against HF reference.
+Done to debug loss > ln(vocab) with correctly loaded weights.
+
+### Mamba2: FLA vs HF -- EQUIVALENT
+
+Both use the same fused kernel path during training:
+- `mamba_split_conv1d_scan_combined` with identical args
+- `norm_before_gate=False`, same ngroups, chunk_size, activation
+- FLA: `return_final_states=False` (no cache), HF: `True` (caches state)
+  Only affects inference caching, NOT training output.
+- FLA computes `intermediate = expand * hidden_size = 2 * 4096 = 8192`
+  HF computes `intermediate = mamba_num_heads * mamba_head_dim = 128 * 64 = 8192`
+  Same result.
+- `projection_size = 8192 + 10240 + 128 = 18560` in both.
+- Internal gated RMSNorm: FLA uses `RMSNormGated`, HF uses `Zamba2RMSNormGated`.
+  In fused kernel path, ngroups is passed to kernel directly -- both equivalent.
+- `dt_limit`: FLA defaults to `(0.0, inf)` -> empty kwargs. HF defaults to None -> empty.
+  Both pass `{}`. Match.
+
+VERDICT: No issue. Kernel-level equivalent during training.
+
+### Attention -- EQUIVALENT
+
+- Both: q/k/v/o linear projections, no bias, no QK-norm
+- RoPE: both use `rotate_half` formula: `q*cos + rotate_half(q)*sin`
+  Same cos/sin layout (concatenated, not interleaved).
+- Scaling: both `head_dim**-0.5`
+- GQA via SDPA -- standard
+
+VERDICT: No issue.
+
+### MoE -- CONFIG VERIFIED CORRECT
+
+Checked at runtime:
+- `gated_experts=False`, `w3=None` -- non-gated, matches HF
+- `expert_act="relu2"` -> `lambda x: F.relu(x).square()` -- matches HF `ACT2FN["relu2"]`
+- `shared_gate=None` -- no shared gate, matches HF (HF has no shared gate)
+- `shared_experts.gated=False`, `shared_experts.w3=None` -- non-gated, matches HF `NemotronHMLP`
+- `score_before_experts=False` -- weights applied after expert computation, matches HF
+- Router: `sigmoid` scoring, `route_norm=True`, `route_scale=5.0` -- matches HF
+- Latent projection: `latent_in(4096->1024)` before experts, `latent_out(1024->4096)` after
+  HF applies latent to ALL tokens then experts select; we apply to ROUTED tokens only.
+  Mathematically equivalent for the output (linear ops commute with selection+weighting).
+
+Expert matmul direction:
+- HF: `F.linear(x, up_proj[i])` = `x @ up_proj.T`
+- Ours: `torch._grouped_mm(x, w1.T)` = `x @ w1.T`
+- Both transpose before matmul. `up_proj` shape = `w1` shape = `(hidden, dim)`. Match.
+
+VERDICT: Config correct. Computation matches.
+
+### Norm placement -- EQUIVALENT
+
+HF flat: each flat layer gets `norm(x) -> mixer -> + residual`
+Ours: each sub-block gets its own pre-norm + residual:
+  `x = x + mamba(mamba_norm(x))`
+  `x = x + attn(attn_norm(x))`      # if has_attn
+  `x = x + moe(ffn_norm(x))`
+
+This correctly replicates the 2-3 flat HF layers per combined block.
+Each norm weight loads from the corresponding flat layer's `norm.weight`.
+
+VERDICT: No issue.
+
+### Layer ordering -- EQUIVALENT
+
+HF flat: M, [*], E repeating pattern
+Ours: each block = mamba -> optional_attn -> moe
+Same order, same residual structure.
+
+VERDICT: No issue.
+
+### Remaining suspects for loss > ln(vocab)
+
+If all the above checks out (and it does), possible remaining causes:
+
+1. CHECKPOINT CONVERSION BUG: weights ended up in wrong tensors during
+   the preconversion to torchtitan DCP format. The adapter is verified
+   correct, but the conversion script/process might have a bug.
+
+2. FLA MAMBA2 TORCH FALLBACK: if CUDA kernels aren't available, FLA falls
+   back to a pure PyTorch implementation (`torch_forward`). This fallback
+   might have numerical differences or bugs. Check if FLA is using the
+   CUDA path or the torch fallback during training.
+
+3. DTYPE MISMATCH: FLA's Mamba2 might cast internally to different dtypes
+   than expected. The `_run_experts_grouped_mm` casts to bf16 explicitly.
+
+4. FSDP INTERACTION: FSDP sharding might interact badly with the 3D
+   expert tensors or the Mamba2 module's internal buffers (conv_state,
+   ssm_state are not parameters but might need special handling).

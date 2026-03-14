@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from dataclasses import dataclass, field
+from collections.abc import Callable
 from typing import Any, Literal, Optional
 
 import torch
@@ -67,16 +68,12 @@ class MoEArgs:
     shared_gate: bool = False
 
     # expert MLP architecture
-    gated_experts: bool = True  # True=SwiGLU (gate+up+down), False=plain MLP (up+down)
-    expert_act: str = "silu"  # activation fn for experts (e.g. "silu", "relu2")
-    expert_intermediate_size: int | None = (
-        None  # per-expert intermediate dim (None = use model hidden_dim)
-    )
+    gated_experts: bool = True       # True=SwiGLU (gate+up+down), False=plain MLP (up+down)
+    expert_act: str = "silu"         # activation fn for experts (e.g. "silu", "relu2")
+    expert_intermediate_size: int | None = None   # per-expert intermediate dim (None = use model hidden_dim)
     shared_expert_intermediate_size: int | None = None  # shared expert intermediate dim
-    latent_size: int | None = (
-        None  # latent bottleneck dim before/after experts (None = no projection)
-    )
-    expert_bias: bool = False  # bias in expert MLP linear layers
+    latent_size: int | None = None   # latent bottleneck before/after experts (None = no projection)
+    expert_bias: bool = False        # bias in expert MLP linear layers
 
     # router
     score_func: Literal["softmax", "sigmoid"] = "sigmoid"
@@ -175,14 +172,18 @@ class MoEArgs:
 # can be used as dense FFN layer or shared experts in MoE layers
 class FeedForward(nn.Module):
     """
+    FFN / shared expert module.
+
+    Supports gated (SwiGLU: silu(w1(x)) * w3(x) -> w2) and non-gated
+    (act(w1(x)) -> w2) modes.
+
     Args:
         dim (int): Input dimension.
         hidden_dim (int): Hidden dimension of the feedforward layer.
-
-    Attributes:
-        w1 (Linear): Linear transformation for the first layer.
-        w2 (Linear): Linear transformation for the second layer.
-        w3 (Linear): Linear transformation for the third layer.
+        peft_config: PEFT configuration.
+        gated (bool): If True, use gated activation (w1 * w3). Default True.
+        act_fn (str): Activation function name. Default "silu".
+        bias (bool): Use bias in linear layers. Default False.
     """
 
     def __init__(
@@ -190,34 +191,47 @@ class FeedForward(nn.Module):
         dim: int,
         hidden_dim: int,
         peft_config: Optional[PEFT] = None,
+        gated: bool = True,
+        act_fn: str = "silu",
+        bias: bool = False,
     ):
         super().__init__()
+        self.gated = gated
+        self.act_fn = _get_act_fn(act_fn)
         self.w1 = lora_or_linear(
             dim,
             hidden_dim,
-            bias=False,
+            bias=bias,
             peft_config=peft_config,
         )
         self.w2 = lora_or_linear(
             hidden_dim,
             dim,
-            bias=False,
+            bias=bias,
             peft_config=peft_config,
         )
-        self.w3 = lora_or_linear(
-            dim,
-            hidden_dim,
-            bias=False,
-            peft_config=peft_config,
+        self.w3 = (
+            lora_or_linear(
+                dim,
+                hidden_dim,
+                bias=bias,
+                peft_config=peft_config,
+            )
+            if gated
+            else None
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+        h = self.act_fn(self.w1(x))
+        if self.w3 is not None:
+            h = h * self.w3(x)
+        return self.w2(h)
 
     def init_weights(self, init_std: float = 0.02):
         trunc_normal_(self.w1.weight, mean=0.0, std=0.02)
-        for linear in (self.w2, self.w3):
-            trunc_normal_(linear.weight, mean=0.0, std=init_std)
+        trunc_normal_(self.w2.weight, mean=0.0, std=init_std)
+        if self.w3 is not None:
+            trunc_normal_(self.w3.weight, mean=0.0, std=init_std)
 
 
 # NOTE: keeping this for-loop implementation for comparison
@@ -225,9 +239,10 @@ class FeedForward(nn.Module):
 def _run_experts_for_loop(
     w1: torch.Tensor,
     w2: torch.Tensor,
-    w3: torch.Tensor,
+    w3: torch.Tensor | None,
     x: torch.Tensor,
     num_tokens_per_expert: torch.Tensor,
+    act_fn: Callable = F.silu,
 ) -> torch.Tensor:
     # NOTE: this would incur a synchronization between device and host
     num_tokens_per_expert_list = num_tokens_per_expert.tolist()
@@ -244,8 +259,9 @@ def _run_experts_for_loop(
     )
     out_experts_splits = []
     for expert_idx, x_expert in enumerate(x_splits):
-        h = F.silu(torch.matmul(x_expert, w1[expert_idx].transpose(-2, -1)))
-        h = h * torch.matmul(x_expert, w3[expert_idx].transpose(-2, -1))
+        h = act_fn(torch.matmul(x_expert, w1[expert_idx].transpose(-2, -1)))
+        if w3 is not None:
+            h = h * torch.matmul(x_expert, w3[expert_idx].transpose(-2, -1))
         h = torch.matmul(h, w2[expert_idx].transpose(-2, -1))
         # h shape (tokens_per_expert(varying), dim)
         out_experts_splits.append(h)
@@ -322,36 +338,36 @@ def _run_experts_for_loop_lora(
 def _run_experts_grouped_mm(
     w1: torch.Tensor,
     w2: torch.Tensor,
-    w3: torch.Tensor,
+    w3: torch.Tensor | None,
     x: torch.Tensor,
     num_tokens_per_expert: torch.Tensor,
     routed_prob: torch.Tensor | None = None,
     use_fused_silu_gate_prob: bool = False,
+    act_fn: Callable = F.silu,
 ) -> torch.Tensor:
     """
-    Run grouped matrix multiplication for MoE experts with SwiGLU activation.
+    Run grouped matrix multiplication for MoE experts.
+
+    Supports both gated (SwiGLU: act(x@w1) * (x@w3) @ w2) and non-gated
+    (act(x@w1) @ w2) expert architectures.
 
     Args:
         w1: First expert weights [num_experts, hidden_dim, dim]
         w2: Second expert weights [num_experts, dim, hidden_dim]
-        w3: Gate expert weights [num_experts, hidden_dim, dim]
+        w3: Gate expert weights [num_experts, hidden_dim, dim], or None for non-gated
         x: Input tensor [total_tokens, dim]
         num_tokens_per_expert: Number of tokens per expert [num_experts]
         routed_prob: Routing probabilities [total_tokens] (optional, for fused kernel)
-        use_fused_silu_gate_prob: Whether to use fused Triton kernel
+        use_fused_silu_gate_prob: Whether to use fused Triton kernel (gated only)
+        act_fn: Activation function (default: F.silu)
 
     Returns:
         Output tensor [total_tokens, dim]
-
-    Note:
-        When use_fused_silu_gate_prob=True, the routing probability is fused into
-        the activation computation: out = silu(x@w1) * (x@w3) * prob @ w2
-        This provides ~3.5x speedup but applies prob BEFORE w2 (vs after in unfused).
     """
     offsets = torch.cumsum(num_tokens_per_expert, dim=0, dtype=torch.int32)
 
-    if use_fused_silu_gate_prob and routed_prob is not None:
-        # Fused path: silu(x@w1) * (x@w3) * prob in one Triton kernel
+    if use_fused_silu_gate_prob and routed_prob is not None and w3 is not None:
+        # Fused path: silu(x@w1) * (x@w3) * prob in one Triton kernel (gated only)
         x1 = torch._grouped_mm(
             x.bfloat16(), w1.bfloat16().transpose(-2, -1), offs=offsets
         )
@@ -363,20 +379,34 @@ def _run_experts_grouped_mm(
             h, w2.bfloat16().transpose(-2, -1), offs=offsets
         ).type_as(x)
     else:
-        # Original unfused path (unchanged)
-        h = F.silu(
+        h = act_fn(
             torch._grouped_mm(
                 x.bfloat16(), w1.bfloat16().transpose(-2, -1), offs=offsets
             )
         )
-        h = h * torch._grouped_mm(
-            x.bfloat16(), w3.bfloat16().transpose(-2, -1), offs=offsets
-        )
+        if w3 is not None:
+            h = h * torch._grouped_mm(
+                x.bfloat16(), w3.bfloat16().transpose(-2, -1), offs=offsets
+            )
         out = torch._grouped_mm(
             h, w2.bfloat16().transpose(-2, -1), offs=offsets
         ).type_as(x)
 
     return out
+
+
+def _get_act_fn(name: str) -> Callable:
+    """Get activation function by name."""
+    if name == "silu":
+        return F.silu
+    elif name == "relu2":
+        return lambda x: F.relu(x).square()
+    elif name == "relu":
+        return F.relu
+    elif name == "gelu":
+        return F.gelu
+    else:
+        raise ValueError(f"Unknown activation: {name}")
 
 
 class GroupedExperts(nn.Module):
@@ -386,12 +416,16 @@ class GroupedExperts(nn.Module):
         hidden_dim: int,
         num_experts: int,
         use_grouped_mm: bool,
+        gated: bool = True,
+        act_fn: str = "silu",
     ):
         super().__init__()
         self.num_experts = num_experts
+        self.gated = gated
+        self.act_fn = _get_act_fn(act_fn)
         self.w1 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
         self.w2 = nn.Parameter(torch.empty(num_experts, dim, hidden_dim))
-        self.w3 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim))
+        self.w3 = nn.Parameter(torch.empty(num_experts, hidden_dim, dim)) if gated else None
         self.use_grouped_mm = use_grouped_mm
 
     def forward(
@@ -407,7 +441,7 @@ class GroupedExperts(nn.Module):
             # pyrefly: ignore [missing-attribute]
             w2 = self.w2.to_local()
             # pyrefly: ignore [missing-attribute]
-            w3 = self.w3.to_local()
+            w3 = self.w3.to_local() if self.w3 is not None else None
         else:
             w1 = self.w1
             w2 = self.w2
@@ -424,7 +458,7 @@ class GroupedExperts(nn.Module):
             llep_state.padded_counts = num_tokens_per_expert
             llep_state.gradient_anchor = gradient_anchor
 
-        # UNIFIED compute — same path for both standard EP and LLEP
+        # UNIFIED compute -- same path for both standard EP and LLEP
         # When w1 is None (LLEP with no tokens received), skip compute
         # and produce an empty output; the gradient anchor still gets added.
         if w1 is None:
@@ -443,9 +477,9 @@ class GroupedExperts(nn.Module):
             else:
                 # EP or LLEP: padding already handled by dispatch hooks
                 run_experts_fn = _run_experts_grouped_mm
-            output = run_experts_fn(w1, w2, w3, x, num_tokens_per_expert)
+            output = run_experts_fn(w1, w2, w3, x, num_tokens_per_expert, act_fn=self.act_fn)
         else:
-            output = _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert)
+            output = _run_experts_for_loop(w1, w2, w3, x, num_tokens_per_expert, act_fn=self.act_fn)
 
         # LLEP: gradient anchor for backward P2P
         if gradient_anchor is not None:
@@ -458,7 +492,8 @@ class GroupedExperts(nn.Module):
         std_out = moe_init_std(self.w2.shape[0], n_layers)
         trunc_normal_(self.w1, mean=0.0, std=std_in)
         trunc_normal_(self.w2, mean=0.0, std=std_in)
-        trunc_normal_(self.w3, mean=0.0, std=std_out)
+        if self.w3 is not None:
+            trunc_normal_(self.w3, mean=0.0, std=std_out)
 
 
 def _groupmm(x, w, offs):
@@ -892,11 +927,22 @@ class MoE(nn.Module):
         self.use_llep = moe_args.use_llep
         self._llep_config = moe_args.llep if moe_args.use_llep else None
 
+        # Latent MoE: project tokens to a bottleneck dim before/after experts.
+        # Router still operates at full dim; only routed tokens get projected.
+        if moe_args.latent_size is not None:
+            expert_dim = moe_args.latent_size
+            self.latent_in = nn.Linear(dim, expert_dim, bias=moe_args.expert_bias)
+            self.latent_out = nn.Linear(expert_dim, dim, bias=moe_args.expert_bias)
+        else:
+            expert_dim = dim
+            self.latent_in = None
+            self.latent_out = None
+
         if peft_config is not None and peft_config.enable_peft:
             # TODO:
             # Update to deepep here
             self.experts = LoraGroupedExperts(
-                dim=dim,
+                dim=expert_dim,
                 hidden_dim=hidden_dim,
                 num_experts=num_experts,
                 use_grouped_mm=moe_args.use_grouped_mm,
@@ -904,10 +950,12 @@ class MoE(nn.Module):
             )
         else:
             self.experts = GroupedExperts(
-                dim=dim,
+                dim=expert_dim,
                 hidden_dim=hidden_dim,
                 num_experts=num_experts,
                 use_grouped_mm=moe_args.use_grouped_mm,
+                gated=moe_args.gated_experts,
+                act_fn=moe_args.expert_act,
             )
 
         self.router = TokenChoiceTopKRouter(
@@ -925,15 +973,22 @@ class MoE(nn.Module):
         if peft_config is not None and peft_config.enable_peft:
             self.router.gate.weight.requires_grad = False
         self.reorderer = TokenReorderer(num_experts=num_experts, top_k=moe_args.top_k)
-        self.shared_experts = (
-            FeedForward(
-                dim=dim,
-                hidden_dim=hidden_dim * moe_args.num_shared_experts,
-                peft_config=peft_config,
+        if moe_args.num_shared_experts > 0:
+            shared_hidden = (
+                moe_args.shared_expert_intermediate_size * moe_args.num_shared_experts
+                if moe_args.shared_expert_intermediate_size is not None
+                else hidden_dim * moe_args.num_shared_experts
             )
-            if moe_args.num_shared_experts > 0
-            else None
-        )
+            self.shared_experts = FeedForward(
+                dim=dim,
+                hidden_dim=shared_hidden,
+                peft_config=peft_config,
+                gated=moe_args.gated_experts,
+                act_fn=moe_args.expert_act,
+                bias=moe_args.expert_bias,
+            )
+        else:
+            self.shared_experts = None
         self.shared_gate = (
             nn.Linear(dim, 1, bias=False) if moe_args.shared_gate else None
         )
@@ -949,16 +1004,18 @@ class MoE(nn.Module):
         # NOTE: tokens_per_expert is accumulated in the model forward pass.
         #       expert_bias is updated outside the model in an optimizer step pre hook
         #       to work with gradient accumulation.
+        # expert_bias: serves dual purpose:
+        # 1. Aux-loss-free load balancing (updated by optimizer hook when load_balance_coeff is set)
+        # 2. Pretrained correction bias (e.g. NemotronH e_score_correction_bias, loaded from checkpoint)
+        # Always created so checkpoints with correction bias can be loaded.
         self.load_balance_coeff = moe_args.load_balance_coeff
         if self.load_balance_coeff is not None:
             assert self.load_balance_coeff > 0.0
-            self.register_buffer(
-                "expert_bias",
-                torch.zeros(num_experts, dtype=torch.float32),
-                persistent=True,
-            )
-        else:
-            self.expert_bias = None
+        self.register_buffer(
+            "expert_bias",
+            torch.zeros(num_experts, dtype=torch.float32),
+            persistent=True,
+        )
 
         # tokens_per_expert will be used to track expert usage and to update the expert bias for load balancing
         self.register_buffer(
@@ -1025,8 +1082,16 @@ class MoE(nn.Module):
                 * top_scores_experts_sorted.reshape(-1, 1)
             ).to(x.dtype)
 
-        # shape (bs*slen*top_k, dim)
+        # Latent projection: dim -> latent_size before experts
+        if self.latent_in is not None:
+            routed_input = self.latent_in(routed_input)
+
+        # shape (bs*slen*top_k, expert_dim)
         routed_output = self.experts(routed_input, num_tokens_per_expert)
+
+        # Latent projection: latent_size -> dim after experts
+        if self.latent_out is not None:
+            routed_output = self.latent_out(routed_output)
 
         # shared expert
         # Note: we execute the shared expert before scoring the output of the routed expert

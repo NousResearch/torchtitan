@@ -118,8 +118,7 @@ def parallelize_qwen3(
 
     if parallel_dims.cp_enabled:
         apply_cp_to_attention_module(
-            # pyrefly: ignore [missing-attribute, not-callable]
-            [block.attention.inner_attention for block in model.layers.values()],
+            [block.attention.inner_attention for block in model.layers.values() if block.has_attn],
             parallel_dims.get_mesh("cp"),
             attn_type,
         )
@@ -247,41 +246,25 @@ def apply_non_moe_tp(
     # pyrefly: ignore [not-callable]
     for transformer_block in model.layers.values():
         layer_plan = {
-            "attention_norm": SequenceParallel(),
-            "attention": prepare_module_input(
-                input_layouts=(Shard(1), Replicate(), None, positions_sharding),
-                desired_input_layouts=(
-                    Replicate(),
-                    Replicate(),
-                    None,
-                    positions_sharding,
-                ),
-            ),
-            "attention.wq": colwise_parallel(use_local_output=False),
-            "attention.wk": colwise_parallel(use_local_output=False),
-            "attention.wv": colwise_parallel(use_local_output=False),
-            "attention.q_norm": SequenceParallel(sequence_dim=2),
-            "attention.k_norm": SequenceParallel(sequence_dim=2),
-            "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
+            "mamba_norm": SequenceParallel(),
             "ffn_norm": SequenceParallel(),
         }
 
-        # pyrefly: ignore [missing-attribute]
-        if not transformer_block.moe_enabled:
-            layer_plan.update(
-                {
-                    "feed_forward": prepare_module_input(
-                        input_layouts=(Shard(1),),
-                        desired_input_layouts=(Replicate(),),
-                    ),
-                    "feed_forward.w1": colwise_parallel(),
-                    "feed_forward.w2": rowwise_parallel(output_layouts=Shard(1)),
-                    "feed_forward.w3": colwise_parallel(),
-                }
-            )
+        # Attention TP (only on layers that have it)
+        if transformer_block.has_attn:
+            layer_plan.update({
+                "attn_norm": SequenceParallel(),
+                "attention": prepare_module_input(
+                    input_layouts=(Shard(1), Replicate(), None),
+                    desired_input_layouts=(Replicate(), Replicate(), None),
+                ),
+                "attention.wq": colwise_parallel(use_local_output=False),
+                "attention.wk": colwise_parallel(use_local_output=False),
+                "attention.wv": colwise_parallel(use_local_output=False),
+                "attention.wo": rowwise_parallel(output_layouts=Shard(1)),
+            })
 
         parallelize_module(
-            # pyrefly: ignore [bad-argument-type]
             module=transformer_block,
             device_mesh=tp_mesh,
             parallelize_plan=layer_plan,

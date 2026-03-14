@@ -1,0 +1,67 @@
+# Nemotron Super 120B-A12B on 8 H100s (96GiB)
+# 512 experts with EP8 = 64 experts per GPU
+
+[job]
+dump_folder = "/home/dakota/nemotron_super_120b_a12b_base_debug"
+description = "Nemotron Super 120B-A12B training"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "nemotron_super"
+flavor = "120B-A12B"
+tokenizer_path = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-Base-BF16"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-6
+eps = 1e-8
+beta1 = 0.9
+beta2 = 0.9
+weight_decay = 0.1
+
+[lr_scheduler]
+warmup_steps = 200
+decay_ratio = 0.1
+
+[training]
+local_batch_size = 1
+seq_len = 4096
+max_norm = 1.0
+steps = 1000
+dataset = "c4"
+global_batch_size = 256
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+context_parallel_degree = 1
+expert_parallel_degree = 8
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+initial_load_path = "/home/shared/torchtitan-conversions/NVIDIA-Nemotron-3-Super-120B-A12B-Base-BF16"
+interval = 500
+last_save_model_only = false
+export_dtype = "bfloat16"
+async_mode = "disabled"
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+
+[compile]
+enable = false
+components = ["loss"]

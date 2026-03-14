@@ -37,7 +37,7 @@ from torchtitan.tools.logging import logger
 
 from .args import NemotronSuperModelArgs
 
-from .mamba2 import Mamba2
+from fla.models.mamba2.modeling_mamba2 import Mamba2
 
 
 # -- RoPE --
@@ -171,7 +171,6 @@ class NemotronSuperLayer(nn.Module):
         self.dim = model_args.dim
         self.n_layers = model_args.n_layers
         self.has_attn = layer_id in set(model_args.attn_layer_idxs)
-        self.moe_enabled = True  # every layer has MoE
 
         # Mamba2 (always present)
         self.mamba_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
@@ -321,7 +320,7 @@ class MTPBlock(nn.Module):
 # -- Full model --
 
 class NemotronSuperModel(ModelProtocol):
-    def __init__(self, model_args: NemotronSuperModelArgs, peft_config=None):
+    def __init__(self, model_args: NemotronSuperModelArgs):
         super().__init__(model_args)
 
         self.model_args = model_args

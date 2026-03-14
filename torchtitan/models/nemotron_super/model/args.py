@@ -13,7 +13,6 @@ from torch import nn
 
 from torchtitan.config import JobConfig
 from torchtitan.models.moe import MoEArgs
-from torchtitan.models.utils import get_moe_model_nparams_and_flops
 from torchtitan.protocols.train_spec import BaseModelArgs
 
 from torchtitan.tools.logging import logger
@@ -88,10 +87,63 @@ class NemotronSuperModelArgs(BaseModelArgs):
         )
 
     def get_nparams_and_flops(self, model: nn.Module, seq_len: int) -> tuple[int, int]:
-        # TODO: needs custom calculation for mamba + MoE + attention mix
-        return get_moe_model_nparams_and_flops(self, model, 2 * self.head_dim, seq_len)
+        nparams_embedding = 0
+        nparams_moe_experts = 0
+        nparams_moe_other = 0  # router, shared experts, latent proj
+        nparams_mamba = 0
+        nparams_attn = 0
+        nparams_other = 0  # norms, output, etc.
 
+        for name, p in model.named_parameters():
+            if "embedding" in name:
+                nparams_embedding += p.numel()
+            elif "moe.experts." in name:
+                nparams_moe_experts += p.numel()
+            elif "moe." in name:
+                nparams_moe_other += p.numel()
+            elif "mamba." in name or "mamba_norm" in name:
+                nparams_mamba += p.numel()
+            elif "attention." in name or "attn_norm" in name:
+                nparams_attn += p.numel()
+            else:
+                nparams_other += p.numel()
 
-# Alias: model.py and state_dict_adapter.py still use Qwen3 code as the
-# starting-point implementation. Remove once the model is fully ported.
-Qwen3ModelArgs = NemotronSuperModelArgs
+        nparams = (
+            nparams_embedding + nparams_moe_experts + nparams_moe_other
+            + nparams_mamba + nparams_attn + nparams_other
+        )
+
+        # Active expert params: only top_k of num_experts are used per token
+        top_k = self.moe_args.top_k
+        num_experts = self.moe_args.num_experts
+        nparams_moe_active = nparams_moe_other + nparams_moe_experts * top_k // num_experts
+
+        # Active params (everything except inactive experts)
+        nparams_active = nparams_mamba + nparams_attn + nparams_other + nparams_moe_active
+
+        # FLOPs per token:
+        # Linear layers (fwd + bwd): 6 * active_params
+        # Attention S^2 term: only on layers with attention (not all n_layers)
+        # Mamba SSM scan: ~2 * mamba_num_heads * mamba_head_dim * ssm_state_size per mamba layer
+        n_attn_layers = len(self.attn_layer_idxs)
+        n_mamba_layers = self.n_layers  # every layer has mamba
+
+        num_flops_per_token = (
+            # matmul FLOPs (fwd + bwd)
+            6 * nparams_active
+            # attention score computation (QK^T + attn@V), only on attn layers
+            + 6 * n_attn_layers * self.n_heads * (2 * self.head_dim) * seq_len
+            # mamba SSM scan (B/C state matmuls, approximate)
+            + 6 * n_mamba_layers * self.mamba_num_heads * self.mamba_head_dim * self.ssm_state_size
+        )
+
+        logger.info(
+            f"NemotronSuper params: mamba {nparams_mamba:,}, attn {nparams_attn:,}, "
+            f"moe {nparams_moe_experts + nparams_moe_other:,} "
+            f"(active {nparams_moe_active:,}), "
+            f"other {nparams_other + nparams_embedding:,}, "
+            f"total {nparams:,}, active {nparams_active + nparams_embedding:,}"
+        )
+
+        return nparams, num_flops_per_token
+

@@ -17,5 +17,6 @@ _supported_models = frozenset(
         "llama4",
         "qwen3",
         "qwen2",
+        "nemotron_super",
     ]
 )
