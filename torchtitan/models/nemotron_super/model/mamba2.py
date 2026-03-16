@@ -6,8 +6,8 @@
 #   1. Uses repeat() instead of repeat_interleave() for B/C group expansion
 #   2. Uses time_step_limit=(0, inf) instead of time_step_min clamping
 
-import math
 import logging
+import math
 
 import torch
 import torch.nn.functional as F
@@ -21,6 +21,7 @@ try:
 except ImportError:
     causal_conv1d_fn = None
     causal_conv1d_update = None
+    print("Causal conv1d not available")
 
 try:
     from mamba_ssm.ops.triton.selective_state_update import selective_state_update
@@ -29,25 +30,28 @@ try:
         mamba_split_conv1d_scan_combined,
     )
 except ImportError:
+    print("Mamba_ssm not available")
     selective_state_update = None
     mamba_chunk_scan_combined = None
     mamba_split_conv1d_scan_combined = None
 
-is_fast_path_available = all((
-    selective_state_update,
-    mamba_chunk_scan_combined,
-    mamba_split_conv1d_scan_combined,
-    causal_conv1d_fn,
-    causal_conv1d_update,
-))
+is_fast_path_available = all(
+    (
+        selective_state_update,
+        mamba_chunk_scan_combined,
+        mamba_split_conv1d_scan_combined,
+        causal_conv1d_fn,
+        causal_conv1d_update,
+    )
+)
 
 
 class RMSNormGated(nn.Module):
     """Grouped gated RMSNorm matching HF MambaRMSNormGated.
-    
+
     Normalizes within groups of group_size elements independently.
     group_size=None means normalize over the full dimension (no grouping).
-    norm_before_gate=False: norm(x * silu(z)) 
+    norm_before_gate=False: norm(x * silu(z))
     norm_before_gate=True:  norm(x) * silu(z)
     """
 
@@ -79,31 +83,55 @@ class RMSNormGated(nn.Module):
 
 # -- Helpers --
 
+
 def pad_tensor_by_size(input_tensor, pad_size):
-    pad_shape = (0, 0, 0, 0, 0, pad_size, 0, 0) if len(input_tensor.shape) == 4 else (0, 0, 0, pad_size, 0, 0)
+    pad_shape = (
+        (0, 0, 0, 0, 0, pad_size, 0, 0)
+        if len(input_tensor.shape) == 4
+        else (0, 0, 0, pad_size, 0, 0)
+    )
     return F.pad(input_tensor, pad_shape, mode="constant", value=0)
 
 
 def reshape_into_chunks(input_tensor, pad_size, chunk_size):
     input_tensor = pad_tensor_by_size(input_tensor, pad_size)
     if len(input_tensor.shape) == 3:
-        return input_tensor.reshape(input_tensor.shape[0], -1, chunk_size, input_tensor.shape[2])
+        return input_tensor.reshape(
+            input_tensor.shape[0], -1, chunk_size, input_tensor.shape[2]
+        )
     else:
-        return input_tensor.reshape(input_tensor.shape[0], -1, chunk_size, input_tensor.shape[2], input_tensor.shape[3])
+        return input_tensor.reshape(
+            input_tensor.shape[0],
+            -1,
+            chunk_size,
+            input_tensor.shape[2],
+            input_tensor.shape[3],
+        )
 
 
 def segment_sum(input_tensor):
     chunk_size = input_tensor.size(-1)
     input_tensor = input_tensor[..., None].expand(*input_tensor.size(), chunk_size)
-    mask = torch.tril(torch.ones(chunk_size, chunk_size, device=input_tensor.device, dtype=torch.bool), diagonal=-1)
+    mask = torch.tril(
+        torch.ones(
+            chunk_size, chunk_size, device=input_tensor.device, dtype=torch.bool
+        ),
+        diagonal=-1,
+    )
     input_tensor = input_tensor.masked_fill(~mask, 0)
     tensor_segsum = torch.cumsum(input_tensor, dim=-2)
-    mask = torch.tril(torch.ones(chunk_size, chunk_size, device=input_tensor.device, dtype=torch.bool), diagonal=0)
+    mask = torch.tril(
+        torch.ones(
+            chunk_size, chunk_size, device=input_tensor.device, dtype=torch.bool
+        ),
+        diagonal=0,
+    )
     tensor_segsum = tensor_segsum.masked_fill(~mask, -torch.inf)
     return tensor_segsum
 
 
 # -- Mamba2 Mixer --
+
 
 class Mamba2(nn.Module):
     """
@@ -168,7 +196,8 @@ class Mamba2(nn.Module):
 
         # dt init
         dt = torch.exp(
-            torch.rand(self.num_heads) * (math.log(time_step_max) - math.log(time_step_min))
+            torch.rand(self.num_heads)
+            * (math.log(time_step_max) - math.log(time_step_min))
             + math.log(time_step_min)
         ).clamp(min=time_step_floor)
         inv_dt = dt + torch.log(-torch.expm1(-dt))
@@ -178,11 +207,15 @@ class Mamba2(nn.Module):
         self.A_log = nn.Parameter(torch.log(A))
 
         self.norm = RMSNormGated(
-            self.intermediate_size, eps=norm_eps, norm_before_gate=False,
+            self.intermediate_size,
+            eps=norm_eps,
+            norm_before_gate=False,
             group_size=self.intermediate_size // self.n_groups,
         )
         self.D = nn.Parameter(torch.ones(self.num_heads))
-        self.out_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=use_bias)
+        self.out_proj = nn.Linear(
+            self.intermediate_size, self.hidden_size, bias=use_bias
+        )
 
         if not is_fast_path_available:
             logger.warning(
@@ -192,14 +225,22 @@ class Mamba2(nn.Module):
     def cuda_kernels_forward(self, hidden_states, attention_mask=None):
         batch_size, seq_len, _ = hidden_states.shape
         groups_time_state_size = self.n_groups * self.ssm_state_size
-        d_to_remove = 2 * self.intermediate_size + 2 * self.n_groups * self.ssm_state_size + self.num_heads
+        d_to_remove = (
+            2 * self.intermediate_size
+            + 2 * self.n_groups * self.ssm_state_size
+            + self.num_heads
+        )
 
         if attention_mask is not None and not torch.all(attention_mask == 1):
-            hidden_states = (hidden_states * attention_mask[:, :, None]).to(hidden_states.dtype)
+            hidden_states = (hidden_states * attention_mask[:, :, None]).to(
+                hidden_states.dtype
+            )
 
         projected_states = self.in_proj(hidden_states)
         A = -torch.exp(self.A_log.float())
-        dt_limit_kwargs = {} if self.time_step_limit is None else {"dt_limit": self.time_step_limit}
+        dt_limit_kwargs = (
+            {} if self.time_step_limit is None else {"dt_limit": self.time_step_limit}
+        )
 
         if self.training:
             out, ssm_state = mamba_split_conv1d_scan_combined(
@@ -236,11 +277,17 @@ class Mamba2(nn.Module):
             ).transpose(1, 2)[:, :seq_len]
             hidden_states, B, C = torch.split(
                 hidden_states_B_C,
-                [self.intermediate_size, groups_time_state_size, groups_time_state_size],
+                [
+                    self.intermediate_size,
+                    groups_time_state_size,
+                    groups_time_state_size,
+                ],
                 dim=-1,
             )
             if attention_mask is not None and not torch.all(attention_mask == 1):
-                hidden_states = (hidden_states * attention_mask[:, :, None]).to(hidden_states.dtype)
+                hidden_states = (hidden_states * attention_mask[:, :, None]).to(
+                    hidden_states.dtype
+                )
             scan_output, ssm_state = mamba_chunk_scan_combined(
                 hidden_states.view(batch_size, seq_len, -1, self.head_dim),
                 time_step,
@@ -283,8 +330,8 @@ class Mamba2(nn.Module):
 
         A = -torch.exp(self.A_log.float())
 
-        # SSD naive implementation
-        dt = nn.functional.softplus(dt + self.dt_bias)
+        # SSD naive implementation — dt in float32 for numerical stability
+        dt = nn.functional.softplus((dt + self.dt_bias).float())
         dt = torch.clamp(dt, self.time_step_min)
         hidden_states = hidden_states.reshape(batch_size, seq_len, -1, self.head_dim).float()
         B = B.reshape(batch_size, seq_len, -1, self.ssm_state_size).float()
@@ -341,6 +388,10 @@ class Mamba2(nn.Module):
     # fmt: on
 
     def forward(self, hidden_states, attention_mask=None, **kwargs):
-        if is_fast_path_available and "cuda" in self.in_proj.weight.device.type and not getattr(self, '_force_torch_path', False):
+        if (
+            is_fast_path_available
+            and "cuda" in self.in_proj.weight.device.type
+            and not getattr(self, "_force_torch_path", False)
+        ):
             return self.cuda_kernels_forward(hidden_states, attention_mask), None, None
         return self.torch_forward(hidden_states, attention_mask), None, None

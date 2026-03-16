@@ -8,11 +8,17 @@ mkdir logs
 chmod g+rw ./logs
 python3.10 -m venv .venv  # or uv venv --python 3.10 if you have uv installed
 source .venv/bin/activate
+export PATH=/usr/local/cuda-12.8/bin:${PATH}
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda-12.8/targets/x86_64-linux/lib
 pip install uv
-uv pip install vllm==0.17.1 --torch-backend=cu129
+uv pip install vllm==0.17.1 --torch-backend=cu128
 uv pip install -r requirements.txt
 uv pip install flashinfer-python==0.6.4 flashinfer-cubin==0.6.4
-uv pip install flashinfer-jit-cache==0.6.4 --index-url https://flashinfer.ai/whl/cu129
+uv pip install flashinfer-jit-cache==0.6.4 --index-url https://flashinfer.ai/whl/cu128
+uv pip install causal_conv1d
+uv pip install flash-linear-attention
+uv pip install mamba_ssm
+```
 ## Configuration instructions
 
 see `torchtitan/grpo/configs/qwen25-7b-math.toml` for good initial values
