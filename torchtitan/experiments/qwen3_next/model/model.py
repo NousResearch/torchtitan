@@ -62,16 +62,14 @@ def causal_conv1d_fn(
         shifted = torch.cat(
             [torch.full_like(seq_idx[:, :1], -1), seq_idx[:, :-1]], dim=1
         )
-        boundary = (seq_idx != shifted).unsqueeze(1).expand_as(x)
-        x = x.clone()
+        boundary = seq_idx != shifted  # (B, L)
+        dilated = boundary
         for k in range(1, K):
-            mask = torch.zeros_like(boundary)
-            mask[:, :, k:] = boundary[:, :, :-k]
-            x = x.masked_fill(mask, 0.0)
+            dilated = dilated | F.pad(boundary[:, :-k], (k, 0))
+        x = x.masked_fill(dilated.unsqueeze(1), 0.0)
 
     x_padded = F.pad(x, (K - 1, 0))
-    w = weight.unsqueeze(1)  # (C, 1, K) for depthwise conv
-    out = F.conv1d(x_padded, w, bias, groups=C)
+    out = F.conv1d(x_padded, weight.unsqueeze(1), bias, groups=C)
 
     if activation == "silu":
         out = F.silu(out)
