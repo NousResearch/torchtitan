@@ -65,11 +65,11 @@ def parallelize_deepseekv3(
         """
 
     attn_type = getattr(model.model_args, "attn_type", "sdpa")
-    if job_config.parallelism.context_parallel_degree > 1 and attn_type == "varlen":
+    if job_config.parallelism.context_parallel_degree > 1 and attn_type in ("varlen", "fa4"):
         raise NotImplementedError(
-            f"Context Parallel only supports SDPA and FlexAttention."
+            f"Context Parallel only supports SDPA and FlexAttention. "
             f"Got attn_type='{attn_type}'. "
-            f"Varlen attention is not supported with CP."
+            f"Varlen and FA4 attention are not supported with CP."
         )
 
     if parallel_dims.tp_enabled:
