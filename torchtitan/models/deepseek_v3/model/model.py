@@ -315,9 +315,16 @@ class Attention(nn.Module):
         """
         bsz, seqlen, _ = x.size()
 
+        import os as _os
+        _noop_level = int(_os.environ.get("NOOP_LEVEL", "0"))
+
+        # Level >= 1: skip entire attention, just return zeros (clean, no tensor creation)
+        if _noop_level >= 1:
+            return x[:, :, :1].expand_as(x) * 0  # single op, same shape
+
         # Query projection
         if self.q_lora_rank == 0:
-            q = self.wq(x)  # (bsz, seqlen, n_heads * qk_head_dim)
+            q = self.wq(x)
         else:
             q = self.wq_a(x)
             q = self.wq_b(self.q_norm(q))
@@ -339,9 +346,7 @@ class Attention(nn.Module):
             k_pe.unsqueeze(2), freqs_cis, positions
         )  # (bsz, seqlen, 1, qk_rope_head_dim)
 
-        kv = self.wkv_b(
-            self.kv_norm(kv)
-        )  # (bsz, seqlen, n_heads * (qk_nope_head_dim + v_head_dim))
+        kv = self.wkv_b(self.kv_norm(kv))  # (bsz, seqlen, n_heads * (qk_nope_head_dim + v_head_dim))
         kv = kv.view(bsz, seqlen, -1, self.qk_nope_head_dim + self.v_head_dim)
         k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
         # TODO: self.n_heads is global count; with TP this should this be k_nope.size(2) for local heads?
@@ -444,10 +449,24 @@ class TransformerBlock(nn.Module):
         Returns:
             torch.Tensor: Output tensor with the same shape as the input.
         """
-        x = x + self.attention(
-            self.attention_norm(x), freqs_cis, attention_masks, positions
-        )
-        if self.moe_enabled:
+        import os as _os
+        _noop_level = int(_os.environ.get("NOOP_LEVEL", "0"))
+        _noop_attn = _os.environ.get("NOOP_ATTN", "0") == "1"
+        _noop_moe = _os.environ.get("NOOP_MOE", "0") == "1"
+
+        # Skip attention if NOOP_ATTN=1 or NOOP_LEVEL>=2
+        if _noop_attn or _noop_level >= 2:
+            x = x  # no attention
+        else:
+            x = x + self.attention(
+                self.attention_norm(x), freqs_cis, attention_masks, positions
+            )
+
+        # Skip MoE/FFN if NOOP_MOE=1 or NOOP_MOE_CLEAN=1 or NOOP_LEVEL>=3
+        _noop_moe_clean = _os.environ.get("NOOP_MOE_CLEAN", "0") == "1"
+        if _noop_moe or _noop_moe_clean or _noop_level >= 3:
+            x = x  # no MoE, no norm, no FSDP hooks
+        elif self.moe_enabled:
             x = x + self.moe(self.ffn_norm(x))
         else:
             x = x + self.feed_forward(self.ffn_norm(x))
@@ -584,10 +603,20 @@ class DeepSeekV3Model(ModelProtocol):
             torch.Tensor: Logits tensor of shape (batch_size, vocab_size).
         """
 
-        h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
+        import os as _os_fwd
+        _skip_layers = _os_fwd.environ.get("NOOP_LAYERS", "0") == "1"
 
-        for layer in self.layers.values():
-            h = layer(h, self.freqs_cis, attention_masks, positions)
+        if _skip_layers:
+            # EXPERIMENT: skip everything — embedding, layers, output
+            h = tokens.float().mean(dim=-1, keepdim=True).expand_as(tokens).to(tokens.dtype) if tokens.dtype != torch.float32 else tokens
+        else:
+            h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
+            for layer in self.layers.values():
+                h = layer(h, self.freqs_cis, attention_masks, positions)
         h = self.norm(h) if self.norm is not None else h
-        output = self.output(h) if self.output is not None else h
+        import os as _os_out
+        if _os_out.environ.get("NOOP_OUTPUT", "0") == "1" and self.output is not None:
+            output = h[:, :, :1].expand(*h.shape[:-1], self.output.weight.shape[0]) * 0
+        else:
+            output = self.output(h) if self.output is not None else h
         return output

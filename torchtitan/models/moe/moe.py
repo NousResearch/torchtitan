@@ -317,6 +317,10 @@ def _run_experts_grouped_mm(
     routed_prob: torch.Tensor | None = None,
     use_fused_silu_gate_prob: bool = False,
 ) -> torch.Tensor:
+    import os as _os
+    if _os.environ.get("NOOP_EXPERT", "0") == "1":
+        # EXPERIMENT: skip expert GEMM, return input-shaped zeros (autograd-safe)
+        return (x[..., :1] * 0).expand_as(x)
     """
     Run grouped matrix multiplication for MoE experts with SwiGLU activation.
 
@@ -963,6 +967,10 @@ class MoE(nn.Module):
         self.log_expert_routing = moe_args.log_expert_routing
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        import os as _os_moe
+        # Clean no-op: return zeros with single op, no tensor creation
+        if _os_moe.environ.get("NOOP_MOE_CLEAN", "0") == "1":
+            return x * 0  # single mul, keeps grad chain, same shape
         """
         Args:
             x (torch.Tensor): Input tensor with shape ``(bs, slen, dim)``.
@@ -970,16 +978,28 @@ class MoE(nn.Module):
         Returns:
             out (torch.Tensor): Output tensor with shape ``(bs, slen, dim)``.
         """
+        import os as _os
+        _noop_routing = _os.environ.get("NOOP_ROUTING", "0") == "1"
+
         bs, slen, dim = x.shape
         x = x.view(-1, dim)
 
         # top_scores and selected_experts_indices shape (bs*slen, top_k)
         # num_tokens_per_expert shape (num_experts,)
-        (
-            top_scores,
-            selected_experts_indices,
-            num_tokens_per_expert,
-        ) = self.router(x, self.expert_bias)
+        if _noop_routing:
+            # EXPERIMENT: skip router, use dummy even distribution
+            num_tokens = bs * slen
+            top_k = self.router.top_k
+            num_experts = self.router.num_experts
+            selected_experts_indices = torch.arange(top_k, device=x.device).unsqueeze(0).expand(num_tokens, -1)
+            top_scores = torch.ones(num_tokens, top_k, device=x.device, dtype=torch.float32) / top_k
+            num_tokens_per_expert = torch.full((num_experts,), num_tokens * top_k // num_experts, device=x.device)
+        else:
+            (
+                top_scores,
+                selected_experts_indices,
+                num_tokens_per_expert,
+            ) = self.router(x, self.expert_bias)
 
         # tokens_per_expert will be used to update the expert bias for load balancing.
         # and also to count the expert usage
@@ -991,66 +1011,77 @@ class MoE(nn.Module):
             if self.log_expert_routing:
                 self.expert_routing_counter.add_(num_tokens_per_expert)
 
-        # top_scores_experts_sorted and token_indices_experts_sorted shape (bs*slen*top_k,)
-        # num_tokens_per_expert shape (num_experts,)
-        # NOTE: the reason we need to compute num_tokens_per_expert again is:
-        #       1st computation in router is to update self.tokens_per_expert
-        #       which would be the same across all TP ranks.
-        #       2nd computation in reorderer is for the actual routing and experts computation
-        #       which would be sharded over TP ranks if expert_tensor_parallel_degree==1.
-        #       If tensor_paralllel_degree == expert_tensor_parallel_degree, they agree.
-        (
-            top_scores_experts_sorted,
-            token_indices_experts_sorted,
-            num_tokens_per_expert,
-        ) = self.reorderer(top_scores, selected_experts_indices)
-
-        # shape (bs*slen*top_k, dim)
-        routed_input = x[token_indices_experts_sorted // self.router.top_k]
-
-        if self.score_before_experts:
-            routed_input = (
-                routed_input.to(torch.float32)
-                * top_scores_experts_sorted.reshape(-1, 1)
-            ).to(x.dtype)
-
-        # shape (bs*slen*top_k, dim)
-        routed_output = self.experts(routed_input, num_tokens_per_expert)
-
-        # shared expert
-        # Note: we execute the shared expert before scoring the output of the routed expert
-        # to "implicitly" overlap the shared expert compute with token combine communication
-        out = self.shared_experts(x) if self.shared_experts is not None else None
-
-        # Apply shared gate if configured
-        if out is not None and self.shared_gate is not None:
-            out = F.sigmoid(self.shared_gate(x)) * out
-
-        # Unsort routed outputs
-        routed_output_unsorted = torch.zeros(
-            (bs * slen * self.router.top_k, dim),
-            dtype=routed_output.dtype,
-            device=routed_output.device,
-        )
-        routed_output_unsorted[token_indices_experts_sorted] = routed_output
-        routed_output_unsorted = routed_output_unsorted.reshape(
-            -1, self.router.top_k, dim
-        )
-        if not self.score_before_experts:
-            out_experts = (
-                torch.bmm(
-                    top_scores.reshape(-1, 1, self.router.top_k),
-                    routed_output_unsorted.float(),
-                )
-                .to(x.dtype)
-                .squeeze(1)
-            )
+        if _noop_routing:
+            # EXPERIMENT: skip reorderer + index + score, just pass x directly to experts
+            # Duplicate x for top_k routes and pass to experts with even distribution
+            routed_input = x.repeat_interleave(self.router.top_k, dim=0)
+            num_local = num_tokens_per_expert[:num_tokens_per_expert.shape[0]]
+            routed_output = self.experts(routed_input, num_tokens_per_expert)
+            # Skip unsort/score — just sum and return
+            out_experts = routed_output.view(num_tokens, self.router.top_k, dim).sum(dim=1) / self.router.top_k
+            # Skip shared expert too
+            return (x * 0 + out_experts).reshape(bs, slen, dim)
         else:
-            out_experts = routed_output_unsorted.sum(dim=1)
+            # top_scores_experts_sorted and token_indices_experts_sorted shape (bs*slen*top_k,)
+            # num_tokens_per_expert shape (num_experts,)
+            # NOTE: the reason we need to compute num_tokens_per_expert again is:
+            #       1st computation in router is to update self.tokens_per_expert
+            #       which would be the same across all TP ranks.
+            #       2nd computation in reorderer is for the actual routing and experts computation
+            #       which would be sharded over TP ranks if expert_tensor_parallel_degree==1.
+            #       If tensor_paralllel_degree == expert_tensor_parallel_degree, they agree.
+            (
+                top_scores_experts_sorted,
+                token_indices_experts_sorted,
+                num_tokens_per_expert,
+            ) = self.reorderer(top_scores, selected_experts_indices)
 
-        if out is None:
-            return out_experts.reshape(bs, slen, dim)
-        return (out + out_experts).reshape(bs, slen, dim)
+            # shape (bs*slen*top_k, dim)
+            routed_input = x[token_indices_experts_sorted // self.router.top_k]
+
+            if self.score_before_experts:
+                routed_input = (
+                    routed_input.to(torch.float32)
+                    * top_scores_experts_sorted.reshape(-1, 1)
+                ).to(x.dtype)
+
+            # shape (bs*slen*top_k, dim)
+            routed_output = self.experts(routed_input, num_tokens_per_expert)
+
+            # shared expert
+            # Note: we execute the shared expert before scoring the output of the routed expert
+            # to "implicitly" overlap the shared expert compute with token combine communication
+            out = self.shared_experts(x) if self.shared_experts is not None else None
+
+            # Apply shared gate if configured
+            if out is not None and self.shared_gate is not None:
+                out = F.sigmoid(self.shared_gate(x)) * out
+
+            # Unsort routed outputs
+            routed_output_unsorted = torch.zeros(
+                (bs * slen * self.router.top_k, dim),
+                dtype=routed_output.dtype,
+                device=routed_output.device,
+            )
+            routed_output_unsorted[token_indices_experts_sorted] = routed_output
+            routed_output_unsorted = routed_output_unsorted.reshape(
+                -1, self.router.top_k, dim
+            )
+            if not self.score_before_experts:
+                out_experts = (
+                    torch.bmm(
+                        top_scores.reshape(-1, 1, self.router.top_k),
+                        routed_output_unsorted.float(),
+                    )
+                    .to(x.dtype)
+                    .squeeze(1)
+                )
+            else:
+                out_experts = routed_output_unsorted.sum(dim=1)
+
+            if out is None:
+                return out_experts.reshape(bs, slen, dim)
+            return (out + out_experts).reshape(bs, slen, dim)
 
     def pop_expert_routing_metrics(self) -> torch.Tensor | None:
         if not self.log_expert_routing:
@@ -1093,6 +1124,28 @@ def build_moe(
     moe_impl: str = "standard",
 ) -> nn.Module:
     """Factory for MoE with different backends: 'standard', 'deepep', or 'deepep_llep'."""
+    import os as _os
+
+    # Profiling: empty MoE (does nothing, returns zeros, but has params for FSDP/EP)
+    if _os.environ.get("EMPTY_MOE", "0") == "1":
+        from .moe_deepep import EmptyMoE
+
+        logger.info(
+            f"EmptyMoE (profiling): no-op MoE, "
+            f"num_experts={args.num_experts}, dim={dim}"
+        )
+        return EmptyMoE(moe_args=args, dim=dim, hidden_dim=hidden_dim)
+
+    # Profiling: comm-only MoE (router + DeepEP dispatch/combine, no GEMM, no shared expert)
+    if _os.environ.get("COMM_ONLY_MOE", "0") == "1":
+        from .moe_deepep import CommOnlyMoE
+
+        logger.info(
+            f"CommOnlyMoE (profiling): router + DeepEP comm only, "
+            f"num_experts={args.num_experts}, top_k={args.top_k}, dim={dim}"
+        )
+        return CommOnlyMoE(moe_args=args, dim=dim, hidden_dim=hidden_dim)
+
     if moe_impl in ("deepep", "deepep_llep"):
         from .moe_deepep import DeepEPMoE
 

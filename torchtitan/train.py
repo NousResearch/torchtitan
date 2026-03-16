@@ -734,7 +734,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
                 # need to free pred before bwd to avoid peaking memory
                 del pred
-                loss.backward()
+                import os as _os
+                if _os.environ.get("NOOP_BACKWARD", "0") == "1":
+                    pass  # EXPERIMENT: skip backward
+                else:
+                    loss.backward()
 
         # Aggressive memory clearing after backward to reduce fragmentation
         if self.aggressive_mem_manager is not None:
@@ -835,7 +839,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             #     logger.info(f"[STEP {self.step}] optimizer.step() START @ {_ts}")
 
             _optim_start = _time.time()
-            self.optimizers.step()
+            import os as _os2
+            if _os2.environ.get("NOOP_OPTIM", "0") == "1":
+                pass  # EXPERIMENT: skip optimizer
+            else:
+                self.optimizers.step()
             _optim_elapsed = _time.time() - _optim_start
 
             # Aggressive memory clearing after optimizer to reduce fragmentation

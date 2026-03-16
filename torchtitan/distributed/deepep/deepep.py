@@ -322,22 +322,15 @@ def _permute_tokens(
     dispatched_indices: torch.Tensor,
     dispatched_scores: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Convert dispatch output to grouped_mm format with permutation and token expansion.
+    """Convert dispatch output to grouped_mm format with permutation and token expansion."""
+    import os as _os
+    if _os.environ.get("NOOP_ROUTING", "0") == "1":
+        # EXPERIMENT: skip permutation, pass through
+        n = hidden_states.shape[0]
+        permuted_indices = torch.arange(n, device=hidden_states.device)
+        permuted_scores = torch.ones(n, device=hidden_states.device, dtype=dispatched_scores.dtype)
+        return hidden_states, permuted_scores, permuted_indices
 
-    Each token may be routed to multiple experts (top-k), so tokens are expanded and sorted
-    by expert ID for efficient grouped matrix multiplication. num_recv_tokens is the number
-    of unique tokens received, while num_all_tokens is the expanded count after replication.
-
-    Args:
-        hidden_states: Received tokens [num_recv_tokens, hidden_dim]
-        dispatched_indices: Expert indices for each token [num_recv_tokens, topk], -1 means masked
-        dispatched_scores: Routing scores [num_recv_tokens, topk]
-
-    Returns:
-        permuted_hidden_states: Tokens sorted by expert [num_all_tokens, hidden_dim]
-        permuted_scores: Routing scores in same order [num_all_tokens]
-        permuted_indices: Original token indices for unpermutation [num_all_tokens]
-    """
     mask = dispatched_indices != -1
     valid_expert_ids = dispatched_indices[mask]  # 1d tensor
     valid_scores = dispatched_scores[mask]
@@ -358,16 +351,12 @@ def _unpermute_tokens(
     permuted_indices: torch.Tensor,
     num_tokens: int,
 ) -> torch.Tensor:
-    """Reverse permutation applied by _permute_tokens.
+    """Reverse permutation applied by _permute_tokens."""
+    import os as _os
+    if _os.environ.get("NOOP_ROUTING", "0") == "1":
+        # EXPERIMENT: skip unpermutation, pass through
+        return permuted_hidden_states[:num_tokens] if permuted_hidden_states.shape[0] > num_tokens else permuted_hidden_states
 
-    Args:
-        permuted_hidden_states: The permuted token tensor [num_all_tokens, hidden_dim]
-        permuted_indices: The indices used to permute the tokens [num_all_tokens]
-        num_tokens: Number of unique tokens received by the current rank
-
-    Returns:
-        Tokens aggregated and restored to their original order [num_tokens, hidden_dim]
-    """
     hidden_dim = permuted_hidden_states.shape[1]
     output_hidden_states = torch.zeros(
         (num_tokens, hidden_dim),
@@ -423,35 +412,54 @@ def dispatch_tokens(
     if top_scores.dtype != torch.float32:
         top_scores = top_scores.float()
 
+    import os as _os
+    _noop_level = int(_os.environ.get("NOOP_LEVEL", "0"))
+    _skip_deepep = _noop_level >= 4 or _os.environ.get("NOOP_DEEPEP", "0") == "1"
+    _noop_routing = _os.environ.get("NOOP_ROUTING", "0") == "1"
+
     buffer = get_buffer(group, get_hidden_bytes(hidden_states))
 
-    # Calculate dispatch layout before actual dispatch
-    (
-        num_tokens_per_rank,
-        num_tokens_per_rdma_rank,
-        num_tokens_per_expert_dispatch,
-        is_token_in_rank,
-        _,
-    ) = buffer.get_dispatch_layout(
-        topk_idx=selected_experts_indices, num_experts=num_experts
-    )
-
-    # Dispatch tokens to experts
-    (
-        hidden_states,
-        dispatched_indices,
-        dispatched_expert_scores,
-        num_tokens_per_expert,
-        handle_id,
-    ) = torch.ops.deepep.dispatch(
-        hidden_states,
-        selected_experts_indices,
-        top_scores,
-        num_tokens_per_rank,
-        num_tokens_per_rdma_rank,
-        is_token_in_rank,
-        num_tokens_per_expert_dispatch,
-    )
+    if _noop_routing:
+        # EXPERIMENT: skip dispatch layout computation
+        ep_size = group.size()
+        num_tokens_per_rank = torch.zeros(ep_size, dtype=torch.int64, device=hidden_states.device)
+        num_tokens_per_rdma_rank = torch.zeros(ep_size, dtype=torch.int64, device=hidden_states.device)
+        num_tokens_per_expert_dispatch = torch.zeros(num_experts, dtype=torch.int64, device=hidden_states.device)
+        is_token_in_rank = torch.zeros(hidden_states.shape[0], ep_size, dtype=torch.bool, device=hidden_states.device)
+    else:
+        # Calculate dispatch layout before actual dispatch
+        (
+            num_tokens_per_rank,
+            num_tokens_per_rdma_rank,
+            num_tokens_per_expert_dispatch,
+            is_token_in_rank,
+            _,
+        ) = buffer.get_dispatch_layout(
+            topk_idx=selected_experts_indices, num_experts=num_experts
+        )
+    if _skip_deepep:
+        # EXPERIMENT: skip DeepEP dispatch (no-op communication)
+        num_tokens = hidden_states.shape[0]
+        dispatched_indices = torch.zeros(num_tokens, selected_experts_indices.shape[1], dtype=torch.long, device=hidden_states.device)
+        dispatched_expert_scores = top_scores
+        num_tokens_per_expert = torch.zeros(num_local_experts, dtype=torch.int32, device='cpu')
+        handle_id = -1
+    else:
+        (
+            hidden_states,
+            dispatched_indices,
+            dispatched_expert_scores,
+            num_tokens_per_expert,
+            handle_id,
+        ) = torch.ops.deepep.dispatch(
+            hidden_states,
+            selected_experts_indices,
+            top_scores,
+            num_tokens_per_rank,
+            num_tokens_per_rdma_rank,
+            is_token_in_rank,
+            num_tokens_per_expert_dispatch,
+        )
 
     num_recv_tokens = hidden_states.shape[0]
 
@@ -496,6 +504,12 @@ def combine_tokens(
         hidden_states, state.permuted_indices, state.num_recv_tokens
     )
 
-    hidden_states = torch.ops.deepep.combine(hidden_states, state.handle_id)
+    import os as _os
+    _noop_level = int(_os.environ.get("NOOP_LEVEL", "0"))
+    _skip_deepep = _noop_level >= 4 or _os.environ.get("NOOP_DEEPEP", "0") == "1"
+    if _skip_deepep:
+        pass  # skip combine
+    else:
+        hidden_states = torch.ops.deepep.combine(hidden_states, state.handle_id)
 
     return hidden_states
