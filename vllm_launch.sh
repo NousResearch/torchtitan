@@ -10,7 +10,7 @@ if [[ "$SLURM_NODEID" -eq 0 ]]; then
     echo "Starting trajectory handler..."
     run-api > ${LOGDIR}/api.log 2>&1 &
     python $PYTHON_SCRIPT serve --slurm=True $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
-    deactivate
+     eactivate
     echo "Started trajectory handler..."
 fi
 echo $SLURM_NODEID ", " $NUM_TRAINING_NODES
@@ -30,12 +30,13 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
     # export NCCL_P2P_DISABLE=1
 #    export NCCL_IB_DISABLE=1
 
+    export NCCL_IB_DISABLE=1
+    export NCCL_P2P_LEVEL=SYS
+
     # debugging flags (optional)
-    export NCCL_DEBUG=WARN
+    export NCCL_DEBUG=INFO
+    export NCCL_DEBUG_SUBSYS=NET
     export PYTHONFAULTHANDLER=1
-    # optional debug settings
-    # export NCCL_DEBUG=INFO
-    # NCCL_DEBUG_SUBSYS=INIT,GRAPH,ENV
 
 #    export LD_LIBRARY_PATH=/opt/amazon/efa/lib:$LD_LIBRARY_PATH
     export LD_LIBRARY_PATH=/usr/local/lib/:$LD_LIBRARY_PATH
@@ -44,10 +45,10 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 
     # on your cluster you might need these:
     # set the network interface
-#    export NCCL_SOCKET_IFNAME="eth0,en,eth,em,bond"
-#    export NCCL_BUFFSIZE=2097152
-#    export TORCH_DIST_INIT_BARRIER=1
-#    export FI_EFA_SET_CUDA_SYNC_MEMOPS=0
+    export NCCL_SOCKET_IFNAME=bond0
+    export NCCL_BUFFSIZE=2097152
+    export TORCH_DIST_INIT_BARRIER=1
+    export FI_EFA_SET_CUDA_SYNC_MEMOPS=0
 
 #    dcgmi profile --pause
     # adjust sbatch --ntasks and sbatch --nodes above and --nnodes below
@@ -79,6 +80,16 @@ else
     inference-node-wandb-watcher --api_addr ${API_ADDR} --tp 1 --node_num ${SLURM_NODEID} > ${LOGDIR}/wandb_${SLURM_NODEID}.log 2>&1  &
 
     source ${VLLM_ENV}/bin/activate
+
+    # Set NCCL network settings for vLLM weight sync
+    export NCCL_SOCKET_IFNAME=bond0
+    export NCCL_IB_DISABLE=1
+    export NCCL_P2P_LEVEL=SYS
+    export NCCL_BUFFSIZE=2097152
+    export TORCH_DIST_INIT_BARRIER=1
+    export FI_EFA_SET_CUDA_SYNC_MEMOPS=0
+    export NCCL_DEBUG=INFO
+    export NCCL_DEBUG_SUBSYS=NET
 
     PORT_BASE=9000
 
