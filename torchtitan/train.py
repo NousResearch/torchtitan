@@ -704,6 +704,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             loss = self.forward_backward_step(input_dict, labels)
             accumulated_losses.append(loss.detach())
 
+        # Release cached CUDA blocks so NCCL can allocate contiguous
+        # communication buffers for the grad-norm all-reduce.
+        torch.cuda.empty_cache()
+
         grad_norm = dist_utils.clip_grad_norm_(
             [p for m in self.model_parts for p in m.parameters()],
             self.job_config.training.max_norm,
