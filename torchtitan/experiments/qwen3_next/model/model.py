@@ -30,14 +30,53 @@ from .args import Qwen3NextModelArgs
 try:
     from fla.modules import FusedRMSNormGated
     from fla.ops.gated_delta_rule import chunk_gated_delta_rule
-    from fla.modules.convolution import causal_conv1d as causal_conv1d_fn
 
     HAS_FLA = True
 except ImportError:
     HAS_FLA = False
     FusedRMSNormGated = None
     chunk_gated_delta_rule = None
-    causal_conv1d_fn = None
+
+
+def causal_conv1d_fn(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    activation: str | None = None,
+    seq_idx: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, None]:
+    """Pure PyTorch causal conv1d — replaces the fla Triton kernel that
+    corrupts GPU memory under activation-checkpoint recomputation.
+
+    Args:
+        x: (B, C, L) input tensor
+        weight: (C, K) depthwise conv weights
+        bias: (C,) optional bias
+        activation: "silu" or None
+        seq_idx: (B, L) segment indices — resets conv state at document
+                 boundaries so the conv doesn't bleed across documents
+    """
+    C, K = weight.shape
+
+    if seq_idx is not None:
+        shifted = torch.cat(
+            [torch.full_like(seq_idx[:, :1], -1), seq_idx[:, :-1]], dim=1
+        )
+        boundary = (seq_idx != shifted).unsqueeze(1).expand_as(x)
+        x = x.clone()
+        for k in range(1, K):
+            mask = torch.zeros_like(boundary)
+            mask[:, :, k:] = boundary[:, :, :-k]
+            x = x.masked_fill(mask, 0.0)
+
+    x_padded = F.pad(x, (K - 1, 0))
+    w = weight.unsqueeze(1)  # (C, 1, K) for depthwise conv
+    out = F.conv1d(x_padded, w, bias, groups=C)
+
+    if activation == "silu":
+        out = F.silu(out)
+
+    return out, None
 
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
