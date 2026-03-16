@@ -17,10 +17,32 @@ LossFunction: TypeAlias = Callable[..., torch.Tensor]
 
 
 def cross_entropy_loss(pred: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """Common cross-entropy loss function for Transformer models training."""
-    return torch.nn.functional.cross_entropy(
-        pred.flatten(0, 1).float(), labels.flatten(0, 1)
-    )
+    """Chunked cross-entropy loss that avoids materializing full fp32 logits.
+
+    Processes the logits in chunks along the sequence dimension to keep peak
+    memory bounded regardless of seq_len x vocab_size.
+    """
+    pred = pred.flatten(0, 1)
+    labels = labels.flatten(0, 1)
+    chunk_size = 4096
+    n = pred.shape[0]
+
+    if n <= chunk_size:
+        return torch.nn.functional.cross_entropy(pred.float(), labels)
+
+    total_loss = torch.zeros((), device=pred.device, dtype=torch.float32)
+    num_valid = 0
+    for i in range(0, n, chunk_size):
+        chunk_pred = pred[i : i + chunk_size].float()
+        chunk_labels = labels[i : i + chunk_size]
+        valid = (chunk_labels != -100).sum()
+        if valid > 0:
+            total_loss = total_loss + torch.nn.functional.cross_entropy(
+                chunk_pred, chunk_labels, reduction="sum"
+            )
+            num_valid = num_valid + valid
+
+    return total_loss / num_valid
 
 
 def cross_entropy_loss_unreduced(
