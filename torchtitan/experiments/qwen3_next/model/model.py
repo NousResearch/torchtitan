@@ -38,14 +38,60 @@ from .args import Qwen3NextModelArgs
 try:
     from fla.modules import FusedRMSNormGated
     from fla.ops.gated_delta_rule import chunk_gated_delta_rule
-    from fla.modules.convolution import causal_conv1d as causal_conv1d_fn
 
     HAS_FLA = True
 except ImportError:
     HAS_FLA = False
     FusedRMSNormGated = None
     chunk_gated_delta_rule = None
-    causal_conv1d_fn = None
+
+
+try:
+    from causal_conv1d import causal_conv1d_fn as _cuda_causal_conv1d_fn
+
+    def causal_conv1d_fn(
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None = None,
+        activation: str | None = None,
+        seq_idx: torch.Tensor | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor, None]:
+        out = _cuda_causal_conv1d_fn(
+            x, weight, bias=bias, seq_idx=seq_idx, activation=activation
+        )
+        return out, None
+
+except ImportError:
+
+    def causal_conv1d_fn(
+        x: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None = None,
+        activation: str | None = None,
+        seq_idx: torch.Tensor | None = None,
+        **kwargs,
+    ) -> tuple[torch.Tensor, None]:
+        """Pure PyTorch fallback for when causal-conv1d is not installed."""
+        C, K = weight.shape
+
+        if seq_idx is not None:
+            shifted = torch.cat(
+                [torch.full_like(seq_idx[:, :1], -1), seq_idx[:, :-1]], dim=1
+            )
+            boundary = seq_idx != shifted  # (B, L)
+            dilated = boundary
+            for k in range(1, K):
+                dilated = dilated | F.pad(boundary[:, :-k], (k, 0))
+            x = x.masked_fill(dilated.unsqueeze(1), 0.0)
+
+        x_padded = F.pad(x, (K - 1, 0))
+        out = F.conv1d(x_padded, weight.unsqueeze(1), bias, groups=C)
+
+        if activation == "silu":
+            out = F.silu(out)
+
+        return out, None
 
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
@@ -941,6 +987,7 @@ class Qwen3NextModel(ModelProtocol):
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
         positions: torch.Tensor | None = None,
+        **kwargs,
     ):
         if attention_masks is None:
             attention_masks = self._build_simple_attention_masks(tokens)
