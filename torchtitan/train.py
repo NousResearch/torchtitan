@@ -811,6 +811,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             )
             accumulated_losses.append(loss.detach())
 
+        # Release cached CUDA blocks so NCCL can allocate contiguous
+        # communication buffers for the grad-norm all-reduce.
+        torch.cuda.empty_cache()
+
         # Track memory after forward/backward
         self.detailed_memory_tracker.measure("after_forward_backward", self.step)
         self.cuda_memory_tracker.measure_all("after_forward_backward", self.step)
