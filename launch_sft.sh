@@ -14,6 +14,7 @@ if [[ "${SLURM_NODEID:-0}" -ge "${NUM_TRAINING_NODES}" ]]; then
     exit 0
 fi
 
+set +u  # conda activate scripts may reference unbound variables
 if [[ -n "${TRAIN_ENV_COMMAND:-}" ]]; then
     eval "${TRAIN_ENV_COMMAND}"
 elif [[ -n "${TRAIN_ENV:-}" && -f "${TRAIN_ENV}/bin/activate" ]]; then
@@ -22,6 +23,7 @@ elif [[ -n "${TRAIN_ENV:-}" && -f "${TRAIN_ENV}/bin/activate" ]]; then
 else
     echo "WARNING: No training environment activation configured; using system Python." >&2
 fi
+set -u
 
 cd "${TRAIN_PATH}"
 
@@ -31,6 +33,7 @@ nodes_array=("${nodes[@]}")
 head_node=${nodes_array[0]}
 
 echo "Head node: ${head_node}, rendezvous IP: ${head_node_ip}"
+export TRITON_CACHE_DIR="/tmp/triton_${SLURM_JOB_ID}_${SLURM_NODEID}"
 export LOGLEVEL=INFO
 export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"
 export PYTHONFAULTHANDLER=1

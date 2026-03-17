@@ -23,6 +23,7 @@ mkdir -p logs/$SLURM_JOB_ID
 
 # set ulimit higher... dang async io
 ulimit -n 32000
+ulimit -l unlimited
 export LOGDIR="$(pwd)/logs/${SLURM_JOB_ID}"
 
 # echo slurm nodes
@@ -34,6 +35,6 @@ source "${TRAIN_PATH}/sft_env.sh"
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
 head_node=${nodes_array[0]}
-export head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+export head_node_ip=$(srun --overlap --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
 
-srun -l --export=ALL "${TRAIN_PATH}/launch_sft.sh"
+srun --overlap -l --export=ALL "${TRAIN_PATH}/launch_sft.sh"

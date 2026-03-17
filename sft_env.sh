@@ -31,8 +31,8 @@ export NCCL_IB_QPS_PER_CONNECTION=2
 export NCCL_IB_SPLIT_DATA_ON_QPS=0
 export NCCL_IGNORE_CPU_AFFINITY=1
 export NCCL_IB_HCA=mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1,mlx5_10:1,mlx5_13:1,mlx5_14:1,mlx5_15:1
-export NCCL_SOCKET_IFNAME=bond0
-export UCX_NET_DEVICES=bond0
+export NCCL_SOCKET_IFNAME=eth0
+export UCX_NET_DEVICES=eth0
 
 : "${TRAIN_ENV:=${TRAIN_PATH}/.venv}"
 : "${VENV_ENV:=}"
