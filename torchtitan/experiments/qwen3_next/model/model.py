@@ -57,10 +57,11 @@ try:
         seq_idx: torch.Tensor | None = None,
         **kwargs,
     ) -> tuple[torch.Tensor, None]:
+        # FLA convention is [B, T, D]; causal_conv1d expects [B, D, T]
         out = _cuda_causal_conv1d_fn(
-            x, weight, bias=bias, seq_idx=seq_idx, activation=activation
+            x.transpose(1, 2), weight, bias=bias, seq_idx=seq_idx, activation=activation
         )
-        return out, None
+        return out.transpose(1, 2), None
 
 except ImportError:
 
@@ -73,6 +74,8 @@ except ImportError:
         **kwargs,
     ) -> tuple[torch.Tensor, None]:
         """Pure PyTorch fallback for when causal-conv1d is not installed."""
+        # FLA convention is [B, T, D]; F.conv1d expects [B, D, T]
+        x = x.transpose(1, 2)
         C, K = weight.shape
 
         if seq_idx is not None:
@@ -91,7 +94,7 @@ except ImportError:
         if activation == "silu":
             out = F.silu(out)
 
-        return out, None
+        return out.transpose(1, 2), None
 
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
