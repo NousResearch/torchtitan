@@ -990,7 +990,7 @@ class Qwen3NextModel(ModelProtocol):
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
         positions: torch.Tensor | None = None,
-        **kwargs,
+        **kwargs
     ):
         if attention_masks is None:
             attention_masks = self._build_simple_attention_masks(tokens)
