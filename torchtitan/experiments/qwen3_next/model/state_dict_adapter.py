@@ -222,7 +222,7 @@ class Qwen3NextStateDictAdapter(MoEStateDictAdapter):
         hf_state_dict = {}
 
         for key, value in state_dict.items():
-            if "moe.experts" in key or "moe.shared_experts" in key:
+            if "moe.experts" in key and "moe.shared_experts" not in key:
                 abstract_key = re.sub(r"(\d+)", "{}", key, count=1)
                 if abstract_key not in to_hf_map:
                     continue
@@ -239,11 +239,7 @@ class Qwen3NextStateDictAdapter(MoEStateDictAdapter):
                     )
                     hf_state_dict.update(local_expert_fqn)
                 else:
-                    n_experts = (
-                        self.model_args.moe_args.num_experts
-                        if "shared" not in key
-                        else self.model_args.moe_args.num_shared_experts
-                    )
+                    n_experts = self.model_args.moe_args.num_experts
                     split_values = self._split_experts_weights(value, n_experts)
                     for expert_num in range(n_experts):
                         new_key = new_abstract_key.format(layer_num, expert_num)
@@ -268,15 +264,9 @@ class Qwen3NextStateDictAdapter(MoEStateDictAdapter):
         expert_weights_by_layer: dict[str, dict[str, dict]] = {}
 
         for key, value in hf_state_dict.items():
-            if "mlp.experts." in key or "mlp.shared_expert." in key:
-                abstract_key = re.sub(
-                    r"(\d+)", "{}", key, count=2 if "experts" in key else 1
-                )
-                if "experts" in key:
-                    layer_num, expert_num = re.findall(r"\d+", key)
-                else:
-                    layer_num = re.search(r"\d+", key).group(0)
-                    expert_num = None
+            if "mlp.experts." in key and "mlp.shared_expert." not in key:
+                abstract_key = re.sub(r"(\d+)", "{}", key, count=2)
+                layer_num, expert_num = re.findall(r"\d+", key)
                 titan_abstract_key = self.from_hf_map[abstract_key]
                 new_key = titan_abstract_key.format(layer_num)
 
@@ -285,7 +275,7 @@ class Qwen3NextStateDictAdapter(MoEStateDictAdapter):
                 if titan_abstract_key not in expert_weights_by_layer[layer_num]:
                     expert_weights_by_layer[layer_num][titan_abstract_key] = {}
                 expert_weights_by_layer[layer_num][titan_abstract_key][
-                    expert_num
+                    int(expert_num)
                 ] = value
 
                 if isinstance(value, DTensor):
@@ -295,17 +285,12 @@ class Qwen3NextStateDictAdapter(MoEStateDictAdapter):
                         layer_num,
                         value.device_mesh,
                     )
-                else:
-                    n_experts = (
-                        self.model_args.moe_args.num_experts
-                        if "experts" in key
-                        else self.model_args.moe_args.num_shared_experts
-                    )
+                else:  # keep this path to be compatible with offline conversion
                     stacked_value = self._concatenate_expert_weights(
                         expert_weights_by_layer,
                         titan_abstract_key,
                         layer_num,
-                        n_experts,
+                        self.model_args.moe_args.num_experts,
                     )
 
                 if stacked_value is not None:
