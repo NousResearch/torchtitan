@@ -34,6 +34,6 @@ source "${TRAIN_PATH}/sft_env.sh"
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )
 nodes_array=($nodes)
 head_node=${nodes_array[0]}
-export head_node_ip=$(srun --nodes=1 --ntasks=1 -w "$head_node" hostname --ip-address)
+export head_node_ip=$(getent hosts "$head_node" | awk '{print $1}')
 
 srun -l --export=ALL "${TRAIN_PATH}/launch_sft.sh"

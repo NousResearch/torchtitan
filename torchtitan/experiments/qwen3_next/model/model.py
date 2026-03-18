@@ -38,14 +38,30 @@ from .args import Qwen3NextModelArgs
 try:
     from fla.modules import FusedRMSNormGated
     from fla.ops.gated_delta_rule import chunk_gated_delta_rule
-    from fla.modules.convolution import causal_conv1d as causal_conv1d_fn
 
     HAS_FLA = True
 except ImportError:
     HAS_FLA = False
     FusedRMSNormGated = None
     chunk_gated_delta_rule = None
-    causal_conv1d_fn = None
+
+
+from causal_conv1d import causal_conv1d_fn as _cuda_causal_conv1d_fn
+
+
+def causal_conv1d_fn(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor | None = None,
+    activation: str | None = None,
+    seq_idx: torch.Tensor | None = None,
+    **kwargs,
+) -> tuple[torch.Tensor, None]:
+    # FLA convention is [B, T, D]; causal_conv1d expects [B, D, T]
+    out = _cuda_causal_conv1d_fn(
+        x.transpose(1, 2), weight, bias=bias, seq_idx=seq_idx, activation=activation
+    )
+    return out.transpose(1, 2), None
 
 
 # Adapted from https://github.com/pytorch/torchtune/blob/main/torchtune/models/qwen2/_positional_embeddings.py
@@ -941,6 +957,7 @@ class Qwen3NextModel(ModelProtocol):
         tokens: torch.Tensor,
         attention_masks: AttentionMasksType | None = None,
         positions: torch.Tensor | None = None,
+        **kwargs
     ):
         if attention_masks is None:
             attention_masks = self._build_simple_attention_masks(tokens)
