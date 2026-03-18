@@ -206,16 +206,50 @@ Or via command line:
 ./run_train.sh --debug.moe_force_load_balance
 ```
 
-### DeepEP Tuning
+### DeepEP Auto-Tuning
 
-The default DeepEP configuration is optimized for **B200 GPUs with EP=8**. If your setup differs, you may need to tune:
+DeepEP includes built-in auto-tuning that grid-searches kernel parameters (`num_sms`, `nvl_chunk`, `rdma_chunk`) at training startup. This automatically adapts to your GPU hardware and topology (intranode NVLink vs internode RDMA).
 
-**When to tune**:
-- Using different GPU hardware (H100/H800/A100)
-- Different expert parallel degree (EP ≠ 8)
+**Enable autotune** in your config:
+
+```toml
+[deepep]
+autotune = true           # Enable auto-tuning (default: false)
+# autotune_warmup = 5     # Warmup iterations per config (default: 5)
+# autotune_repeat = 10    # Timed iterations per config (default: 10)
+# autotune_verbose = false # Print every config result (default: false)
+```
+
+**What it does**:
+- Detects intranode (NVLink) vs internode (RDMA) topology automatically
+- Creates uniform round-robin routing for balanced benchmarking
+- Searches over SM counts (GPU-specific) and chunk sizes
+- Sets optimal `dispatch_config` and `combine_config` before training starts
+- Takes ~1-60s at startup depending on search space
+
+**When to use autotune**:
+- Different GPU hardware (B200, H100/H200, A100)
+- Different expert parallel degree or number of nodes
 - Different model architecture (hidden_size, num_experts, top_k)
 
-**How to tune**: See [scripts/deepep/torchtitan_deepep_tune/README.md](../../../scripts/deepep/torchtitan_deepep_tune/README.md)
+**Manual configuration** (when autotune is disabled):
+
+```toml
+[deepep]
+autotune = false
+num_sms = 24              # Number of SMs for DeepEP kernels
+nvl_buffer_size = 256     # NVLink buffer size
+rdma_buffer_size = 128    # RDMA buffer size (internode only)
+```
+
+**Example autotune output** (1-node, 8× B200):
+```
+[DeepEP Autotune] intranode (8 GPUs) on NVIDIA B200
+[DeepEP Autotune] Search space: sms=[24, 32, 48, 64]
+[DeepEP Autotune] Total: 60 dispatch + 64 combine = 124 configs
+  DISPATCH (num_sms=64): Best: nvl=32 -> 42.1 GB/s, Speedup: 4.10x
+  COMBINE  (num_sms=64): Best: nvl=15 -> 88.5 GB/s, Speedup: 15.90x
+```
 
 ---
 
