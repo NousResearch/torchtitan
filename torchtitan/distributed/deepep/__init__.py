@@ -14,6 +14,7 @@ from .deepep import (
     get_tuned_configs,
     run_deepep_autotune_if_enabled,
     set_tuned_configs,
+    setup_deepep,
     sync_combine,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "get_tuned_configs",
     "run_deepep_autotune_if_enabled",
     "set_tuned_configs",
+    "setup_deepep",
     "sync_combine",
 ]

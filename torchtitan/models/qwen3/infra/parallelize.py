@@ -104,42 +104,12 @@ def parallelize_qwen3(
         )
 
     # Check if using DeepEP for MoE communication
-    if job_config.parallelism.expert_parallel_comm_backend == "deepep":
-        use_deepep = True
+    # Import deepep module to register custom ops before accessing them
+    import torchtitan.distributed.deepep  # noqa: F401 - registers torch.ops.deepep
 
-        # Import deepep module to register custom ops before accessing them
-        import torchtitan.distributed.deepep  # noqa: F401 - registers torch.ops.deepep
+    from torchtitan.distributed.deepep import setup_deepep
 
-        _op_sac_save_list.add(torch.ops.deepep.dispatch.default)
-        _op_sac_save_list.add(torch.ops.deepep.combine.default)
-
-        # Upgrade MoE to DeepEPMoE on each transformer block.
-        # DeepEPMoE overrides forward() to pass routing info (5-tuple) to experts,
-        # which DeepEPExpertParallel hooks expect for dispatch/combine.
-        from torchtitan.models.moe.moe_deepep import DeepEPMoE
-
-        for transformer_block in model.layers.values():
-            if getattr(transformer_block, "moe_enabled", False):
-                moe = transformer_block.moe
-                # DeepEPMoE is a subclass of MoE, so __class__ swap is safe
-                moe.__class__ = DeepEPMoE
-                # DeepEP doesn't use reorderer - routing handled by DeepEPExpertParallel
-                moe.reorderer = None
-
-        from torchtitan.distributed.deepep import run_deepep_autotune_if_enabled
-
-        ep_mesh = parallel_dims.get_optional_mesh("ep")
-        if ep_mesh is not None:
-            run_deepep_autotune_if_enabled(
-                deepep_config=job_config.deepep,
-                ep_group=ep_mesh.get_group(),
-                num_tokens=job_config.training.local_batch_size * job_config.training.seq_len,
-                hidden=model.model_args.dim,
-                num_experts=model.model_args.moe_args.num_experts,
-                num_topk=model.model_args.moe_args.top_k,
-            )
-    else:
-        use_deepep = False
+    use_deepep = setup_deepep(model, job_config, parallel_dims, _op_sac_save_list)
 
     if parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         dual_pipe_v = get_dual_pipe_v_flag(job_config, parallel_dims)
