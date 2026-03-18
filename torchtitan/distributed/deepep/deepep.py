@@ -1407,18 +1407,6 @@ def setup_deepep(model, job_config, parallel_dims, op_sac_save_list) -> bool:
     if job_config.parallelism.expert_parallel_comm_backend != "deepep":
         return False
 
-    if not parallel_dims.ep_enabled:
-        raise ValueError(
-            "DeepEP requires expert parallelism (ep_degree > 1). "
-            "The DeepEP MoE model code does not support EP=1. "
-            "Please set expert_parallel_degree > 1 or use standard communication backend."
-        )
-    if parallel_dims.etp_enabled:
-        raise NotImplementedError(
-            "DeepEP with Expert Tensor Parallelism (ETP) is not supported yet. "
-            "Please set expert_tensor_parallel_degree=1 or use standard communication backend."
-        )
-
     # Register DeepEP custom ops for SAC
     op_sac_save_list.add(torch.ops.deepep.dispatch.default)
     op_sac_save_list.add(torch.ops.deepep.combine.default)

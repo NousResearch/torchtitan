@@ -97,12 +97,28 @@ def parallelize_deepseekv3(
         maybe_enable_async_tp(job_config, tp_mesh)
 
     # Check if using DeepEP for MoE communication
-    # Import deepep module to register custom ops before accessing them
-    import torchtitan.distributed.deepep  # noqa: F401 - registers torch.ops.deepep
+    if job_config.parallelism.expert_parallel_comm_backend == "deepep":
+        if not parallel_dims.ep_enabled:
+            raise ValueError(
+                "DeepEP requires expert parallelism (ep_degree > 1). "
+                "The DeepEP MoE model code does not support EP=1. "
+                "Please set expert_parallel_degree > 1 or use standard communication backend."
+            )
+        if parallel_dims.etp_enabled:
+            raise NotImplementedError(
+                "DeepEP with Expert Tensor Parallelism (ETP) is not supported yet. "
+                "Please set expert_tensor_parallel_degree=1 or use standard communication backend."
+            )
 
-    from torchtitan.distributed.deepep import setup_deepep
+        use_deepep = True
 
-    use_deepep = setup_deepep(model, job_config, parallel_dims, _op_sac_save_list)
+        # Import deepep module to register custom ops before accessing them
+        import torchtitan.distributed.deepep  # noqa: F401 - registers torch.ops.deepep
+
+        _op_sac_save_list.add(torch.ops.deepep.dispatch.default)
+        _op_sac_save_list.add(torch.ops.deepep.combine.default)
+    else:
+        use_deepep = False
 
     if parallel_dims.tp_enabled or parallel_dims.ep_enabled:
         dual_pipe_v = get_dual_pipe_v_flag(job_config, parallel_dims)
