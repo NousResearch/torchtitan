@@ -284,13 +284,21 @@ def permute_1d(w, n_heads):
 
 
 def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_id):
+    # Spawned subprocess doesn't inherit env vars — set NCCL heartbeat timeout explicitly
+    # to avoid watchdog killing this process while waiting between weight updates.
+    os.environ["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "7200"
     NUM_SGLANG_NODES = int(os.environ.get("NUM_INFERENCE_NODES", -1))
     CUDA_VISIBLE_DEVICES = str(os.environ.get("CUDA_VISIBLE_DEVICES", -1)).split(",")
     SGLANG_UPDATE_PROC_DEBUG = int(os.environ.get("SGLANG_UPDATE_PROC_DEBUG", 0))
     # if NUM_SGLANG_NODES == -1:
     #     print(f"NUM_SGLANG_NODES is not set, exiting weight updater process", flush=True)
     #     return
-    world_size = NUM_SGLANG_NODES * 8 if NUM_SGLANG_NODES != 0 else 4
+    # NUM_ROLLOUT_GPUS_PER_NODE: how many GPUs per inference node are rollout workers
+    # (may be < 8 if some GPUs are reserved for judge, etc.)
+    # MIN_ROLLOUT_GPU: the physical GPU index of the first rollout worker (e.g. 2 if GPUs 0+1 are judge)
+    rollout_gpus_per_node = int(os.environ.get("NUM_ROLLOUT_GPUS_PER_NODE", 8))
+    min_rollout_gpu = int(os.environ.get("MIN_ROLLOUT_GPU", 0))
+    world_size = NUM_SGLANG_NODES * rollout_gpus_per_node if NUM_SGLANG_NODES != 0 else 4
     hostnames = get_hostnames()
     # process for together cluster...
     for key, val in state_dict.items():
@@ -307,8 +315,7 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         print("Master address is None, exiting weight updater process", flush=True)
         return
     rank = -1
-    # Probably always 4 in single node? But just in case someone needs tp for whatever reason
-    ranks_per_node = 8 if NUM_SGLANG_NODES != 0 else 4
+    ranks_per_node = rollout_gpus_per_node if NUM_SGLANG_NODES != 0 else 4
     if NUM_SGLANG_NODES == 0:
         rank = (
             int(CUDA_VISIBLE_DEVICES[gpu_id]) - 4
@@ -317,7 +324,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
         for i, url in enumerate(urls):
             print(f"Worker {i} url: {url}", flush=True)
             if url in hostnames:
-                rank = ranks_per_node * i + int(CUDA_VISIBLE_DEVICES[gpu_id])
+                # Use contiguous ranks: offset GPU index by min_rollout_gpu so ranks start at 0
+                rank = ranks_per_node * i + (int(CUDA_VISIBLE_DEVICES[gpu_id]) - min_rollout_gpu)
     if rank == -1:
         print("Rank is -1, exiting weight updater process", flush=True)
         return
@@ -325,16 +333,22 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
     json_data = get_json_data()
     param_name_list = list(json_data["param_mappings"].keys())
     param_name_list.sort()
-    if rank == 0:
-        print("Rank 0, writing json of weight dtypes...", flush=True)
+    if rank < ranks_per_node:
+        # All workers on the first inference node write dtypes atomically (atomic
+        # rename so concurrent writes of identical content are safe).
+        print(f"Rank {rank} (first inference node), writing json of weight dtypes...", flush=True)
+        import tempfile
         name_conversions = get_name_conversions(json_data["param_mappings"])
         weight_dtypes = {}
         for name in state_dict.keys():
             tt_names = name_conversions[name]
             for tt_name in tt_names:
                 weight_dtypes[tt_name] = str(state_dict[name].dtype).split(".")[-1]
-        with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "w") as f:
-            json.dump(weight_dtypes, f)
+        logdir = os.environ['LOGDIR']
+        with tempfile.NamedTemporaryFile(mode='w', dir=logdir, delete=False, suffix='.tmp') as tmp_f:
+            json.dump(weight_dtypes, tmp_f)
+            tmp_path = tmp_f.name
+        os.replace(tmp_path, f"{logdir}/sglang_dtypes.json")
     print("Got json", flush=True)
     num_training_gpus = json_data["dp_shard_degree"] * json_data["tp_degree"]
     total_group_size = num_training_gpus + world_size
@@ -342,6 +356,8 @@ def weight_updater_process(state_dict, q_heads, kv_heads, tp_rank, tp_size, gpu_
     print(f"Total group size: {total_group_size}", flush=True)
     print(f"Num training gpus: {num_training_gpus}", flush=True)
     print(f"Creating process group with rank {rank} of {total_group_size}", flush=True)
+    # sglang_group initializes the default process group (required by _new_process_group_helper
+    # used in our custom init_process_group below). world_size = rollout workers only.
     sglang_group = torch.distributed.init_process_group(
         backend="gloo",
         init_method=f"tcp://{master_sglang_addr}",

@@ -40,7 +40,7 @@ def wait_for_sglang(servers):
         status_code = 503
         while status_code == 503:
             try:
-                response = requests.get(f"http://{server}/health_generate")
+                response = requests.get(f"http://{server}/health_generate", timeout=120)
                 status_code = response.status_code
             except Exception:
                 # No connection...

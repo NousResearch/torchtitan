@@ -63,7 +63,7 @@ async def health_generate() -> Response:
     If the server is not running anything, this request will be run, so we know whether the server is healthy.
     """
     assert engine is not None
-    sampling_params = SamplingParams()
+    sampling_params = SamplingParams(max_tokens=1)
     request_id = random_uuid()
     results_generator = engine.generate(
         {"prompt_token_ids": [0]}, sampling_params, request_id

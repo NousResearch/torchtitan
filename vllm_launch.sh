@@ -12,7 +12,7 @@ if [[ "$SLURM_NODEID" -eq 0 ]]; then
     # Start trajectory handler
     echo "Starting trajectory handler..."
     ${API_ENV}/bin/run-api --port 8001 > ${LOGDIR}/api.log 2>&1 &
-    ${API_ENV}/bin/python $PYTHON_SCRIPT serve --slurm=True $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
+    ${API_ENV}/bin/python $PYTHON_SCRIPT serve --slurm=False $PYTHON_ARGS > ${LOGDIR}/env_server.log 2>&1 &
     echo "Started trajectory handler..."
 fi
 echo $SLURM_NODEID ", " $NUM_TRAINING_NODES
@@ -53,23 +53,50 @@ if [[ "$SLURM_NODEID" -lt "$NUM_TRAINING_NODES" ]]; then
 #    dcgmi profile --pause
     # adjust sbatch --ntasks and sbatch --nodes above and --nnodes below
     # to your specific node count, and update target launch file.
-    ${TRAIN_ENV}/bin/torchrun --nproc_per_node 8 --nnodes ${NUM_TRAINING_NODES} --rdzv_id 101 --rdzv_backend c10d --rdzv_endpoint="$head_node_ip:29500"  --role rank --tee 3 \
+    ${TRAIN_ENV}/bin/torchrun --nproc_per_node 8 --nnodes ${NUM_TRAINING_NODES} --rdzv_id 101 --rdzv_backend static --rdzv_endpoint="$head_node_ip:29500" --node-rank=$SLURM_NODEID --role rank --tee 3 \
 -m torchtitan.grpo_train --job.config_file ${CONFIG_FILE}  --grpo.sglang_slurm_num_nodes ${NUM_INFERENCE_NODES} ${TRAINING_ARGS}
     scancel $SLURM_JOBID
 #    dcgmi profile --resume
 # else we're inferencing...
 else
 
-    # Setup 8 vllm instances with model in vllm venv
+    # Kill any stale vllm processes from previous jobs on this inference node
+    pkill -f 'vllm_runner' || true
+    pkill -f 'vllm.entrypoints' || true
+    sleep 3
+
+    # GPUs 0+1 are reserved for the judge (tp=2); rollout workers use GPUs 2-7
+    export NUM_ROLLOUT_GPUS_PER_NODE=6
+    export MIN_ROLLOUT_GPU=2
+
+    # Setup 6 rollout vllm instances on GPUs 2-7
     echo "Starting vllm instances..."
 
-    export TRITON_CACHE_DIR=${LOGDIR}/cache/triton_${SLURM_JOB_ID}_${SLURM_NODEID}
+    export TRITON_CACHE_DIR=/tmp/triton_${SLURM_JOB_ID}_${SLURM_NODEID}
     mkdir -p ${TRITON_CACHE_DIR}
+    export FLASHINFER_WORKSPACE_BASE=/tmp/flashinfer_${SLURM_JOB_ID}_${SLURM_NODEID}
+    mkdir -p ${FLASHINFER_WORKSPACE_BASE}
 
     # Startup wandb monitoring...
     API_ADDR="http://${head_node_ip}:8000"
     ${API_ENV}/bin/inference-node-wandb-watcher --api_addr ${API_ADDR} --tp 1 --node_num ${SLURM_NODEID} > ${LOGDIR}/wandb_${SLURM_NODEID}.log 2>&1  &
 
+
+    # Start judge model (Qwen3.5-27B, tp=2) on GPUs 0+1, port 9010
+    JUDGE_MODEL=${JUDGE_MODEL:-"Qwen/Qwen3.5-27B"}
+    JUDGE_PORT=${JUDGE_PORT:-9010}
+    echo "Starting judge vllm on GPUs 0+1, port ${JUDGE_PORT}, model ${JUDGE_MODEL}"
+    JUDGE_ENV=${JUDGE_ENV:-"/home/mormio/miniconda3/envs/grpo-vllm-judge"}
+    LD_PRELOAD="${JUDGE_ENV}/lib/libstdc++.so.6" FLASHINFER_DISABLE_VERSION_CHECK=1 CUDA_VISIBLE_DEVICES=0,1 nohup ${JUDGE_ENV}/bin/vllm serve ${JUDGE_MODEL} \
+      --host 0.0.0.0 \
+      --tensor-parallel-size 2 \
+      --gpu-memory-utilization 0.90 \
+      --max-model-len 65536 \
+      --dtype="bfloat16" \
+      --reasoning-parser qwen3 \
+      --language-model-only \
+      --port ${JUDGE_PORT} > ${LOGDIR}/vllm_judge.log 2>&1 &
+    sleep 5
 
     PORT_BASE=9000
 
@@ -77,7 +104,7 @@ else
     # this assumes you can run it with tp=1
     # if not, well, good luck with single node training, I'll pray for you
     LOG_OFFSET=$((SLURM_NODEID * 8))
-    for i in {0..6}; do
+    for i in {2..6}; do
         GPU_ID=$i
         LOG_ID=$((GPU_ID + LOG_OFFSET))
         PORT=$((PORT_BASE + i))
@@ -103,5 +130,6 @@ else
       --max-model-len ${VLLM_MAX_MODEL_LEN:-65536} \
       --dtype="bfloat16" \
       --log-level="error" \
-      --port 9007 > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1
+      --port 9007 > ${LOGDIR}/vllm_${LOG_ID}.log 2>&1 &
+    wait
 fi
