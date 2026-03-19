@@ -126,18 +126,6 @@ def parallelize_qwen3(
                 # DeepEP doesn't use reorderer - routing handled by DeepEPExpertParallel
                 moe.reorderer = None
 
-        from torchtitan.distributed.deepep import run_deepep_autotune_if_enabled
-
-        ep_mesh = parallel_dims.get_optional_mesh("ep")
-        if ep_mesh is not None:
-            run_deepep_autotune_if_enabled(
-                deepep_config=job_config.deepep,
-                ep_group=ep_mesh.get_group(),
-                num_tokens=job_config.training.local_batch_size * job_config.training.seq_len,
-                hidden=model.model_args.dim,
-                num_experts=model.model_args.moe_args.num_experts,
-                num_topk=model.model_args.moe_args.top_k,
-            )
     else:
         use_deepep = False
 
