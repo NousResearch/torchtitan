@@ -532,10 +532,6 @@ class AutotuneResult:
     is_internode: bool = False
     best_dispatch_sms: int = 24
     best_combine_sms: int = 24
-    worst_dispatch_config: Optional[Tuple[int, ...]] = None
-    worst_dispatch_bandwidth_gbps: float = 0.0
-    worst_combine_config: Optional[Tuple[int, ...]] = None
-    worst_combine_bandwidth_gbps: float = 0.0
 
 
 def _bench_fn(fn, warmup: int = 3, repeat: int = 5) -> float:
@@ -581,15 +577,20 @@ def _detect_internode(buffer: Buffer) -> Tuple[bool, int, int]:
 
 
 def _get_gpu_sm_range(default_sms: int = 24) -> list:
-    """Auto-detect GPU type and return appropriate SM search range."""
+    """Auto-detect GPU type and return appropriate SM search range.
+
+    Based on https://nousresearch.com/moe-scaling-field-notes/:
+    num_sms=128 gave 2.3-2.6x speedup over num_sms=24 on B200.
+    Must be even (DeepEP constraint).
+    """
     try:
         gpu_name = torch.cuda.get_device_name(0).lower()
         if "b200" in gpu_name or "b100" in gpu_name:
-            return [24, 32, 48, 64]
+            return [20, 24, 32, 48, 64, 96, 128]
         elif "h200" in gpu_name or "h100" in gpu_name:
-            return [16, 20, 24, 28, 32]
+            return [16, 20, 24, 32, 48, 64, 96, 128]
         elif "a100" in gpu_name:
-            return [16, 20, 24, 28, 32]
+            return [16, 20, 24, 32, 48, 64]
         else:
             return [default_sms]
     except Exception:
@@ -677,34 +678,40 @@ def autotune_deepep(
     ) = buffer.get_dispatch_layout(topk_idx, num_experts)
 
     # ================================================================
-    # Phase 0: Tune buffer sizes (nvl_buffer_size, rdma_buffer_size)
+    # Full Cartesian search over all Config parameters
     # ================================================================
-    # DeepEP's built-in values vary by rank count (256→288→480→560→720).
-    # Search around the built-in value to find optimal for this setup.
+    # Based on https://nousresearch.com/moe-scaling-field-notes/:
+    # - num_sms up to 128 gives 2.3-2.6x speedup over 24
+    # - nvl_buffer_size up to 1024 can be optimal
+    # - All params interact, so search jointly
     try:
         builtin_nvl_buf = Buffer.get_dispatch_config(num_ranks).nvl_buffer_size
     except Exception:
         builtin_nvl_buf = 256
+    min_nvl_buf = max(builtin_nvl_buf, 256)
 
-    # Only search buffer sizes >= DeepEP's built-in value (smaller causes CUDA crashes).
-    # For internode 64 ranks, builtin is 288. Values like 256 or 128 cause illegal memory access.
-    min_nvl_buf = max(builtin_nvl_buf, 288) if is_internode else builtin_nvl_buf
     if is_internode:
-        nvl_buf_candidates = sorted(set(
-            v for v in [min_nvl_buf, 288, 384, 480, 512, 560, 720]
+        nvl_chunk_range = list(range(2, 48, 4))
+        rdma_chunk_range = list(range(4, 36, 4))
+        nvl_buf_range = sorted(set(
+            v for v in [min_nvl_buf, 256, 288, 384, 512, 720, 1024]
             if v >= min_nvl_buf
         ))
-        rdma_buf_candidates = [128, 256]
+        rdma_buf_range = [128, 256]
     else:
-        nvl_buf_candidates = sorted(set(
+        nvl_chunk_range = list(range(2, 36, 2))
+        rdma_chunk_range = [16]  # dummy
+        nvl_buf_range = sorted(set(
             v for v in [min_nvl_buf, 256, 384, 512]
             if v >= min_nvl_buf
         ))
-        rdma_buf_candidates = [rdma_buffer_size]  # not used for intranode
+        rdma_buf_range = [rdma_buffer_size]
 
-    # Use mid-range chunk values for buffer tuning
-    mid_nvl_chunk = 16
-    mid_rdma_chunk = 8
+    num_dispatch_configs = (
+        len(sms_range) * len(nvl_chunk_range) * len(rdma_chunk_range)
+        * len(nvl_buf_range) * len(rdma_buf_range)
+    )
+    num_combine_configs = num_dispatch_configs  # same search space
 
     if rank == 0:
         gpu_name = torch.cuda.get_device_name(0)
@@ -718,124 +725,30 @@ def autotune_deepep(
             f"[DeepEP Autotune] tokens={num_tokens}, hidden={hidden}, "
             f"experts={num_experts}, topk={num_topk}"
         )
-
-    best_buf_time = float("inf")
-    best_nvl_buf = builtin_nvl_buf
-    best_rdma_buf = rdma_buffer_size
-
-    if rank == 0:
         logger.info(
-            f"[DeepEP Autotune] Phase 0: Tuning buffer sizes "
-            f"(nvl_buf={nvl_buf_candidates}, rdma_buf={rdma_buf_candidates})"
+            f"[DeepEP Autotune] Full Cartesian search:"
+            f" sms={sms_range}, nvl_chunk={nvl_chunk_range},"
+            f" rdma_chunk={rdma_chunk_range},"
+            f" nvl_buf={nvl_buf_range}, rdma_buf={rdma_buf_range}"
         )
-
-    for nvl_buf in nvl_buf_candidates:
-        for rdma_buf in rdma_buf_candidates:
-            try:
-                if is_internode:
-                    cfg = Config(sms_range[0], mid_nvl_chunk, nvl_buf, mid_rdma_chunk, rdma_buf)
-                else:
-                    cfg = Config(sms_range[0], mid_nvl_chunk, nvl_buf)
-
-                def buf_bench_fn():
-                    buffer.dispatch(
-                        x,
-                        topk_idx=topk_idx,
-                        topk_weights=topk_weights,
-                        num_tokens_per_rank=num_tokens_per_rank,
-                        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-                        is_token_in_rank=is_token_in_rank,
-                        num_tokens_per_expert=num_tokens_per_expert,
-                        config=cfg,
-                    )
-
-                t = _bench_fn(buf_bench_fn, warmup, repeat)
-                bw = (x.numel() * 2) / 1e9 / t if t > 0 else 0
-
-                if rank == 0 and verbose:
-                    logger.info(
-                        f"  nvl_buf={nvl_buf}, rdma_buf={rdma_buf}: {bw:.1f} GB/s"
-                    )
-
-                if t < best_buf_time:
-                    best_buf_time = t
-                    best_nvl_buf = nvl_buf
-                    best_rdma_buf = rdma_buf
-            except RuntimeError:
-                continue
-
-    nvl_buffer_size = best_nvl_buf
-    rdma_buffer_size = best_rdma_buf
-
-    if rank == 0:
         logger.info(
-            f"[DeepEP Autotune] Best buffer sizes: "
-            f"nvl_buffer={nvl_buffer_size}, rdma_buffer={rdma_buffer_size}"
-        )
-
-    # ================================================================
-    # Phase 1+2: Tune chunk sizes (existing logic)
-    # ================================================================
-    # Search space — covers DeepEP's built-in defaults for all rank counts.
-    if is_internode:
-        nvl_dispatch_range = list(range(2, 48, 2))
-        rdma_dispatch_range = list(range(4, 36, 4))
-        nvl_combine_range = list(range(1, 16, 1))
-        rdma_combine_range = list(range(4, 36, 4))
-    else:
-        nvl_dispatch_range = list(range(2, 36, 2))
-        rdma_dispatch_range = [16]  # dummy for intranode
-        nvl_combine_range = list(range(1, 17, 1))
-        rdma_combine_range = [16]  # dummy for intranode
-
-    num_dispatch_configs = (
-        len(sms_range) * len(nvl_dispatch_range) * len(rdma_dispatch_range)
-    )
-    num_combine_configs = (
-        len(sms_range) * len(nvl_combine_range) * len(rdma_combine_range)
-    )
-    total_configs = num_dispatch_configs + num_combine_configs
-
-    if rank == 0:
-        logger.info(f"[DeepEP Autotune] Search space: sms={sms_range}")
-        if is_internode:
-            logger.info(
-                f"  dispatch: nvl={nvl_dispatch_range[0]}-{nvl_dispatch_range[-1]}"
-                f" ({len(nvl_dispatch_range)}), rdma={rdma_dispatch_range[0]}"
-                f"-{rdma_dispatch_range[-1]} ({len(rdma_dispatch_range)})"
-            )
-            logger.info(
-                f"  combine:  nvl={nvl_combine_range[0]}-{nvl_combine_range[-1]}"
-                f" ({len(nvl_combine_range)}), rdma={rdma_combine_range[0]}"
-                f"-{rdma_combine_range[-1]} ({len(rdma_combine_range)})"
-            )
-        else:
-            logger.info(
-                f"  dispatch: nvl={nvl_dispatch_range[0]}-{nvl_dispatch_range[-1]}"
-                f" ({len(nvl_dispatch_range)})"
-            )
-            logger.info(
-                f"  combine:  nvl={nvl_combine_range[0]}-{nvl_combine_range[-1]}"
-                f" ({len(nvl_combine_range)})"
-            )
-        logger.info(
-            f"[DeepEP Autotune] Total: {num_dispatch_configs} dispatch + "
-            f"{num_combine_configs} combine = {total_configs} configs"
+            f"[DeepEP Autotune] {num_dispatch_configs} dispatch + "
+            f"{num_combine_configs} combine configs"
         )
         logger.info(f"[DeepEP Autotune] warmup={warmup}, repeat={repeat}")
 
-    def make_config(sms: int, nvl_chunk: int, rdma_chunk: int = 16) -> Config:
+    def make_config(sms, nvl_chunk, nvl_buf, rdma_chunk=16, rdma_buf=128):
         if is_internode:
-            return Config(sms, nvl_chunk, nvl_buffer_size, rdma_chunk, rdma_buffer_size)
+            return Config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
         else:
-            return Config(sms, nvl_chunk, nvl_buffer_size)
+            return Config(sms, nvl_chunk, nvl_buf)
 
     # Initial dispatch to get handle and calculate bytes.
-    # Use middle-of-range values for initial dispatch to avoid timeouts
-    # on internode (small nvl/rdma chunks can timeout).
-    init_nvl = nvl_dispatch_range[len(nvl_dispatch_range) // 2]
-    init_rdma = rdma_dispatch_range[len(rdma_dispatch_range) // 2]
-    initial_config = make_config(sms_range[0], init_nvl, init_rdma)
+    init_nvl = nvl_chunk_range[len(nvl_chunk_range) // 2]
+    init_rdma = rdma_chunk_range[len(rdma_chunk_range) // 2]
+    init_nvl_buf = nvl_buf_range[0]
+    init_rdma_buf = rdma_buf_range[0]
+    initial_config = make_config(sms_range[0], init_nvl, init_nvl_buf, init_rdma, init_rdma_buf)
     recv_x, _, _, _, handle, _ = buffer.dispatch(
         x,
         topk_idx=topk_idx,
@@ -853,84 +766,120 @@ def autotune_deepep(
 
     autotune_start = time.time()
 
-    if is_internode:
-        # ====================================================================
-        # INTERNODE: Joint tuning of num_sms for best combined dispatch+combine
-        # ====================================================================
-        # For internode, only use the sms value that the initial dispatch
-        # validated (sms_range[0]). Sweeping sms on internode can cause
-        # DeepEP dispatch timeouts that fatally corrupt CUDA state
-        # (cudaErrorLaunchFailure). Only tune nvl/rdma chunk sizes.
-        sms_range = [sms_range[0]]
+    # --- Full Cartesian dispatch tuning ---
+    best_dispatch_time = float("inf")
+    worst_dispatch_time = 0.0
+    best_dispatch_sms = sms_range[0]
+    best_dispatch_nvl = nvl_chunk_range[0]
+    best_dispatch_rdma = rdma_chunk_range[0]
+    best_dispatch_nvl_buf = nvl_buf_range[0]
+    best_dispatch_rdma_buf = rdma_buf_range[0]
+    tested = 0
+    skipped = 0
 
-        if rank == 0:
-            logger.info(
-                "[DeepEP Autotune] Internode: tuning nvl/rdma chunks "
-                f"at num_sms={sms_range[0]}..."
-            )
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Tuning dispatch ({num_dispatch_configs} configs)..."
+        )
 
-        best_combined_time = float("inf")
-        best_sms = sms_range[0]
-        best_dispatch_nvl = nvl_dispatch_range[0]
-        best_dispatch_rdma = rdma_dispatch_range[0]
-        best_combine_nvl = nvl_combine_range[0]
-        best_combine_rdma = rdma_combine_range[0]
-        worst_dispatch_time = 0.0
-        worst_combine_time = 0.0
-        worst_dispatch_nvl = nvl_dispatch_range[0]
-        worst_dispatch_rdma = rdma_dispatch_range[0]
-        worst_combine_nvl = nvl_combine_range[0]
-        worst_combine_rdma = rdma_combine_range[0]
-        best_dispatch_time = float("inf")
-        best_combine_time = float("inf")
+    for sms in sms_range:
+        for nvl_buf in nvl_buf_range:
+            for rdma_buf in rdma_buf_range:
+                for nvl_chunk in nvl_chunk_range:
+                    for rdma_chunk in rdma_chunk_range:
+                        config = make_config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
 
-        for sms in sms_range:
-            if rank == 0:
-                logger.info(f"[DeepEP Autotune] Testing sms={sms}...")
+                        def dispatch_fn():
+                            buffer.dispatch(
+                                x,
+                                topk_idx=topk_idx,
+                                topk_weights=topk_weights,
+                                num_tokens_per_rank=num_tokens_per_rank,
+                                num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+                                is_token_in_rank=is_token_in_rank,
+                                num_tokens_per_expert=num_tokens_per_expert,
+                                config=config,
+                            )
 
-            # Find best dispatch config for this sms
-            sms_best_dispatch_time = float("inf")
-            sms_best_dispatch_nvl = nvl_dispatch_range[0]
-            sms_best_dispatch_rdma = rdma_dispatch_range[0]
+                        try:
+                            t = _bench_fn(dispatch_fn, warmup, repeat)
+                            tested += 1
+                        except RuntimeError:
+                            skipped += 1
+                            continue
 
-            for nvl_chunk in nvl_dispatch_range:
-                for rdma_chunk in rdma_dispatch_range:
-                    config = make_config(sms, nvl_chunk, rdma_chunk)
+                        if t < best_dispatch_time:
+                            best_dispatch_time = t
+                            best_dispatch_sms = sms
+                            best_dispatch_nvl = nvl_chunk
+                            best_dispatch_rdma = rdma_chunk
+                            best_dispatch_nvl_buf = nvl_buf
+                            best_dispatch_rdma_buf = rdma_buf
+                        if t > worst_dispatch_time:
+                            worst_dispatch_time = t
 
-                    def dispatch_fn():
-                        buffer.dispatch(
-                            x,
-                            topk_idx=topk_idx,
-                            topk_weights=topk_weights,
-                            num_tokens_per_rank=num_tokens_per_rank,
-                            num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-                            is_token_in_rank=is_token_in_rank,
-                            num_tokens_per_expert=num_tokens_per_expert,
-                            config=config,
-                        )
+    dispatch_elapsed = time.time() - autotune_start
+    if rank == 0:
+        best_bw = (
+            dispatch_recv_bytes / 1e9 / best_dispatch_time
+            if best_dispatch_time > 0
+            else 0
+        )
+        logger.info(
+            f"[DeepEP Autotune] Dispatch done: {tested} tested, "
+            f"{skipped} skipped in {dispatch_elapsed:.1f}s"
+        )
+        logger.info(
+            f"  Best: sms={best_dispatch_sms}, nvl={best_dispatch_nvl},"
+            f" rdma={best_dispatch_rdma},"
+            f" nvl_buf={best_dispatch_nvl_buf},"
+            f" rdma_buf={best_dispatch_rdma_buf}"
+            f" -> {best_bw:.1f} GB/s"
+        )
 
-                    try:
-                        t = _bench_fn(dispatch_fn, warmup, repeat)
-                    except RuntimeError:
-                        continue
+    # Re-dispatch with best config to get handle for combine tuning
+    best_dispatch_cfg = make_config(
+        best_dispatch_sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+        best_dispatch_rdma, best_dispatch_rdma_buf,
+    )
+    recv_x, _, _, _, handle, _ = buffer.dispatch(
+        x,
+        topk_idx=topk_idx,
+        topk_weights=topk_weights,
+        num_tokens_per_rank=num_tokens_per_rank,
+        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+        is_token_in_rank=is_token_in_rank,
+        num_tokens_per_expert=num_tokens_per_expert,
+        config=best_dispatch_cfg,
+    )
 
-                    if t < sms_best_dispatch_time:
-                        sms_best_dispatch_time = t
-                        sms_best_dispatch_nvl = nvl_chunk
-                        sms_best_dispatch_rdma = rdma_chunk
-                    if t > worst_dispatch_time:
-                        worst_dispatch_time = t
-                        worst_dispatch_nvl = nvl_chunk
-                        worst_dispatch_rdma = rdma_chunk
+    # --- Full Cartesian combine tuning ---
+    best_combine_time = float("inf")
+    worst_combine_time = 0.0
+    best_combine_sms = sms_range[0]
+    best_combine_nvl = nvl_chunk_range[0]
+    best_combine_rdma = rdma_chunk_range[0]
+    best_combine_nvl_buf = nvl_buf_range[0]
+    best_combine_rdma_buf = rdma_buf_range[0]
+    tested = 0
+    skipped = 0
+    current_sms = best_dispatch_sms
 
-            if sms_best_dispatch_time == float("inf"):
-                continue
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Tuning combine ({num_combine_configs} configs)..."
+        )
 
-            # Re-dispatch with best config to get handle for combine
-            dispatch_cfg = make_config(
-                sms, sms_best_dispatch_nvl, sms_best_dispatch_rdma
-            )
+    combine_start = time.time()
+
+    for sms in sms_range:
+        # Re-dispatch if sms changed (combine handle tied to dispatch sms)
+        if sms != current_sms:
             try:
+                redispatch_cfg = make_config(
+                    sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+                    best_dispatch_rdma, best_dispatch_rdma_buf,
+                )
                 recv_x, _, _, _, handle, _ = buffer.dispatch(
                     x,
                     topk_idx=topk_idx,
@@ -939,276 +888,63 @@ def autotune_deepep(
                     num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
                     is_token_in_rank=is_token_in_rank,
                     num_tokens_per_expert=num_tokens_per_expert,
-                    config=dispatch_cfg,
+                    config=redispatch_cfg,
                 )
+                current_sms = sms
             except RuntimeError:
-                continue
-
-            # Find best combine config for this sms
-            sms_best_combine_time = float("inf")
-            sms_best_combine_nvl = nvl_combine_range[0]
-            sms_best_combine_rdma = rdma_combine_range[0]
-
-            for nvl_chunk in nvl_combine_range:
-                for rdma_chunk in rdma_combine_range:
-                    config = make_config(sms, nvl_chunk, rdma_chunk)
-
-                    def combine_fn():
-                        buffer.combine(recv_x, handle=handle, config=config)
-
-                    try:
-                        t = _bench_fn(combine_fn, warmup, repeat)
-                    except RuntimeError:
-                        continue
-
-                    if t < sms_best_combine_time:
-                        sms_best_combine_time = t
-                        sms_best_combine_nvl = nvl_chunk
-                        sms_best_combine_rdma = rdma_chunk
-                    if t > worst_combine_time:
-                        worst_combine_time = t
-                        worst_combine_nvl = nvl_chunk
-                        worst_combine_rdma = rdma_chunk
-
-            if sms_best_combine_time == float("inf"):
-                continue
-
-            combined_time = sms_best_dispatch_time + sms_best_combine_time
-            dispatch_bw = dispatch_recv_bytes / 1e9 / sms_best_dispatch_time
-            combine_bw = combine_send_bytes / 1e9 / sms_best_combine_time
-
-            if rank == 0:
-                logger.info(
-                    f"  sms={sms}: dispatch={dispatch_bw:.1f} GB/s,"
-                    f" combine={combine_bw:.1f} GB/s,"
-                    f" total={combined_time*1000:.2f}ms"
+                total_skip = (
+                    len(nvl_buf_range) * len(rdma_buf_range)
+                    * len(nvl_chunk_range) * len(rdma_chunk_range)
                 )
+                skipped += total_skip
+                continue
 
-            if combined_time < best_combined_time:
-                best_combined_time = combined_time
-                best_sms = sms
-                best_dispatch_nvl = sms_best_dispatch_nvl
-                best_dispatch_rdma = sms_best_dispatch_rdma
-                best_dispatch_time = sms_best_dispatch_time
-                best_combine_nvl = sms_best_combine_nvl
-                best_combine_rdma = sms_best_combine_rdma
-                best_combine_time = sms_best_combine_time
+        for nvl_buf in nvl_buf_range:
+            for rdma_buf in rdma_buf_range:
+                for nvl_chunk in nvl_chunk_range:
+                    for rdma_chunk in rdma_chunk_range:
+                        config = make_config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
 
-        best_dispatch_sms = best_sms
-        best_combine_sms = best_sms
+                        def combine_fn():
+                            buffer.combine(recv_x, handle=handle, config=config)
 
-        total_elapsed = time.time() - autotune_start
-        if rank == 0:
-            best_dispatch_bw = (
-                dispatch_recv_bytes / 1e9 / best_dispatch_time
-                if best_dispatch_time > 0
-                else 0
-            )
-            best_combine_bw = (
-                combine_send_bytes / 1e9 / best_combine_time
-                if best_combine_time > 0
-                else 0
-            )
-            logger.info(
-                f"[DeepEP Autotune] Internode tuning done in {total_elapsed:.1f}s"
-            )
-            logger.info(
-                f"  Best sms={best_sms}: dispatch nvl={best_dispatch_nvl},"
-                f" rdma={best_dispatch_rdma} -> {best_dispatch_bw:.1f} GB/s"
-            )
-            logger.info(
-                f"  Best sms={best_sms}: combine nvl={best_combine_nvl},"
-                f" rdma={best_combine_rdma} -> {best_combine_bw:.1f} GB/s"
-            )
+                        try:
+                            t = _bench_fn(combine_fn, warmup, repeat)
+                            tested += 1
+                        except RuntimeError:
+                            skipped += 1
+                            continue
 
-    else:
-        # ====================================================================
-        # INTRANODE: Independent tuning of dispatch and combine
-        # ====================================================================
+                        if t < best_combine_time:
+                            best_combine_time = t
+                            best_combine_sms = sms
+                            best_combine_nvl = nvl_chunk
+                            best_combine_rdma = rdma_chunk
+                            best_combine_nvl_buf = nvl_buf
+                            best_combine_rdma_buf = rdma_buf
+                        if t > worst_combine_time:
+                            worst_combine_time = t
 
-        # --- Tune dispatch ---
-        best_dispatch_time = float("inf")
-        worst_dispatch_time = 0.0
-        best_dispatch_sms = sms_range[0]
-        best_dispatch_nvl = nvl_dispatch_range[0]
-        best_dispatch_rdma = rdma_dispatch_range[0]
-        worst_dispatch_nvl = nvl_dispatch_range[0]
-        worst_dispatch_rdma = rdma_dispatch_range[0]
+    combine_elapsed = time.time() - combine_start
+    total_elapsed = time.time() - autotune_start
 
-        if rank == 0:
-            logger.info(
-                f"[DeepEP Autotune] Tuning dispatch ({num_dispatch_configs} configs)..."
-            )
-
-        dispatch_start = time.time()
-        tested = 0
-        skipped = 0
-
-        for sms in sms_range:
-            for nvl_chunk in nvl_dispatch_range:
-                for rdma_chunk in rdma_dispatch_range:
-                    config = make_config(sms, nvl_chunk, rdma_chunk)
-
-                    def dispatch_fn():
-                        buffer.dispatch(
-                            x,
-                            topk_idx=topk_idx,
-                            topk_weights=topk_weights,
-                            num_tokens_per_rank=num_tokens_per_rank,
-                            num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-                            is_token_in_rank=is_token_in_rank,
-                            num_tokens_per_expert=num_tokens_per_expert,
-                            config=config,
-                        )
-
-                    try:
-                        t = _bench_fn(dispatch_fn, warmup, repeat)
-                        tested += 1
-                    except RuntimeError:
-                        skipped += 1
-                        continue
-
-                    bw = dispatch_recv_bytes / 1e9 / t if t > 0 else 0
-
-                    if verbose and rank == 0:
-                        logger.info(
-                            f"  [{tested}/{num_dispatch_configs}] sms={sms:2d},"
-                            f" nvl={nvl_chunk:2d}: {bw:6.1f} GB/s"
-                        )
-
-                    if t < best_dispatch_time:
-                        best_dispatch_time = t
-                        best_dispatch_sms = sms
-                        best_dispatch_nvl = nvl_chunk
-                        best_dispatch_rdma = rdma_chunk
-                    if t > worst_dispatch_time:
-                        worst_dispatch_time = t
-                        worst_dispatch_nvl = nvl_chunk
-                        worst_dispatch_rdma = rdma_chunk
-
-        dispatch_elapsed = time.time() - dispatch_start
-        if rank == 0:
-            best_bw = (
-                dispatch_recv_bytes / 1e9 / best_dispatch_time
-                if best_dispatch_time > 0
-                else 0
-            )
-            logger.info(
-                f"[DeepEP Autotune] Dispatch done: {tested} tested, "
-                f"{skipped} skipped in {dispatch_elapsed:.1f}s"
-            )
-            logger.info(
-                f"  Best: sms={best_dispatch_sms}, nvl={best_dispatch_nvl}"
-                f" -> {best_bw:.1f} GB/s"
-            )
-
-        # Re-dispatch with best config to get handle for combine tuning
-        best_dispatch_cfg = make_config(
-            best_dispatch_sms, best_dispatch_nvl, best_dispatch_rdma
+    if rank == 0:
+        best_bw = (
+            combine_send_bytes / 1e9 / best_combine_time
+            if best_combine_time > 0
+            else 0
         )
-        recv_x, _, _, _, handle, _ = buffer.dispatch(
-            x,
-            topk_idx=topk_idx,
-            topk_weights=topk_weights,
-            num_tokens_per_rank=num_tokens_per_rank,
-            num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-            is_token_in_rank=is_token_in_rank,
-            num_tokens_per_expert=num_tokens_per_expert,
-            config=best_dispatch_cfg,
+        logger.info(
+            f"[DeepEP Autotune] Combine done: {tested} tested, "
+            f"{skipped} skipped in {combine_elapsed:.1f}s"
         )
-
-        # --- Tune combine ---
-        best_combine_time = float("inf")
-        worst_combine_time = 0.0
-        best_combine_sms = sms_range[0]
-        best_combine_nvl = nvl_combine_range[0]
-        best_combine_rdma = rdma_combine_range[0]
-        worst_combine_nvl = nvl_combine_range[0]
-        worst_combine_rdma = rdma_combine_range[0]
-
-        num_combine_configs = (
-            len(sms_range) * len(nvl_combine_range) * len(rdma_combine_range)
+        logger.info(
+            f"  Best: sms={best_combine_sms}, nvl={best_combine_nvl},"
+            f" rdma={best_combine_rdma},"
+            f" nvl_buf={best_combine_nvl_buf},"
+            f" rdma_buf={best_combine_rdma_buf}"
+            f" -> {best_bw:.1f} GB/s"
         )
-
-        if rank == 0:
-            logger.info(
-                f"[DeepEP Autotune] Tuning combine ({num_combine_configs} configs)..."
-            )
-
-        combine_start = time.time()
-        tested = 0
-        skipped = 0
-        current_sms = best_dispatch_sms
-
-        for sms in sms_range:
-            if sms != current_sms:
-                try:
-                    dispatch_cfg = make_config(
-                        sms, best_dispatch_nvl, best_dispatch_rdma
-                    )
-                    recv_x, _, _, _, handle, _ = buffer.dispatch(
-                        x,
-                        topk_idx=topk_idx,
-                        topk_weights=topk_weights,
-                        num_tokens_per_rank=num_tokens_per_rank,
-                        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
-                        is_token_in_rank=is_token_in_rank,
-                        num_tokens_per_expert=num_tokens_per_expert,
-                        config=dispatch_cfg,
-                    )
-                    current_sms = sms
-                except RuntimeError:
-                    skipped += len(nvl_combine_range) * len(rdma_combine_range)
-                    continue
-
-            for nvl_chunk in nvl_combine_range:
-                for rdma_chunk in rdma_combine_range:
-                    config = make_config(sms, nvl_chunk, rdma_chunk)
-
-                    def combine_fn():
-                        buffer.combine(recv_x, handle=handle, config=config)
-
-                    try:
-                        t = _bench_fn(combine_fn, warmup, repeat)
-                        tested += 1
-                    except RuntimeError:
-                        skipped += 1
-                        continue
-
-                    bw = combine_send_bytes / 1e9 / t if t > 0 else 0
-
-                    if verbose and rank == 0:
-                        logger.info(
-                            f"  [{tested}/{num_combine_configs}] sms={sms:2d},"
-                            f" nvl={nvl_chunk:2d}: {bw:6.1f} GB/s"
-                        )
-
-                    if t < best_combine_time:
-                        best_combine_time = t
-                        best_combine_sms = sms
-                        best_combine_nvl = nvl_chunk
-                        best_combine_rdma = rdma_chunk
-                    if t > worst_combine_time:
-                        worst_combine_time = t
-                        worst_combine_nvl = nvl_chunk
-                        worst_combine_rdma = rdma_chunk
-
-        combine_elapsed = time.time() - combine_start
-        total_elapsed = time.time() - autotune_start
-        if rank == 0:
-            best_bw = (
-                combine_send_bytes / 1e9 / best_combine_time
-                if best_combine_time > 0
-                else 0
-            )
-            logger.info(
-                f"[DeepEP Autotune] Combine done: {tested} tested, "
-                f"{skipped} skipped in {combine_elapsed:.1f}s"
-            )
-            logger.info(
-                f"  Best: sms={best_combine_sms}, nvl={best_combine_nvl}"
-                f" -> {best_bw:.1f} GB/s"
-            )
 
     # Calculate bandwidths
     best_dispatch_bw = (
@@ -1229,34 +965,16 @@ def autotune_deepep(
     # Build result configs
     if is_internode:
         dispatch_cfg_tuple = (
-            best_dispatch_nvl,
-            nvl_buffer_size,
-            best_dispatch_rdma,
-            rdma_buffer_size,
+            best_dispatch_nvl, best_dispatch_nvl_buf,
+            best_dispatch_rdma, best_dispatch_rdma_buf,
         )
         combine_cfg_tuple = (
-            best_combine_nvl,
-            nvl_buffer_size,
-            best_combine_rdma,
-            rdma_buffer_size,
-        )
-        worst_dispatch_cfg = (
-            worst_dispatch_nvl,
-            nvl_buffer_size,
-            worst_dispatch_rdma,
-            rdma_buffer_size,
-        )
-        worst_combine_cfg = (
-            worst_combine_nvl,
-            nvl_buffer_size,
-            worst_combine_rdma,
-            rdma_buffer_size,
+            best_combine_nvl, best_combine_nvl_buf,
+            best_combine_rdma, best_combine_rdma_buf,
         )
     else:
-        dispatch_cfg_tuple = (best_dispatch_nvl, nvl_buffer_size)
-        combine_cfg_tuple = (best_combine_nvl, nvl_buffer_size)
-        worst_dispatch_cfg = (worst_dispatch_nvl, nvl_buffer_size)
-        worst_combine_cfg = (worst_combine_nvl, nvl_buffer_size)
+        dispatch_cfg_tuple = (best_dispatch_nvl, best_dispatch_nvl_buf)
+        combine_cfg_tuple = (best_combine_nvl, best_combine_nvl_buf)
 
     result = AutotuneResult(
         dispatch_config=dispatch_cfg_tuple,
@@ -1266,25 +984,23 @@ def autotune_deepep(
         is_internode=is_internode,
         best_dispatch_sms=best_dispatch_sms,
         best_combine_sms=best_combine_sms,
-        worst_dispatch_config=worst_dispatch_cfg,
-        worst_dispatch_bandwidth_gbps=worst_dispatch_bw,
-        worst_combine_config=worst_combine_cfg,
-        worst_combine_bandwidth_gbps=worst_combine_bw,
     )
 
-    # Set global configs with best num_sms values
+    # Set global configs with best values
     best_dispatch_config = make_config(
-        best_dispatch_sms, best_dispatch_nvl, best_dispatch_rdma
+        best_dispatch_sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+        best_dispatch_rdma, best_dispatch_rdma_buf,
     )
     best_combine_config = make_config(
-        best_combine_sms, best_combine_nvl, best_combine_rdma
+        best_combine_sms, best_combine_nvl, best_combine_nvl_buf,
+        best_combine_rdma, best_combine_rdma_buf,
     )
     set_tuned_configs(
         dispatch_config=best_dispatch_config,
         combine_config=best_combine_config,
     )
 
-    # Print summary on rank 0
+    # Print summary
     if rank == 0:
         dispatch_speedup = (
             best_dispatch_bw / worst_dispatch_bw if worst_dispatch_bw > 0 else 1.0
@@ -1296,50 +1012,20 @@ def autotune_deepep(
         logger.info("=" * 70)
         logger.info(f"[DeepEP Autotune] RESULTS (total time: {total_elapsed:.1f}s)")
         logger.info("=" * 70)
-
-        if is_internode:
-            logger.info(f"  DISPATCH (num_sms={best_dispatch_sms}):")
-            logger.info(
-                f"    Best:  nvl={best_dispatch_nvl:2d}, rdma={best_dispatch_rdma:2d}"
-                f" -> {best_dispatch_bw:6.1f} GB/s"
-            )
-            logger.info(
-                f"    Worst: nvl={worst_dispatch_nvl:2d}, rdma={worst_dispatch_rdma:2d}"
-                f" -> {worst_dispatch_bw:6.1f} GB/s"
-            )
-            logger.info(f"    Speedup: {dispatch_speedup:.2f}x over worst config")
-            logger.info(f"  COMBINE (num_sms={best_combine_sms}):")
-            logger.info(
-                f"    Best:  nvl={best_combine_nvl:2d}, rdma={best_combine_rdma:2d}"
-                f" -> {best_combine_bw:6.1f} GB/s"
-            )
-            logger.info(
-                f"    Worst: nvl={worst_combine_nvl:2d}, rdma={worst_combine_rdma:2d}"
-                f" -> {worst_combine_bw:6.1f} GB/s"
-            )
-            logger.info(f"    Speedup: {combine_speedup:.2f}x over worst config")
-        else:
-            logger.info(f"  DISPATCH (num_sms={best_dispatch_sms}):")
-            logger.info(
-                f"    Best:  nvl={best_dispatch_nvl:2d}"
-                f" -> {best_dispatch_bw:6.1f} GB/s"
-            )
-            logger.info(
-                f"    Worst: nvl={worst_dispatch_nvl:2d}"
-                f" -> {worst_dispatch_bw:6.1f} GB/s"
-            )
-            logger.info(f"    Speedup: {dispatch_speedup:.2f}x over worst config")
-            logger.info(f"  COMBINE (num_sms={best_combine_sms}):")
-            logger.info(
-                f"    Best:  nvl={best_combine_nvl:2d}"
-                f" -> {best_combine_bw:6.1f} GB/s"
-            )
-            logger.info(
-                f"    Worst: nvl={worst_combine_nvl:2d}"
-                f" -> {worst_combine_bw:6.1f} GB/s"
-            )
-            logger.info(f"    Speedup: {combine_speedup:.2f}x over worst config")
-
+        logger.info(
+            f"  DISPATCH: sms={best_dispatch_sms}, nvl={best_dispatch_nvl},"
+            f" rdma={best_dispatch_rdma},"
+            f" nvl_buf={best_dispatch_nvl_buf}, rdma_buf={best_dispatch_rdma_buf}"
+            f" -> {best_dispatch_bw:.1f} GB/s"
+            f" ({dispatch_speedup:.2f}x over worst)"
+        )
+        logger.info(
+            f"  COMBINE:  sms={best_combine_sms}, nvl={best_combine_nvl},"
+            f" rdma={best_combine_rdma},"
+            f" nvl_buf={best_combine_nvl_buf}, rdma_buf={best_combine_rdma_buf}"
+            f" -> {best_combine_bw:.1f} GB/s"
+            f" ({combine_speedup:.2f}x over worst)"
+        )
         logger.info("=" * 70)
 
     return result
