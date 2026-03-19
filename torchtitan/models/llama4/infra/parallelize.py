@@ -48,7 +48,6 @@ from torchtitan.distributed.dual_pipe_v import (
 from torchtitan.distributed.expert_parallel import (
     BaseExpertParallel,
     DeepEPExpertParallel,
-    DeepEPLLEPExpertParallel,
     ExpertParallel,
     ExpertParallelLLEP,
     ExpertTensorParallel,
@@ -56,10 +55,7 @@ from torchtitan.distributed.expert_parallel import (
     TensorParallel,
 )
 from torchtitan.distributed.tensor_parallel import maybe_enable_async_tp
-from torchtitan.models.llama3.infra.parallelize import (
-    apply_ddp,
-    disable_fsdp_gradient_division,
-)
+from torchtitan.models.llama3.infra.parallelize import apply_ddp
 from torchtitan.models.moe import moe as moe_module
 from torchtitan.tools.logging import logger
 
@@ -147,6 +143,30 @@ def parallelize_llama(
 
         _op_sac_save_list.add(torch.ops.deepep.dispatch.default)
         _op_sac_save_list.add(torch.ops.deepep.combine.default)
+
+        # Run DeepEP autotune if enabled
+        from torchtitan.distributed.deepep import run_deepep_autotune_if_enabled
+
+        ep_mesh = parallel_dims.get_optional_mesh("ep")
+        if ep_mesh is not None:
+            # Get model parameters for autotune
+            # pyrefly: ignore [missing-attribute]
+            model_args = model.model_args
+            num_tokens = (
+                job_config.training.local_batch_size * job_config.training.seq_len
+            )
+            hidden = getattr(model_args, "dim", getattr(model_args, "hidden_dim", 2048))
+            num_experts = getattr(model_args, "num_experts", 8)
+            num_topk = getattr(model_args, "num_experts_per_tok", 2)
+
+            run_deepep_autotune_if_enabled(
+                deepep_config=job_config.deepep,
+                ep_group=ep_mesh.get_group(),
+                num_tokens=num_tokens,
+                hidden=hidden,
+                num_experts=num_experts,
+                num_topk=num_topk,
+            )
     else:
         use_deepep = False
 
@@ -361,7 +381,8 @@ def apply_fsdp(
         reduce_dtype (torch.dtype): The data type to use for reduction operations.
         pp_enabled (bool): Whether pipeline parallelism is enabled.
         cpu_offload (bool, optional): Whether to offload model parameters to CPU. Defaults to False.
-        reshard_after_forward_policy (str | int, optional): The policy to use for resharding after forward pass. Defaults to "default".  # noqa: B950
+        reshard_after_forward_policy (str | int, optional): The policy to use for
+            resharding after forward pass. Defaults to "default".
             String options: "never", "always", "default".
             - "default" applies default resharding behavior, implementing "smart defaults" for known optimal scenarios.
             - "always" will enable `reshard_after_forward` for all forward passes.
@@ -456,6 +477,12 @@ def apply_fsdp(
                 shard_placement_fn=_experts_shard_placement_fn,
             )
 
+            # NOTE: # Although the FSDP sharding of experts is done on a mesh of
+            #       a different size than other parameters, the gradient division
+            #       factor should be consistent with data.
+            transformer_block.moe.experts.set_gradient_divide_factor(
+                gradient_divide_factor,
+            )
         if not transformer_block.moe_enabled:
             try:
                 if hasattr(transformer_block.feed_forward.w1, "lora_a"):
@@ -512,9 +539,6 @@ def apply_fsdp(
         )
 
     fully_shard(model, **fsdp_config)
-
-    # Disable FSDP's automatic gradient division for all FSDP modules
-    disable_fsdp_gradient_division(model)
 
     # NOTE: set up explicit prefetching when EP is enabled, as D2H syncs
     # in EP could interfere with implicit prefetching in FSDP
@@ -665,40 +689,15 @@ def apply_moe_ep_tp(
         elif tp_mesh is None or etp_mesh is None:
             assert ep_etp_mesh is None
             experts_mesh = ep_mesh
-            if use_llep and use_deepep:
-                # Adaptive: DeepEP when balanced, LLEP when imbalanced
+            if use_llep:
+                # LLEP: only shard weights, no dispatch/combine hooks
+                experts_plan = ExpertParallelLLEP()
                 # pyrefly: ignore [missing-attribute]
-                llep_config = transformer_block.moe._llep_config
+                transformer_block.moe._llep_enabled = True
                 # pyrefly: ignore [missing-attribute]
-                score_before_experts = transformer_block.moe.score_before_experts
-                experts_plan = DeepEPLLEPExpertParallel(
-                    score_before_experts=score_before_experts,
-                    max_tokens_factor=llep_config.max_tokens_factor,
-                    min_tokens_per_gemm=llep_config.min_tokens_per_gemm,
-                    adaptive_threshold=llep_config.adaptive_threshold,
-                    verbose=llep_config.verbose,
-                )
+                transformer_block.moe._ep_group = ep_mesh.get_group()
                 logger.info(
-                    f"Enabling DeepEP+LLEP adaptive switching "
-                    f"(α={llep_config.max_tokens_factor}, "
-                    f"m={llep_config.min_tokens_per_gemm}, "
-                    f"λ={llep_config.adaptive_threshold})"
-                )
-            elif use_llep:
-                # LLEP: dispatch/combine hooks with LPT-based routing
-                # pyrefly: ignore [missing-attribute]
-                llep_config = transformer_block.moe._llep_config
-                experts_plan = ExpertParallelLLEP(
-                    max_tokens_factor=llep_config.max_tokens_factor,
-                    min_tokens_per_gemm=llep_config.min_tokens_per_gemm,
-                    adaptive_threshold=llep_config.adaptive_threshold,
-                    verbose=llep_config.verbose,
-                )
-                logger.info(
-                    f"Enabling LLEP for expert parallelism "
-                    f"(α={llep_config.max_tokens_factor}, "
-                    f"m={llep_config.min_tokens_per_gemm}, "
-                    f"λ={llep_config.adaptive_threshold})"
+                    "Enabling Least-Loaded Expert Parallelism (LLEP) for expert parallelism"
                 )
             elif use_deepep:
                 # pyrefly: ignore [missing-attribute]
@@ -726,57 +725,30 @@ def apply_moe_ep_tp(
         )
 
 
-def old_apply_compile(model: nn.Module, compile_config: CompileConfig):
-    """
-    Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
-    repeated structure. Alternatively one can compile the whole model (after applying DP).
-    """
-    logger.info("Using old apply_compile")
-    # NOTE: This flag is needed for torch.compile to avoid graph breaking on dynamic shapes in token-choice MoE
-    # but it is experimental.
-    # torch._dynamo.config.capture_scalar_outputs = True
-    for layer_id, transformer_block in model.layers.named_children():
-        # IMPORTANT: MoE layers MUST use fullgraph=False, non-MoE layers SHOULD use fullgraph=True.
-        #
-        # Why MoE needs fullgraph=False:
-        #   DeepEP's PrimusTurboDeepepManager.setup_metadata() mutates instance state
-        #   (self.token_probs, self.token_indices) inside activation checkpointing regions.
-        #   When fullgraph=True, torch.compile wraps these in HigherOrderOperator which
-        #   raises "Mutating a variable not in the current scope (SideEffects)" error.
-        #   fullgraph=False allows graph breaks, permitting these state mutations.
-        #
-        # Why non-MoE layers should use fullgraph=True:
-        #   fullgraph=False on attention/FFN layers causes unnecessary graph breaks,
-        #   which interferes with activation checkpointing and retains more intermediate
-        #   tensors during backward pass, leading to OOM on memory-constrained setups.
-        #
-        # Respect user config for non-MoE layers, but MoE layers MUST use False
-        fullgraph = compile_config.fullgraph
-        if transformer_block.moe_enabled:
-            fullgraph = False
-        transformer_block = torch.compile(
-            transformer_block,
-            backend=compile_config.backend,
-            fullgraph=fullgraph,
-        )
-        model.layers.register_module(layer_id, transformer_block)
-
-    logger.info("Compiling each TransformerBlock with torch.compile")
-
-
 def apply_compile(model: nn.Module, compile_config: CompileConfig, ep_enabled: bool):
     """
     Apply torch.compile to each TransformerBlock, which makes compilation efficient due to
     repeated structure. Alternatively one can compile the whole model (after applying DP).
     """
-    if compile_config.use_old_compile:
-        return old_apply_compile(model, compile_config)
-
     # NOTE: This flag is needed for torch.compile to avoid graph breaking on dynamic shapes in token-choice MoE
     # but it is experimental.
     torch._dynamo.config.capture_scalar_outputs = True
+
+    # Inductor config for max_autotune - when False, disables aggressive kernel fusion
+    # which can cause OOM errors due to exceeding GPU shared memory limits
+    torch._inductor.config.max_autotune = compile_config.max_autotune
+
+    # Prune Triton kernel configs that exceed hardware shared memory limits
+    # This helps avoid 'No valid triton configs' OOM errors
+    torch._inductor.config.max_autotune_prune_choices_based_on_shared_mem = (
+        compile_config.prune_configs_by_shared_mem
+    )
+
+    # Control CUDA graphs for Triton kernels - disabling may help with some OOM issues
+    torch._inductor.config.triton.cudagraphs = compile_config.triton_cudagraphs
     # pyrefly: ignore [missing-attribute]
     for layer_id, transformer_block in model.layers.named_children():
+        # pyrefly: ignore[missing-attribute]
         if transformer_block.moe_enabled:
             # If it is a MoE layer, FSDP(GroupedExperts) will cause a graph break
             # So we must weave compile wrappers around those FSDP hooks to
