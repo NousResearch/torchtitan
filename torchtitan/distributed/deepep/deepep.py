@@ -624,7 +624,7 @@ def autotune_deepep(
     hidden: int,
     num_experts: int,
     num_topk: int,
-    nvl_buffer_size: int = 512,
+    nvl_buffer_size: int = 256,
     rdma_buffer_size: int = 128,
     warmup: int = 5,
     repeat: int = 10,
@@ -667,6 +667,17 @@ def autotune_deepep(
 
     is_internode, num_local_ranks, num_nodes = _detect_internode(buffer)
 
+    # Use DeepEP's built-in nvl_buffer_size for this rank count if not overridden.
+    # DeepEP pre-tunes buffer sizes per rank count (256→288→480→560→720).
+    try:
+        builtin_dispatch = Buffer.get_dispatch_config(num_ranks)
+        builtin_nvl_buffer = builtin_dispatch.nvl_buffer_size
+    except Exception:
+        builtin_nvl_buffer = nvl_buffer_size
+    if nvl_buffer_size == 256:
+        # User didn't override — use DeepEP's builtin value
+        nvl_buffer_size = builtin_nvl_buffer
+
     # Get dispatch layout
     (
         num_tokens_per_rank,
@@ -676,17 +687,16 @@ def autotune_deepep(
         _,
     ) = buffer.get_dispatch_layout(topk_idx, num_experts)
 
-    # Search space
+    # Search space — covers DeepEP's built-in defaults for all rank counts.
+    # Internode defaults: dispatch nvl=6-36, rdma=6-20; combine nvl=1-10, rdma=6-12
+    # Intranode defaults: dispatch nvl=6-24; combine nvl=4-10
     if is_internode:
-        # Use conservative ranges for internode to avoid DeepEP dispatch
-        # timeouts that fatally corrupt CUDA state. Small nvl/rdma chunks
-        # can cause NVL receiver timeouts on internode.
-        nvl_dispatch_range = list(range(16, 48, 4))
-        rdma_dispatch_range = list(range(8, 36, 4))
-        nvl_combine_range = list(range(4, 16, 2))
-        rdma_combine_range = list(range(8, 36, 4))
+        nvl_dispatch_range = list(range(2, 48, 2))
+        rdma_dispatch_range = list(range(4, 36, 4))
+        nvl_combine_range = list(range(1, 16, 1))
+        rdma_combine_range = list(range(4, 36, 4))
     else:
-        nvl_dispatch_range = list(range(4, 34, 2))
+        nvl_dispatch_range = list(range(2, 36, 2))
         rdma_dispatch_range = [16]  # dummy for intranode
         nvl_combine_range = list(range(1, 17, 1))
         rdma_combine_range = [16]  # dummy for intranode
@@ -1281,51 +1291,39 @@ def run_deepep_autotune_if_enabled(
         num_topk: Top-k experts per token
     """
     if deepep_config is None or not getattr(deepep_config, "autotune", False):
-        # Autotune not enabled, set manual configs from deepep_config
+        # Autotune not enabled — use DeepEP's built-in pre-tuned configs
+        # which are optimized per rank count (see deep_ep/buffer.py)
         num_sms = getattr(deepep_config, "num_sms", 24) if deepep_config else 24
-        nvl_buffer = (
-            getattr(deepep_config, "nvl_buffer_size", 256) if deepep_config else 256
-        )
-        rdma_buffer = (
-            getattr(deepep_config, "rdma_buffer_size", 128) if deepep_config else 128
-        )
-
-        # Detect internode vs intranode to set correct Config format
-        # Create a temporary buffer to probe topology
-        hidden_bytes = hidden * 2  # bfloat16
-        buffer = get_buffer(ep_group, hidden_bytes)
-        is_internode, _, num_nodes = _detect_internode(buffer)
-
-        if is_internode:
-            # Internode: Config(sms, nvl_chunk, nvl_buffer, rdma_chunk, rdma_buffer)
-            default_dispatch = (6, nvl_buffer, 8, rdma_buffer)
-            default_combine = (4, nvl_buffer, 8, rdma_buffer)
-        else:
-            # Intranode: Config(sms, nvl_chunk, nvl_buffer)
-            default_dispatch = (6, nvl_buffer)
-            default_combine = (4, nvl_buffer)
+        num_ranks = ep_group.size()
 
         Buffer.set_num_sms(num_sms)
+        dispatch_config = Buffer.get_dispatch_config(num_ranks)
+        combine_config = Buffer.get_combine_config(num_ranks)
         set_tuned_configs(
-            dispatch_config=Config(num_sms, *default_dispatch),
-            combine_config=Config(num_sms, *default_combine),
+            dispatch_config=dispatch_config,
+            combine_config=combine_config,
         )
+
+        # Detect topology for logging
+        hidden_bytes = hidden * 2  # bfloat16
+        buffer = get_buffer(ep_group, hidden_bytes)
+        _, _, num_nodes = _detect_internode(buffer)
 
         rank = torch.distributed.get_rank(ep_group) if ep_group else 0
         if rank == 0:
             mode_str = (
                 f"internode ({num_nodes} nodes)"
-                if is_internode
+                if num_nodes > 1
                 else "intranode"
             )
             logger.info(
-                f"DeepEP using default configs ({mode_str}): num_sms={num_sms}, "
-                f"dispatch={default_dispatch}, combine={default_combine}"
+                f"DeepEP using built-in configs ({mode_str}, {num_ranks} ranks): "
+                f"num_sms={num_sms}"
             )
         return None
 
     # Run autotune
-    nvl_buffer = getattr(deepep_config, "nvl_buffer_size", 512)
+    nvl_buffer = getattr(deepep_config, "nvl_buffer_size", 256)
     rdma_buffer = getattr(deepep_config, "rdma_buffer_size", 128)
     warmup = getattr(deepep_config, "autotune_warmup", 5)
     repeat = getattr(deepep_config, "autotune_repeat", 10)

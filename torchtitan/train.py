@@ -941,19 +941,25 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             job_config.parallelism.expert_parallel_comm_backend == "deepep"
             and self.parallel_dims.ep_enabled
         ):
-            from torchtitan.distributed.deepep import run_deepep_autotune_if_enabled
+            from torchtitan.distributed.deepep import (
+                get_tuned_configs,
+                run_deepep_autotune_if_enabled,
+            )
 
-            ep_mesh = self.parallel_dims.get_optional_mesh("ep")
-            if ep_mesh is not None:
-                run_deepep_autotune_if_enabled(
-                    deepep_config=job_config.deepep,
-                    ep_group=ep_mesh.get_group(),
-                    num_tokens=job_config.training.local_batch_size
-                    * job_config.training.seq_len,
-                    hidden=self.model_args.dim,
-                    num_experts=self.model_args.moe_args.num_experts,
-                    num_topk=self.model_args.moe_args.top_k,
-                )
+            # Skip if parallelize.py already ran autotune/set configs
+            dispatch_cfg, combine_cfg = get_tuned_configs()
+            if dispatch_cfg is None and combine_cfg is None:
+                ep_mesh = self.parallel_dims.get_optional_mesh("ep")
+                if ep_mesh is not None:
+                    run_deepep_autotune_if_enabled(
+                        deepep_config=job_config.deepep,
+                        ep_group=ep_mesh.get_group(),
+                        num_tokens=job_config.training.local_batch_size
+                        * job_config.training.seq_len,
+                        hidden=self.model_args.dim,
+                        num_experts=self.model_args.moe_args.num_experts,
+                        num_topk=self.model_args.moe_args.top_k,
+                    )
 
         logger.info(f"Training starts at step {self.step + 1}")
 
