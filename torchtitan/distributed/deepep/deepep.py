@@ -686,17 +686,19 @@ def autotune_deepep(
     except Exception:
         builtin_nvl_buf = 256
 
-    # Only search buffer sizes >= DeepEP's built-in value (smaller can cause OOM/crash)
+    # Only search buffer sizes >= DeepEP's built-in value (smaller causes CUDA crashes).
+    # For internode 64 ranks, builtin is 288. Values like 256 or 128 cause illegal memory access.
+    min_nvl_buf = max(builtin_nvl_buf, 288) if is_internode else builtin_nvl_buf
     if is_internode:
         nvl_buf_candidates = sorted(set(
-            v for v in [builtin_nvl_buf, 288, 384, 480, 512, 560, 720]
-            if v >= builtin_nvl_buf
+            v for v in [min_nvl_buf, 288, 384, 480, 512, 560, 720]
+            if v >= min_nvl_buf
         ))
         rdma_buf_candidates = [128, 256]
     else:
         nvl_buf_candidates = sorted(set(
-            v for v in [builtin_nvl_buf, 256, 384, 512]
-            if v >= builtin_nvl_buf
+            v for v in [min_nvl_buf, 256, 384, 512]
+            if v >= min_nvl_buf
         ))
         rdma_buf_candidates = [rdma_buffer_size]  # not used for intranode
 
