@@ -691,10 +691,13 @@ def autotune_deepep(
     min_nvl_buf = max(builtin_nvl_buf, 256)
 
     if is_internode:
+        # For internode, lock sms to initial value to avoid CUDA crashes.
+        # High sms values corrupt GPU state via cached matrix conflicts.
+        sms_range = [sms_range[0]]
         nvl_chunk_range = list(range(2, 48, 4))
         rdma_chunk_range = list(range(4, 36, 4))
         nvl_buf_range = sorted(set(
-            v for v in [min_nvl_buf, 256, 288, 384, 512, 720, 1024]
+            v for v in [min_nvl_buf, 288, 384, 512, 720, 1024]
             if v >= min_nvl_buf
         ))
         rdma_buf_range = [128, 256]
@@ -702,7 +705,7 @@ def autotune_deepep(
         nvl_chunk_range = list(range(2, 36, 2))
         rdma_chunk_range = [16]  # dummy
         nvl_buf_range = sorted(set(
-            v for v in [min_nvl_buf, 256, 384, 512]
+            v for v in [min_nvl_buf, 256, 384, 512, 1024]
             if v >= min_nvl_buf
         ))
         rdma_buf_range = [rdma_buffer_size]
