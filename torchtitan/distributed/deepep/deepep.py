@@ -33,107 +33,32 @@ except ImportError as e:
 from torchtitan.tools.logging import logger
 
 
-class DeepEPState:
-    """Process-global state for DeepEP operations.
+# Global buffer (single buffer per process, recreated if group changes)
+# pyrefly: ignore [bad-assignment]
+_buffer: Buffer = None
 
-    Groups all process-level mutable state needed by torch.library custom ops.
-    Accessed via module-level _state singleton (required because custom ops
-    can only access module scope).
-    """
+# Global cache for dispatch handles, keyed by handle_id
+# SAC saves the handle_id tensor; we use it to retrieve the non-tensor handle
+_handle_cache: dict = {}
+_handle_counter: int = 0
 
-    def __init__(self):
-        self.buffer: Optional[Buffer] = None
-        self.handle_cache: dict = {}
-        self.handle_counter: int = 0
-        self.pending_combine_event: Optional[EventOverlap] = None
-        self.tuned_dispatch_config: Optional[Config] = None
-        self.tuned_combine_config: Optional[Config] = None
+# Pending combine event for deferred synchronization.
+# Stores the EventOverlap from buffer.combine() to allow overlapping
+# shared_experts computation with combine communication.
+# This is process-local state (each GPU process has its own Python interpreter),
+# and execution is single-threaded, so a simple module variable suffices.
+_pending_combine_event: Optional[EventOverlap] = None
 
-    def get_next_handle_id(self) -> torch.Tensor:
-        """Generate a unique handle_id tensor on CPU to avoid GPU-CPU sync."""
-        self.handle_counter += 1
-        return torch.tensor([self.handle_counter], dtype=torch.int64, device="cpu")
-
-    def set_tuned_configs(
-        self,
-        dispatch_config: Optional[Config] = None,
-        combine_config: Optional[Config] = None,
-    ) -> None:
-        """Set the tuned configs for dispatch and combine operations."""
-        self.tuned_dispatch_config = dispatch_config
-        self.tuned_combine_config = combine_config
-
-    def get_tuned_configs(self) -> Tuple[Optional[Config], Optional[Config]]:
-        """Get the current tuned configs."""
-        return self.tuned_dispatch_config, self.tuned_combine_config
-
-    def get_buffer(self, group: ProcessGroup, hidden_bytes: int) -> Buffer:
-        """Get or create a buffer for all-to-all communication."""
-        num_nvl_bytes, num_rdma_bytes = 0, 0
-        for config in (
-            Buffer.get_dispatch_config(group.size()),
-            Buffer.get_combine_config(group.size()),
-        ):
-            num_nvl_bytes = max(
-                config.get_nvl_buffer_size_hint(hidden_bytes, group.size()),
-                num_nvl_bytes,
-            )
-            num_rdma_bytes = max(
-                config.get_rdma_buffer_size_hint(hidden_bytes, group.size()),
-                num_rdma_bytes,
-            )
-
-        if (
-            self.buffer is None
-            or self.buffer.group != group
-            or self.buffer.num_nvl_bytes < num_nvl_bytes
-            or self.buffer.num_rdma_bytes < num_rdma_bytes
-        ):
-            self.buffer = Buffer(group, num_nvl_bytes, num_rdma_bytes)
-
-        return self.buffer
-
-    @torch.compiler.disable()
-    def sync_combine(self) -> None:
-        """Synchronize the current CUDA stream with the pending combine operation.
-
-        This function MUST be called before using the result of combine_tokens()
-        to ensure the async combine has completed. It inserts a wait operation
-        on the current CUDA stream, making subsequent CUDA kernels wait for
-        the combine to finish.
-
-        torch.compile Compatibility:
-            Decorated with @torch.compiler.disable() to always run in eager mode.
-            This avoids issues with CUDA event operations not being traceable.
-
-        Process Isolation:
-            Each GPU process has its own Python interpreter, so this module-level
-            variable is inherently process-local. No cross-process interference.
-
-        Single-Threaded Execution:
-            PyTorch training is single-threaded per process, so no thread safety
-            concerns. Sequential execution guarantees correct event ordering.
-
-        Activation Checkpointing Compatibility:
-            - During forward: combine stores event, sync_combine() waits on it
-            - During AC recomputation: combine runs again, stores NEW event,
-              sync_combine() waits on the new event
-            - Sequential execution ensures each forward/recompute uses its own event
-
-        Multiple MoE Layers:
-            Each layer's combine overwrites the pending event. Since sync_combine()
-            is called before using each layer's output (and before the next layer's
-            combine), this is safe. The sync clears the event to prevent double-sync.
-
-        Safe to call multiple times - subsequent calls are no-ops if the event
-        was already synced or if no combine operation is pending.
-        """
-        if self.pending_combine_event is not None:
-            self.pending_combine_event.current_stream_wait()
-            self.pending_combine_event = None
+# Global tuned configs (set by autotune or manually)
+_tuned_dispatch_config: Optional[Config] = None
+_tuned_combine_config: Optional[Config] = None
 
 
-_state = DeepEPState()
+def _get_next_handle_id() -> torch.Tensor:
+    """Generate a unique handle_id tensor on CPU to avoid GPU-CPU sync."""
+    global _handle_counter
+    _handle_counter += 1
+    return torch.tensor([_handle_counter], dtype=torch.int64, device="cpu")
 
 
 # ============================================================================
@@ -165,7 +90,9 @@ def _dispatch_op_impl(
     num_tokens_per_expert: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Execute DeepEP dispatch."""
-    buffer = _state.buffer
+    global _buffer
+
+    buffer = _buffer
     assert buffer is not None, "Buffer must be initialized before dispatch"
 
     previous_event = EventOverlap(EventHandle())
@@ -188,13 +115,13 @@ def _dispatch_op_impl(
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
-        config=_state.tuned_dispatch_config,
+        config=_tuned_dispatch_config,
     )
 
     after_event.current_stream_wait()
 
-    handle_id = _state.get_next_handle_id()
-    _state.handle_cache[handle_id.item()] = handle
+    handle_id = _get_next_handle_id()
+    _handle_cache[handle_id.item()] = handle
 
     recv_num_tokens_per_expert = torch.tensor(
         recv_num_tokens_per_expert_list, dtype=torch.int32, device="cpu"
@@ -207,7 +134,7 @@ def _dispatch_setup_context(ctx, inputs, output):
     x, *_ = inputs
     *_, handle_id = output
     ctx.input_dtype = x.dtype
-    ctx.saved_handle = _state.handle_cache.get(handle_id.item())
+    ctx.saved_handle = _handle_cache.get(handle_id.item())
 
 
 def _dispatch_backward(
@@ -219,6 +146,8 @@ def _dispatch_backward(
     grad_handle_id,
 ):
     """Backward for dispatch: performs combine on gradients."""
+    global _buffer
+
     if grad_recv_x is None:
         return None, None, None, None, None, None, None
 
@@ -228,14 +157,14 @@ def _dispatch_backward(
 
     previous_event = EventOverlap(EventHandle())
 
-    grad_x, grad_scores, after_event = _state.buffer.combine(
+    grad_x, grad_scores, after_event = _buffer.combine(
         x=grad_recv_x,
         handle=handle,
         topk_weights=grad_recv_scores.float() if grad_recv_scores is not None else None,
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
-        config=_state.tuned_combine_config,
+        config=_tuned_combine_config,
     )
 
     after_event.current_stream_wait()
@@ -251,15 +180,17 @@ def _dispatch_backward(
 @torch.library.impl(_lib, "combine", "CUDA")
 def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
     """Execute DeepEP combine."""
-    buffer = _state.buffer
+    global _buffer, _pending_combine_event
+
+    buffer = _buffer
     assert buffer is not None, "Buffer must be initialized before combine"
 
     # In inference mode, setup_context doesn't run, so we clean up handle_cache here.
     # NOTE: For inference, use torch.inference_mode() instead of torch.no_grad()
     if torch.is_inference_mode_enabled():
-        handle = _state.handle_cache.pop(handle_id.item(), None)
+        handle = _handle_cache.pop(handle_id.item(), None)
     else:
-        handle = _state.handle_cache.get(handle_id.item())
+        handle = _handle_cache.get(handle_id.item())
     assert handle is not None, f"Handle not found for handle_id={handle_id.item()}"
 
     previous_event = EventOverlap(EventHandle())
@@ -270,13 +201,13 @@ def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
-        config=_state.tuned_combine_config,
+        config=_tuned_combine_config,
     )
 
     # Store event for deferred sync instead of syncing immediately.
     # This enables overlapping shared_experts computation with combine communication.
     # The caller MUST call sync_combine() before using the returned tensor.
-    _state.pending_combine_event = after_event
+    _pending_combine_event = after_event
 
     return combined
 
@@ -284,16 +215,18 @@ def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
 def _combine_setup_context(ctx, inputs, output):
     _, handle_id = inputs
     # Pop handle from cache and save it for backward
-    ctx.saved_handle = _state.handle_cache.pop(handle_id.item(), None)
+    ctx.saved_handle = _handle_cache.pop(handle_id.item(), None)
 
 
 def _combine_backward(ctx, grad_combined):
     """Backward for combine: performs dispatch on gradients."""
+    global _buffer
+
     handle = ctx.saved_handle
     assert handle is not None, "Handle not found in combine backward"
     previous_event = EventOverlap(EventHandle())
 
-    grad_x, _, _, _, _, after_event = _state.buffer.dispatch(
+    grad_x, _, _, _, _, after_event = _buffer.dispatch(
         x=grad_combined,
         topk_idx=None,
         topk_weights=None,
@@ -305,7 +238,7 @@ def _combine_backward(ctx, grad_combined):
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
-        config=_state.tuned_dispatch_config,
+        config=_tuned_dispatch_config,
     )
 
     after_event.current_stream_wait()
@@ -323,8 +256,44 @@ torch.library.register_autograd(
 
 @torch.compiler.disable()
 def sync_combine() -> None:
-    """Synchronize the current CUDA stream with the pending combine operation."""
-    _state.sync_combine()
+    """Synchronize the current CUDA stream with the pending combine operation.
+
+    This function MUST be called before using the result of combine_tokens()
+    to ensure the async combine has completed. It inserts a wait operation
+    on the current CUDA stream, making subsequent CUDA kernels wait for
+    the combine to finish.
+
+    torch.compile Compatibility:
+        Decorated with @torch.compiler.disable() to always run in eager mode.
+        This avoids issues with CUDA event operations not being traceable.
+
+    Process Isolation:
+        Each GPU process has its own Python interpreter, so this module-level
+        variable is inherently process-local. No cross-process interference.
+
+    Single-Threaded Execution:
+        PyTorch training is single-threaded per process, so no thread safety
+        concerns. Sequential execution guarantees correct event ordering.
+
+    Activation Checkpointing Compatibility:
+        - During forward: combine stores event, sync_combine() waits on it
+        - During AC recomputation: combine runs again, stores NEW event,
+          sync_combine() waits on the new event
+        - Sequential execution ensures each forward/recompute uses its own event
+
+    Multiple MoE Layers:
+        Each layer's combine overwrites the pending event. Since sync_combine()
+        is called before using each layer's output (and before the next layer's
+        combine), this is safe. The sync clears the event to prevent double-sync.
+
+    Safe to call multiple times - subsequent calls are no-ops if the event
+    was already synced or if no combine operation is pending.
+    """
+    global _pending_combine_event
+
+    if _pending_combine_event is not None:
+        _pending_combine_event.current_stream_wait()
+        _pending_combine_event = None
 
 
 def get_hidden_bytes(x: torch.Tensor) -> int:
@@ -335,7 +304,28 @@ def get_hidden_bytes(x: torch.Tensor) -> int:
 
 def get_buffer(group: ProcessGroup, hidden_bytes: int) -> Buffer:
     """Get or create a buffer for all-to-all communication."""
-    return _state.get_buffer(group, hidden_bytes)
+    global _buffer
+    num_nvl_bytes, num_rdma_bytes = 0, 0
+    for config in (
+        Buffer.get_dispatch_config(group.size()),
+        Buffer.get_combine_config(group.size()),
+    ):
+        num_nvl_bytes = max(
+            config.get_nvl_buffer_size_hint(hidden_bytes, group.size()), num_nvl_bytes
+        )
+        num_rdma_bytes = max(
+            config.get_rdma_buffer_size_hint(hidden_bytes, group.size()), num_rdma_bytes
+        )
+
+    if (
+        _buffer is None
+        or _buffer.group != group
+        or _buffer.num_nvl_bytes < num_nvl_bytes
+        or _buffer.num_rdma_bytes < num_rdma_bytes
+    ):
+        _buffer = Buffer(group, num_nvl_bytes, num_rdma_bytes)
+
+    return _buffer
 
 
 def _permute_tokens(
@@ -532,12 +522,14 @@ def set_tuned_configs(
     combine_config: Optional[Config] = None,
 ) -> None:
     """Set the tuned configs for dispatch and combine operations."""
-    _state.set_tuned_configs(dispatch_config, combine_config)
+    global _tuned_dispatch_config, _tuned_combine_config
+    _tuned_dispatch_config = dispatch_config
+    _tuned_combine_config = combine_config
 
 
 def get_tuned_configs() -> Tuple[Optional[Config], Optional[Config]]:
     """Get the current tuned configs."""
-    return _state.get_tuned_configs()
+    return _tuned_dispatch_config, _tuned_combine_config
 
 
 # ============================================================================
