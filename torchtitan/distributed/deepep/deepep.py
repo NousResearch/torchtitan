@@ -11,6 +11,7 @@ Provides low-level functions and autograd wrappers for DeepEP communication.
 Used by DeepEPExpertParallel in expert_parallel.py.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -18,7 +19,7 @@ import torch
 from torch.distributed import ProcessGroup
 
 try:
-    from deep_ep import Buffer  # pyrefly: ignore[missing-import]
+    from deep_ep import Buffer, Config  # pyrefly: ignore[missing-import]
     from deep_ep.utils import (  # pyrefly: ignore[missing-import]
         EventHandle,
         EventOverlap,
@@ -29,29 +30,31 @@ except ImportError as e:
         "Install from: https://github.com/deepseek-ai/deepep"
     ) from e
 
+from torchtitan.tools.logging import logger
 
-# Global buffer (single buffer per process, recreated if group changes)
-# pyrefly: ignore [bad-assignment]
-_buffer: Buffer = None
 
-# Global cache for dispatch handles, keyed by handle_id
-# SAC saves the handle_id tensor; we use it to retrieve the non-tensor handle
-_handle_cache: dict = {}
-_handle_counter: int = 0
+class _State:
+    """Process-global mutable state for DeepEP.
 
-# Pending combine event for deferred synchronization.
-# Stores the EventOverlap from buffer.combine() to allow overlapping
-# shared_experts computation with combine communication.
-# This is process-local state (each GPU process has its own Python interpreter),
-# and execution is single-threaded, so a simple module variable suffices.
-_pending_combine_event: Optional[EventOverlap] = None
+    All mutable state accessed by custom ops lives here.
+    Module-level singleton avoids `global` statements.
+    """
+
+    buffer: Optional[Buffer] = None
+    handle_cache: dict = {}
+    handle_counter: int = 0
+    pending_combine_event: Optional[EventOverlap] = None
+    tuned_dispatch_config: Optional[Config] = None
+    tuned_combine_config: Optional[Config] = None
+
+
+_state = _State()
 
 
 def _get_next_handle_id() -> torch.Tensor:
     """Generate a unique handle_id tensor on CPU to avoid GPU-CPU sync."""
-    global _handle_counter
-    _handle_counter += 1
-    return torch.tensor([_handle_counter], dtype=torch.int64, device="cpu")
+    _state.handle_counter += 1
+    return torch.tensor([_state.handle_counter], dtype=torch.int64, device="cpu")
 
 
 # ============================================================================
@@ -83,9 +86,7 @@ def _dispatch_op_impl(
     num_tokens_per_expert: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     """Execute DeepEP dispatch."""
-    global _buffer
-
-    buffer = _buffer
+    buffer = _state.buffer
     assert buffer is not None, "Buffer must be initialized before dispatch"
 
     previous_event = EventOverlap(EventHandle())
@@ -108,12 +109,13 @@ def _dispatch_op_impl(
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
+        config=_state.tuned_dispatch_config,
     )
 
     after_event.current_stream_wait()
 
     handle_id = _get_next_handle_id()
-    _handle_cache[handle_id.item()] = handle
+    _state.handle_cache[handle_id.item()] = handle
 
     recv_num_tokens_per_expert = torch.tensor(
         recv_num_tokens_per_expert_list, dtype=torch.int32, device="cpu"
@@ -126,7 +128,7 @@ def _dispatch_setup_context(ctx, inputs, output):
     x, *_ = inputs
     *_, handle_id = output
     ctx.input_dtype = x.dtype
-    ctx.saved_handle = _handle_cache.get(handle_id.item())
+    ctx.saved_handle = _state.handle_cache.get(handle_id.item())
 
 
 def _dispatch_backward(
@@ -138,8 +140,6 @@ def _dispatch_backward(
     grad_handle_id,
 ):
     """Backward for dispatch: performs combine on gradients."""
-    global _buffer
-
     if grad_recv_x is None:
         return None, None, None, None, None, None, None
 
@@ -149,13 +149,14 @@ def _dispatch_backward(
 
     previous_event = EventOverlap(EventHandle())
 
-    grad_x, grad_scores, after_event = _buffer.combine(
+    grad_x, grad_scores, after_event = _state.buffer.combine(
         x=grad_recv_x,
         handle=handle,
         topk_weights=grad_recv_scores.float() if grad_recv_scores is not None else None,
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
+        config=_state.tuned_combine_config,
     )
 
     after_event.current_stream_wait()
@@ -171,17 +172,15 @@ def _dispatch_backward(
 @torch.library.impl(_lib, "combine", "CUDA")
 def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
     """Execute DeepEP combine."""
-    global _buffer, _pending_combine_event
-
-    buffer = _buffer
+    buffer = _state.buffer
     assert buffer is not None, "Buffer must be initialized before combine"
 
     # In inference mode, setup_context doesn't run, so we clean up handle_cache here.
     # NOTE: For inference, use torch.inference_mode() instead of torch.no_grad()
     if torch.is_inference_mode_enabled():
-        handle = _handle_cache.pop(handle_id.item(), None)
+        handle = _state.handle_cache.pop(handle_id.item(), None)
     else:
-        handle = _handle_cache.get(handle_id.item())
+        handle = _state.handle_cache.get(handle_id.item())
     assert handle is not None, f"Handle not found for handle_id={handle_id.item()}"
 
     previous_event = EventOverlap(EventHandle())
@@ -192,12 +191,13 @@ def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
+        config=_state.tuned_combine_config,
     )
 
     # Store event for deferred sync instead of syncing immediately.
     # This enables overlapping shared_experts computation with combine communication.
     # The caller MUST call sync_combine() before using the returned tensor.
-    _pending_combine_event = after_event
+    _state.pending_combine_event = after_event
 
     return combined
 
@@ -205,18 +205,16 @@ def _combine_op_impl(x: torch.Tensor, handle_id: torch.Tensor) -> torch.Tensor:
 def _combine_setup_context(ctx, inputs, output):
     _, handle_id = inputs
     # Pop handle from cache and save it for backward
-    ctx.saved_handle = _handle_cache.pop(handle_id.item(), None)
+    ctx.saved_handle = _state.handle_cache.pop(handle_id.item(), None)
 
 
 def _combine_backward(ctx, grad_combined):
     """Backward for combine: performs dispatch on gradients."""
-    global _buffer
-
     handle = ctx.saved_handle
     assert handle is not None, "Handle not found in combine backward"
     previous_event = EventOverlap(EventHandle())
 
-    grad_x, _, _, _, _, after_event = _buffer.dispatch(
+    grad_x, _, _, _, _, after_event = _state.buffer.dispatch(
         x=grad_combined,
         topk_idx=None,
         topk_weights=None,
@@ -228,6 +226,7 @@ def _combine_backward(ctx, grad_combined):
         previous_event=previous_event,
         async_finish=True,
         allocate_on_comm_stream=True,
+        config=_state.tuned_dispatch_config,
     )
 
     after_event.current_stream_wait()
@@ -278,11 +277,9 @@ def sync_combine() -> None:
     Safe to call multiple times - subsequent calls are no-ops if the event
     was already synced or if no combine operation is pending.
     """
-    global _pending_combine_event
-
-    if _pending_combine_event is not None:
-        _pending_combine_event.current_stream_wait()
-        _pending_combine_event = None
+    if _state.pending_combine_event is not None:
+        _state.pending_combine_event.current_stream_wait()
+        _state.pending_combine_event = None
 
 
 def get_hidden_bytes(x: torch.Tensor) -> int:
@@ -293,7 +290,6 @@ def get_hidden_bytes(x: torch.Tensor) -> int:
 
 def get_buffer(group: ProcessGroup, hidden_bytes: int) -> Buffer:
     """Get or create a buffer for all-to-all communication."""
-    global _buffer
     num_nvl_bytes, num_rdma_bytes = 0, 0
     for config in (
         Buffer.get_dispatch_config(group.size()),
@@ -307,14 +303,14 @@ def get_buffer(group: ProcessGroup, hidden_bytes: int) -> Buffer:
         )
 
     if (
-        _buffer is None
-        or _buffer.group != group
-        or _buffer.num_nvl_bytes < num_nvl_bytes
-        or _buffer.num_rdma_bytes < num_rdma_bytes
+        _state.buffer is None
+        or _state.buffer.group != group
+        or _state.buffer.num_nvl_bytes < num_nvl_bytes
+        or _state.buffer.num_rdma_bytes < num_rdma_bytes
     ):
-        _buffer = Buffer(group, num_nvl_bytes, num_rdma_bytes)
+        _state.buffer = Buffer(group, num_nvl_bytes, num_rdma_bytes)
 
-    return _buffer
+    return _state.buffer
 
 
 def _permute_tokens(
@@ -499,3 +495,635 @@ def combine_tokens(
     hidden_states = torch.ops.deepep.combine(hidden_states, state.handle_id)
 
     return hidden_states
+
+
+# ============================================================================
+# Tuned Config Management
+# ============================================================================
+
+
+def set_tuned_configs(
+    dispatch_config: Optional[Config] = None,
+    combine_config: Optional[Config] = None,
+) -> None:
+    """Set the tuned configs for dispatch and combine operations."""
+    _state.tuned_dispatch_config = dispatch_config
+    _state.tuned_combine_config = combine_config
+
+
+def get_tuned_configs() -> Tuple[Optional[Config], Optional[Config]]:
+    """Get the current tuned configs."""
+    return _state.tuned_dispatch_config, _state.tuned_combine_config
+
+
+# ============================================================================
+# Auto-tuning
+# ============================================================================
+
+
+@dataclass
+class AutotuneResult:
+    """Result from autotuning."""
+
+    dispatch_config: Tuple[int, ...]
+    combine_config: Tuple[int, ...]
+    dispatch_bandwidth_gbps: float
+    combine_bandwidth_gbps: float
+    is_internode: bool = False
+    best_dispatch_sms: int = 24
+    best_combine_sms: int = 24
+
+
+def _bench_fn(fn, warmup: int = 3, repeat: int = 5) -> float:
+    """Benchmark a function and return average time in seconds.
+
+    Raises Exception on CUDA errors so callers can skip bad configs.
+    """
+    for _ in range(warmup):
+        fn()
+    torch.cuda.synchronize()
+
+    start = time.perf_counter()
+    for _ in range(repeat):
+        fn()
+    torch.cuda.synchronize()
+    end = time.perf_counter()
+
+    elapsed = end - start
+    return elapsed / repeat if elapsed > 0 else float("inf")
+
+
+def _detect_internode(buffer: Buffer) -> Tuple[bool, int, int]:
+    """
+    Detect if communication requires internode (RDMA) or is intranode only (NVLink).
+
+    Returns:
+        (is_internode, num_local_ranks, num_nodes)
+    """
+    import os
+
+    num_ranks = buffer.group_size
+    num_rdma_ranks = buffer.runtime.get_num_rdma_ranks()
+    is_internode = num_rdma_ranks > 1
+
+    if is_internode:
+        num_nodes = num_rdma_ranks
+        local_world_size = num_ranks // num_nodes
+    else:
+        local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", num_ranks))
+        num_nodes = 1
+
+    return is_internode, local_world_size, num_nodes
+
+
+def _get_gpu_sm_range(default_sms: int = 24) -> list:
+    """Auto-detect GPU type and return appropriate SM search range.
+
+    Based on https://nousresearch.com/moe-scaling-field-notes/:
+    num_sms=128 gave 2.3-2.6x speedup over num_sms=24 on B200.
+    Must be even (DeepEP constraint).
+    """
+    try:
+        gpu_name = torch.cuda.get_device_name(0).lower()
+        if "b200" in gpu_name or "b100" in gpu_name:
+            return [20, 24, 32, 48, 64, 96, 128]
+        elif "h200" in gpu_name or "h100" in gpu_name:
+            return [16, 20, 24, 32, 48, 64, 96, 128]
+        elif "a100" in gpu_name:
+            return [16, 20, 24, 32, 48, 64]
+        else:
+            return [default_sms]
+    except Exception:
+        return [default_sms]
+
+
+def _create_uniform_routing(
+    num_tokens: int, hidden: int, num_experts: int, num_topk: int
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Deterministic uniform round-robin routing for benchmarking.
+
+    Each token is assigned to topk experts round-robin, ensuring perfectly
+    balanced load. Uses actual model dimensions for realistic comm volume.
+
+    Returns:
+        (x, topk_idx, topk_weights) tensors on CUDA
+    """
+    x = torch.randn((num_tokens, hidden), dtype=torch.bfloat16, device="cuda")
+    topk_idx = (
+        torch.arange(num_tokens, device="cuda").unsqueeze(1) * num_topk
+        + torch.arange(num_topk, device="cuda").unsqueeze(0)
+    ) % num_experts
+    topk_weights = torch.full(
+        (num_tokens, num_topk), 1.0 / num_topk, dtype=torch.float32, device="cuda"
+    )
+    return x, topk_idx.to(torch.int64), topk_weights
+
+
+def autotune_deepep(
+    group: ProcessGroup,
+    num_tokens: int,
+    hidden: int,
+    num_experts: int,
+    num_topk: int,
+    nvl_buffer_size: int = 256,
+    rdma_buffer_size: int = 128,
+    warmup: int = 5,
+    repeat: int = 10,
+    verbose: bool = False,
+) -> AutotuneResult:
+    """
+    Autotune DeepEP dispatch/combine configs before training.
+
+    Searches over all tunable parameters:
+        - num_sms: Auto-detected range based on GPU type
+        - nvl_chunk: NVLink chunk size
+        - rdma_chunk: RDMA chunk size (for internode only)
+
+    Args:
+        group: Process group for EP communication
+        num_tokens: Number of tokens per batch (batch_size * seq_len)
+        hidden: Hidden dimension
+        num_experts: Total number of experts
+        num_topk: Top-k experts per token
+        nvl_buffer_size: NVLink buffer size (default: 512)
+        rdma_buffer_size: RDMA buffer size for internode (default: 128)
+        warmup: Warmup iterations (default: 5)
+        repeat: Benchmark iterations (default: 10)
+        verbose: Print every config result (default: False)
+
+    Returns:
+        AutotuneResult with optimal configs
+    """
+    rank = torch.distributed.get_rank(group)
+    num_ranks = group.size()
+
+    sms_range = _get_gpu_sm_range()
+
+    # Create uniform round-robin routing for balanced benchmarking
+    x, topk_idx, topk_weights = _create_uniform_routing(
+        num_tokens, hidden, num_experts, num_topk
+    )
+
+    buffer = get_buffer(group, get_hidden_bytes(x))
+
+    is_internode, num_local_ranks, num_nodes = _detect_internode(buffer)
+
+    # Get dispatch layout
+    (
+        num_tokens_per_rank,
+        num_tokens_per_rdma_rank,
+        num_tokens_per_expert,
+        is_token_in_rank,
+        _,
+    ) = buffer.get_dispatch_layout(topk_idx, num_experts)
+
+    # ================================================================
+    # Full Cartesian search over all Config parameters
+    # ================================================================
+    # Based on https://nousresearch.com/moe-scaling-field-notes/:
+    # - num_sms up to 128 gives 2.3-2.6x speedup over 24
+    # - nvl_buffer_size up to 1024 can be optimal
+    # - All params interact, so search jointly
+    try:
+        builtin_nvl_buf = Buffer.get_dispatch_config(num_ranks).nvl_buffer_size
+    except Exception:
+        builtin_nvl_buf = 256
+    min_nvl_buf = max(builtin_nvl_buf, 256)
+
+    # nvl_buffer_size and rdma_buffer_size: use DeepEP's built-in value.
+    # Sweeping buffer sizes at runtime causes unrecoverable CUDA crashes
+    # (illegal memory access) when values are too small for the rank count.
+    nvl_buf_range = [min_nvl_buf]
+    rdma_buf_range = [rdma_buffer_size]
+
+    if is_internode:
+        # Lock sms to initial value for internode to avoid CUDA crashes
+        # from cached matrix conflicts when num_channels changes.
+        sms_range = [sms_range[0]]
+        nvl_chunk_range = list(range(2, 48, 2))
+        rdma_chunk_range = list(range(4, 36, 4))
+    else:
+        nvl_chunk_range = list(range(2, 36, 2))
+        rdma_chunk_range = [16]  # dummy
+
+    num_dispatch_configs = (
+        len(sms_range) * len(nvl_chunk_range) * len(rdma_chunk_range)
+        * len(nvl_buf_range) * len(rdma_buf_range)
+    )
+    num_combine_configs = num_dispatch_configs  # same search space
+
+    if rank == 0:
+        gpu_name = torch.cuda.get_device_name(0)
+        mode_str = (
+            f"internode ({num_nodes} nodes)"
+            if is_internode
+            else f"intranode ({num_ranks} GPUs)"
+        )
+        logger.info(f"[DeepEP Autotune] {mode_str} on {gpu_name}")
+        logger.info(
+            f"[DeepEP Autotune] tokens={num_tokens}, hidden={hidden}, "
+            f"experts={num_experts}, topk={num_topk}"
+        )
+        logger.info(
+            f"[DeepEP Autotune] Full Cartesian search:"
+            f" sms={sms_range}, nvl_chunk={nvl_chunk_range},"
+            f" rdma_chunk={rdma_chunk_range},"
+            f" nvl_buf={nvl_buf_range}, rdma_buf={rdma_buf_range}"
+        )
+        logger.info(
+            f"[DeepEP Autotune] {num_dispatch_configs} dispatch + "
+            f"{num_combine_configs} combine configs"
+        )
+        logger.info(f"[DeepEP Autotune] warmup={warmup}, repeat={repeat}")
+
+    def make_config(sms, nvl_chunk, nvl_buf, rdma_chunk=16, rdma_buf=128):
+        if is_internode:
+            return Config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
+        else:
+            return Config(sms, nvl_chunk, nvl_buf)
+
+    # Initial dispatch to get handle and calculate bytes.
+    init_nvl = nvl_chunk_range[len(nvl_chunk_range) // 2]
+    init_rdma = rdma_chunk_range[len(rdma_chunk_range) // 2]
+    init_nvl_buf = nvl_buf_range[0]
+    init_rdma_buf = rdma_buf_range[0]
+    initial_config = make_config(sms_range[0], init_nvl, init_nvl_buf, init_rdma, init_rdma_buf)
+    recv_x, _, _, _, handle, _ = buffer.dispatch(
+        x,
+        topk_idx=topk_idx,
+        topk_weights=topk_weights,
+        num_tokens_per_rank=num_tokens_per_rank,
+        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+        is_token_in_rank=is_token_in_rank,
+        num_tokens_per_expert=num_tokens_per_expert,
+        config=initial_config,
+    )
+    torch.cuda.synchronize()
+
+    dispatch_recv_bytes = recv_x.numel() * 2  # bfloat16
+    combine_send_bytes = recv_x.numel() * 2
+
+    autotune_start = time.time()
+
+    # --- Full Cartesian dispatch tuning ---
+    best_dispatch_time = float("inf")
+    worst_dispatch_time = 0.0
+    best_dispatch_sms = sms_range[0]
+    best_dispatch_nvl = nvl_chunk_range[0]
+    best_dispatch_rdma = rdma_chunk_range[0]
+    best_dispatch_nvl_buf = nvl_buf_range[0]
+    best_dispatch_rdma_buf = rdma_buf_range[0]
+    tested = 0
+    skipped = 0
+
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Tuning dispatch ({num_dispatch_configs} configs)..."
+        )
+
+    for sms in sms_range:
+        for nvl_buf in nvl_buf_range:
+            for rdma_buf in rdma_buf_range:
+                for nvl_chunk in nvl_chunk_range:
+                    for rdma_chunk in rdma_chunk_range:
+                        config = make_config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
+
+                        def dispatch_fn():
+                            buffer.dispatch(
+                                x,
+                                topk_idx=topk_idx,
+                                topk_weights=topk_weights,
+                                num_tokens_per_rank=num_tokens_per_rank,
+                                num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+                                is_token_in_rank=is_token_in_rank,
+                                num_tokens_per_expert=num_tokens_per_expert,
+                                config=config,
+                            )
+
+                        try:
+                            t = _bench_fn(dispatch_fn, warmup, repeat)
+                            tested += 1
+                        except RuntimeError:
+                            skipped += 1
+                            continue
+
+                        if t < best_dispatch_time:
+                            best_dispatch_time = t
+                            best_dispatch_sms = sms
+                            best_dispatch_nvl = nvl_chunk
+                            best_dispatch_rdma = rdma_chunk
+                            best_dispatch_nvl_buf = nvl_buf
+                            best_dispatch_rdma_buf = rdma_buf
+                        if t > worst_dispatch_time:
+                            worst_dispatch_time = t
+
+    dispatch_elapsed = time.time() - autotune_start
+    if rank == 0:
+        best_bw = (
+            dispatch_recv_bytes / 1e9 / best_dispatch_time
+            if best_dispatch_time > 0
+            else 0
+        )
+        logger.info(
+            f"[DeepEP Autotune] Dispatch done: {tested} tested, "
+            f"{skipped} skipped in {dispatch_elapsed:.1f}s"
+        )
+        logger.info(
+            f"  Best: sms={best_dispatch_sms}, nvl={best_dispatch_nvl},"
+            f" rdma={best_dispatch_rdma},"
+            f" nvl_buf={best_dispatch_nvl_buf},"
+            f" rdma_buf={best_dispatch_rdma_buf}"
+            f" -> {best_bw:.1f} GB/s"
+        )
+
+    # Re-dispatch with best config to get handle for combine tuning
+    best_dispatch_cfg = make_config(
+        best_dispatch_sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+        best_dispatch_rdma, best_dispatch_rdma_buf,
+    )
+    recv_x, _, _, _, handle, _ = buffer.dispatch(
+        x,
+        topk_idx=topk_idx,
+        topk_weights=topk_weights,
+        num_tokens_per_rank=num_tokens_per_rank,
+        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+        is_token_in_rank=is_token_in_rank,
+        num_tokens_per_expert=num_tokens_per_expert,
+        config=best_dispatch_cfg,
+    )
+
+    # --- Full Cartesian combine tuning ---
+    best_combine_time = float("inf")
+    worst_combine_time = 0.0
+    best_combine_sms = sms_range[0]
+    best_combine_nvl = nvl_chunk_range[0]
+    best_combine_rdma = rdma_chunk_range[0]
+    best_combine_nvl_buf = nvl_buf_range[0]
+    best_combine_rdma_buf = rdma_buf_range[0]
+    tested = 0
+    skipped = 0
+    current_sms = best_dispatch_sms
+
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Tuning combine ({num_combine_configs} configs)..."
+        )
+
+    combine_start = time.time()
+
+    for sms in sms_range:
+        # Re-dispatch if sms changed (combine handle tied to dispatch sms)
+        if sms != current_sms:
+            try:
+                redispatch_cfg = make_config(
+                    sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+                    best_dispatch_rdma, best_dispatch_rdma_buf,
+                )
+                recv_x, _, _, _, handle, _ = buffer.dispatch(
+                    x,
+                    topk_idx=topk_idx,
+                    topk_weights=topk_weights,
+                    num_tokens_per_rank=num_tokens_per_rank,
+                    num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+                    is_token_in_rank=is_token_in_rank,
+                    num_tokens_per_expert=num_tokens_per_expert,
+                    config=redispatch_cfg,
+                )
+                current_sms = sms
+            except RuntimeError:
+                total_skip = (
+                    len(nvl_buf_range) * len(rdma_buf_range)
+                    * len(nvl_chunk_range) * len(rdma_chunk_range)
+                )
+                skipped += total_skip
+                continue
+
+        for nvl_buf in nvl_buf_range:
+            for rdma_buf in rdma_buf_range:
+                for nvl_chunk in nvl_chunk_range:
+                    for rdma_chunk in rdma_chunk_range:
+                        config = make_config(sms, nvl_chunk, nvl_buf, rdma_chunk, rdma_buf)
+
+                        def combine_fn():
+                            buffer.combine(recv_x, handle=handle, config=config)
+
+                        try:
+                            t = _bench_fn(combine_fn, warmup, repeat)
+                            tested += 1
+                        except RuntimeError:
+                            skipped += 1
+                            continue
+
+                        if t < best_combine_time:
+                            best_combine_time = t
+                            best_combine_sms = sms
+                            best_combine_nvl = nvl_chunk
+                            best_combine_rdma = rdma_chunk
+                            best_combine_nvl_buf = nvl_buf
+                            best_combine_rdma_buf = rdma_buf
+                        if t > worst_combine_time:
+                            worst_combine_time = t
+
+    combine_elapsed = time.time() - combine_start
+    total_elapsed = time.time() - autotune_start
+
+    if rank == 0:
+        best_bw = (
+            combine_send_bytes / 1e9 / best_combine_time
+            if best_combine_time > 0
+            else 0
+        )
+        logger.info(
+            f"[DeepEP Autotune] Combine done: {tested} tested, "
+            f"{skipped} skipped in {combine_elapsed:.1f}s"
+        )
+        logger.info(
+            f"  Best: sms={best_combine_sms}, nvl={best_combine_nvl},"
+            f" rdma={best_combine_rdma},"
+            f" nvl_buf={best_combine_nvl_buf},"
+            f" rdma_buf={best_combine_rdma_buf}"
+            f" -> {best_bw:.1f} GB/s"
+        )
+
+    # Calculate bandwidths
+    best_dispatch_bw = (
+        dispatch_recv_bytes / 1e9 / best_dispatch_time if best_dispatch_time > 0 else 0
+    )
+    worst_dispatch_bw = (
+        dispatch_recv_bytes / 1e9 / worst_dispatch_time
+        if worst_dispatch_time > 0
+        else 0
+    )
+    best_combine_bw = (
+        combine_send_bytes / 1e9 / best_combine_time if best_combine_time > 0 else 0
+    )
+    worst_combine_bw = (
+        combine_send_bytes / 1e9 / worst_combine_time if worst_combine_time > 0 else 0
+    )
+
+    # Build result configs
+    if is_internode:
+        dispatch_cfg_tuple = (
+            best_dispatch_nvl, best_dispatch_nvl_buf,
+            best_dispatch_rdma, best_dispatch_rdma_buf,
+        )
+        combine_cfg_tuple = (
+            best_combine_nvl, best_combine_nvl_buf,
+            best_combine_rdma, best_combine_rdma_buf,
+        )
+    else:
+        dispatch_cfg_tuple = (best_dispatch_nvl, best_dispatch_nvl_buf)
+        combine_cfg_tuple = (best_combine_nvl, best_combine_nvl_buf)
+
+    result = AutotuneResult(
+        dispatch_config=dispatch_cfg_tuple,
+        combine_config=combine_cfg_tuple,
+        dispatch_bandwidth_gbps=best_dispatch_bw,
+        combine_bandwidth_gbps=best_combine_bw,
+        is_internode=is_internode,
+        best_dispatch_sms=best_dispatch_sms,
+        best_combine_sms=best_combine_sms,
+    )
+
+    # Set global configs with best values
+    best_dispatch_config = make_config(
+        best_dispatch_sms, best_dispatch_nvl, best_dispatch_nvl_buf,
+        best_dispatch_rdma, best_dispatch_rdma_buf,
+    )
+    best_combine_config = make_config(
+        best_combine_sms, best_combine_nvl, best_combine_nvl_buf,
+        best_combine_rdma, best_combine_rdma_buf,
+    )
+    set_tuned_configs(
+        dispatch_config=best_dispatch_config,
+        combine_config=best_combine_config,
+    )
+
+    # Print summary
+    if rank == 0:
+        dispatch_speedup = (
+            best_dispatch_bw / worst_dispatch_bw if worst_dispatch_bw > 0 else 1.0
+        )
+        combine_speedup = (
+            best_combine_bw / worst_combine_bw if worst_combine_bw > 0 else 1.0
+        )
+
+        logger.info("=" * 70)
+        logger.info(f"[DeepEP Autotune] RESULTS (total time: {total_elapsed:.1f}s)")
+        logger.info("=" * 70)
+        logger.info(
+            f"  DISPATCH: sms={best_dispatch_sms}, nvl={best_dispatch_nvl},"
+            f" rdma={best_dispatch_rdma},"
+            f" nvl_buf={best_dispatch_nvl_buf}, rdma_buf={best_dispatch_rdma_buf}"
+            f" -> {best_dispatch_bw:.1f} GB/s"
+            f" ({dispatch_speedup:.2f}x over worst)"
+        )
+        logger.info(
+            f"  COMBINE:  sms={best_combine_sms}, nvl={best_combine_nvl},"
+            f" rdma={best_combine_rdma},"
+            f" nvl_buf={best_combine_nvl_buf}, rdma_buf={best_combine_rdma_buf}"
+            f" -> {best_combine_bw:.1f} GB/s"
+            f" ({combine_speedup:.2f}x over worst)"
+        )
+        logger.info("=" * 70)
+
+    return result
+
+
+def run_deepep_autotune_if_enabled(
+    deepep_config,
+    ep_group: ProcessGroup,
+    num_tokens: int,
+    hidden: int,
+    num_experts: int,
+    num_topk: int,
+) -> Optional[AutotuneResult]:
+    """
+    Run DeepEP autotune if enabled in config.
+
+    Should be called after EP process group is created and before training begins.
+
+    Args:
+        deepep_config: The deepep config from job_config.deepep
+        ep_group: Expert parallelism process group
+        num_tokens: Number of tokens per micro-batch (batch_size * seq_len)
+        hidden: Model hidden dimension
+        num_experts: Total number of MoE experts
+        num_topk: Top-k experts per token
+    """
+    if deepep_config is None or not getattr(deepep_config, "autotune", False):
+        # Autotune not enabled — use DeepEP's built-in pre-tuned configs
+        # which are optimized per rank count (see deep_ep/buffer.py)
+        num_sms = getattr(deepep_config, "num_sms", 24) if deepep_config else 24
+        num_ranks = ep_group.size()
+
+        Buffer.set_num_sms(num_sms)
+        dispatch_config = Buffer.get_dispatch_config(num_ranks)
+        combine_config = Buffer.get_combine_config(num_ranks)
+        set_tuned_configs(
+            dispatch_config=dispatch_config,
+            combine_config=combine_config,
+        )
+
+        # Detect topology for logging
+        hidden_bytes = hidden * 2  # bfloat16
+        buffer = get_buffer(ep_group, hidden_bytes)
+        _, _, num_nodes = _detect_internode(buffer)
+
+        rank = torch.distributed.get_rank(ep_group) if ep_group else 0
+        if rank == 0:
+            mode_str = (
+                f"internode ({num_nodes} nodes)"
+                if num_nodes > 1
+                else "intranode"
+            )
+            logger.info(
+                f"DeepEP using built-in configs ({mode_str}, {num_ranks} ranks): "
+                f"num_sms={num_sms}"
+            )
+        return None
+
+    # Run autotune
+    nvl_buffer = getattr(deepep_config, "nvl_buffer_size", 256)
+    rdma_buffer = getattr(deepep_config, "rdma_buffer_size", 128)
+    warmup = getattr(deepep_config, "autotune_warmup", 5)
+    repeat = getattr(deepep_config, "autotune_repeat", 10)
+    verbose = getattr(deepep_config, "autotune_verbose", False)
+
+    rank = torch.distributed.get_rank(ep_group)
+    if rank == 0:
+        logger.info(
+            f"Running DeepEP autotune: tokens={num_tokens}, hidden={hidden}, "
+            f"experts={num_experts}, topk={num_topk}"
+        )
+
+    try:
+        result = autotune_deepep(
+            group=ep_group,
+            num_tokens=num_tokens,
+            hidden=hidden,
+            num_experts=num_experts,
+            num_topk=num_topk,
+            nvl_buffer_size=nvl_buffer,
+            rdma_buffer_size=rdma_buffer,
+            warmup=warmup,
+            repeat=repeat,
+            verbose=verbose,
+        )
+
+        # Barrier to ensure all ranks complete autotune before training
+        torch.distributed.barrier(ep_group)
+
+        return result
+    except Exception as e:
+        # DeepEP internode dispatch timeouts can fatally corrupt CUDA state
+        # (cudaErrorLaunchFailure). This is unrecoverable — the process must
+        # be restarted. Log the error so the user knows to disable autotune
+        # or narrow the search ranges for internode.
+        if rank == 0:
+            logger.error(
+                f"[DeepEP Autotune] Fatal error: {type(e).__name__}: {e}. "
+                f"CUDA state may be corrupted. For internode, consider running "
+                f"with autotune=false and manually setting num_sms/nvl_buffer_size."
+            )
+        raise
