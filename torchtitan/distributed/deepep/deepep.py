@@ -667,17 +667,6 @@ def autotune_deepep(
 
     is_internode, num_local_ranks, num_nodes = _detect_internode(buffer)
 
-    # Use DeepEP's built-in nvl_buffer_size for this rank count if not overridden.
-    # DeepEP pre-tunes buffer sizes per rank count (256→288→480→560→720).
-    try:
-        builtin_dispatch = Buffer.get_dispatch_config(num_ranks)
-        builtin_nvl_buffer = builtin_dispatch.nvl_buffer_size
-    except Exception:
-        builtin_nvl_buffer = nvl_buffer_size
-    if nvl_buffer_size == 256:
-        # User didn't override — use DeepEP's builtin value
-        nvl_buffer_size = builtin_nvl_buffer
-
     # Get dispatch layout
     (
         num_tokens_per_rank,
@@ -687,9 +676,98 @@ def autotune_deepep(
         _,
     ) = buffer.get_dispatch_layout(topk_idx, num_experts)
 
+    # ================================================================
+    # Phase 0: Tune buffer sizes (nvl_buffer_size, rdma_buffer_size)
+    # ================================================================
+    # DeepEP's built-in values vary by rank count (256→288→480→560→720).
+    # Search around the built-in value to find optimal for this setup.
+    try:
+        builtin_nvl_buf = Buffer.get_dispatch_config(num_ranks).nvl_buffer_size
+    except Exception:
+        builtin_nvl_buf = 256
+
+    if is_internode:
+        nvl_buf_candidates = sorted(set([128, 256, 288, 384, 480, 512, 560, 720, builtin_nvl_buf]))
+        rdma_buf_candidates = [64, 128, 256]
+    else:
+        nvl_buf_candidates = sorted(set([128, 256, 384, 512, builtin_nvl_buf]))
+        rdma_buf_candidates = [rdma_buffer_size]  # not used for intranode
+
+    # Use mid-range chunk values for buffer tuning
+    mid_nvl_chunk = 16
+    mid_rdma_chunk = 8
+
+    if rank == 0:
+        gpu_name = torch.cuda.get_device_name(0)
+        mode_str = (
+            f"internode ({num_nodes} nodes)"
+            if is_internode
+            else f"intranode ({num_ranks} GPUs)"
+        )
+        logger.info(f"[DeepEP Autotune] {mode_str} on {gpu_name}")
+        logger.info(
+            f"[DeepEP Autotune] tokens={num_tokens}, hidden={hidden}, "
+            f"experts={num_experts}, topk={num_topk}"
+        )
+
+    best_buf_time = float("inf")
+    best_nvl_buf = builtin_nvl_buf
+    best_rdma_buf = rdma_buffer_size
+
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Phase 0: Tuning buffer sizes "
+            f"(nvl_buf={nvl_buf_candidates}, rdma_buf={rdma_buf_candidates})"
+        )
+
+    for nvl_buf in nvl_buf_candidates:
+        for rdma_buf in rdma_buf_candidates:
+            try:
+                if is_internode:
+                    cfg = Config(sms_range[0], mid_nvl_chunk, nvl_buf, mid_rdma_chunk, rdma_buf)
+                else:
+                    cfg = Config(sms_range[0], mid_nvl_chunk, nvl_buf)
+
+                def buf_bench_fn():
+                    buffer.dispatch(
+                        x,
+                        topk_idx=topk_idx,
+                        topk_weights=topk_weights,
+                        num_tokens_per_rank=num_tokens_per_rank,
+                        num_tokens_per_rdma_rank=num_tokens_per_rdma_rank,
+                        is_token_in_rank=is_token_in_rank,
+                        num_tokens_per_expert=num_tokens_per_expert,
+                        config=cfg,
+                    )
+
+                t = _bench_fn(buf_bench_fn, warmup, repeat)
+                bw = (x.numel() * 2) / 1e9 / t if t > 0 else 0
+
+                if rank == 0 and verbose:
+                    logger.info(
+                        f"  nvl_buf={nvl_buf}, rdma_buf={rdma_buf}: {bw:.1f} GB/s"
+                    )
+
+                if t < best_buf_time:
+                    best_buf_time = t
+                    best_nvl_buf = nvl_buf
+                    best_rdma_buf = rdma_buf
+            except RuntimeError:
+                continue
+
+    nvl_buffer_size = best_nvl_buf
+    rdma_buffer_size = best_rdma_buf
+
+    if rank == 0:
+        logger.info(
+            f"[DeepEP Autotune] Best buffer sizes: "
+            f"nvl_buffer={nvl_buffer_size}, rdma_buffer={rdma_buffer_size}"
+        )
+
+    # ================================================================
+    # Phase 1+2: Tune chunk sizes (existing logic)
+    # ================================================================
     # Search space — covers DeepEP's built-in defaults for all rank counts.
-    # Internode defaults: dispatch nvl=6-36, rdma=6-20; combine nvl=1-10, rdma=6-12
-    # Intranode defaults: dispatch nvl=6-24; combine nvl=4-10
     if is_internode:
         nvl_dispatch_range = list(range(2, 48, 2))
         rdma_dispatch_range = list(range(4, 36, 4))
@@ -710,17 +788,6 @@ def autotune_deepep(
     total_configs = num_dispatch_configs + num_combine_configs
 
     if rank == 0:
-        gpu_name = torch.cuda.get_device_name(0)
-        mode_str = (
-            f"internode ({num_nodes} nodes)"
-            if is_internode
-            else f"intranode ({num_ranks} GPUs)"
-        )
-        logger.info(f"[DeepEP Autotune] {mode_str} on {gpu_name}")
-        logger.info(
-            f"[DeepEP Autotune] tokens={num_tokens}, hidden={hidden}, "
-            f"experts={num_experts}, topk={num_topk}"
-        )
         logger.info(f"[DeepEP Autotune] Search space: sms={sms_range}")
         if is_internode:
             logger.info(
