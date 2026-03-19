@@ -690,25 +690,21 @@ def autotune_deepep(
         builtin_nvl_buf = 256
     min_nvl_buf = max(builtin_nvl_buf, 256)
 
+    # nvl_buffer_size and rdma_buffer_size: use DeepEP's built-in value.
+    # Sweeping buffer sizes at runtime causes unrecoverable CUDA crashes
+    # (illegal memory access) when values are too small for the rank count.
+    nvl_buf_range = [min_nvl_buf]
+    rdma_buf_range = [rdma_buffer_size]
+
     if is_internode:
-        # For internode, lock sms to initial value to avoid CUDA crashes.
-        # High sms values corrupt GPU state via cached matrix conflicts.
+        # Lock sms to initial value for internode to avoid CUDA crashes
+        # from cached matrix conflicts when num_channels changes.
         sms_range = [sms_range[0]]
-        nvl_chunk_range = list(range(2, 48, 4))
+        nvl_chunk_range = list(range(2, 48, 2))
         rdma_chunk_range = list(range(4, 36, 4))
-        nvl_buf_range = sorted(set(
-            v for v in [min_nvl_buf, 288, 384, 512, 720, 1024]
-            if v >= min_nvl_buf
-        ))
-        rdma_buf_range = [128, 256]
     else:
         nvl_chunk_range = list(range(2, 36, 2))
         rdma_chunk_range = [16]  # dummy
-        nvl_buf_range = sorted(set(
-            v for v in [min_nvl_buf, 256, 384, 512, 1024]
-            if v >= min_nvl_buf
-        ))
-        rdma_buf_range = [rdma_buffer_size]
 
     num_dispatch_configs = (
         len(sms_range) * len(nvl_chunk_range) * len(rdma_chunk_range)
