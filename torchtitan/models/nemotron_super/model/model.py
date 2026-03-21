@@ -111,7 +111,7 @@ class Attention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        rope_cache: torch.Tensor,
+        # rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None,
     ):
         bs, seqlen, _ = x.shape
@@ -119,7 +119,7 @@ class Attention(nn.Module):
         xk = self.wk(x).view(bs, seqlen, -1, self.head_dim)
         xv = self.wv(x).view(bs, seqlen, -1, self.head_dim)
 
-        xq, xk = apply_rotary_emb(xq, xk, rope_cache)
+        # xq, xk = apply_rotary_emb(xq, xk, rope_cache)
 
         xq = xq.transpose(1, 2)  # (bs, n_heads, seqlen, head_dim)
         xk = xk.transpose(1, 2)
@@ -219,7 +219,7 @@ class NemotronSuperLayer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        rope_cache: torch.Tensor,
+        # rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None,
     ):
         # Mamba2
@@ -228,7 +228,7 @@ class NemotronSuperLayer(nn.Module):
 
         # Attention (optional)
         if self.has_attn:
-            x = x + self.attention(self.attn_norm(x), rope_cache, attention_masks)
+            x = x + self.attention(self.attn_norm(x), attention_masks)
 
         # MoE
         x = x + self.moe(self.ffn_norm(x))
@@ -293,7 +293,7 @@ class MTPBlock(nn.Module):
         hidden_states: torch.Tensor,
         input_ids: torch.Tensor,
         tok_embeddings: nn.Embedding,
-        rope_cache: torch.Tensor,
+        # rope_cache: torch.Tensor,
         attention_masks: AttentionMasksType | None,
     ) -> torch.Tensor:
         # Fuse: previous hidden states + shifted token embeddings
@@ -305,7 +305,7 @@ class MTPBlock(nn.Module):
         h = self.eh_proj(fused)
 
         # Attention + MoE
-        h = h + self.attention(self.attn_norm(h), rope_cache, attention_masks)
+        h = h + self.attention(self.attn_norm(h), attention_masks)
         h = h + self.moe(self.ffn_norm(h))
 
         return self.final_layernorm(h)
@@ -330,9 +330,9 @@ class NemotronSuperModel(ModelProtocol):
         self.head_dim = model_args.head_dim
 
         self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
-        self.register_buffer(
-            "rope_cache", self._precompute_rope_cache(), persistent=False
-        )
+        # self.register_buffer(
+        #     "rope_cache", self._precompute_rope_cache(), persistent=False
+        # )
 
         self.layers = torch.nn.ModuleDict()
         for layer_id in range(model_args.n_layers):
@@ -347,17 +347,8 @@ class NemotronSuperModel(ModelProtocol):
         else:
             self.mtp = None
 
-    def _precompute_rope_cache(self) -> torch.Tensor:
-        return precompute_rope_cache(
-            self.model_args.head_dim,
-            self.model_args.max_seq_len,
-            self.model_args.rope_theta,
-        )
-
     def init_weights(self, buffer_device: torch.device | None = None):
-        buffer_device = buffer_device or self.rope_cache.device
-        with torch.device(buffer_device):
-            self.rope_cache = self._precompute_rope_cache()
+        buffer_device = buffer_device or self.norm.weight.device
         trunc_normal_(self.tok_embeddings.weight, mean=0.0, std=0.02)
         for layer in self.layers.values():
             layer.init_weights(buffer_device)
@@ -404,7 +395,7 @@ class NemotronSuperModel(ModelProtocol):
     ):
         h = self.tok_embeddings(tokens)
         for layer in self.layers.values():
-            h = layer(h, self.rope_cache, attention_masks)
+            h = layer(h, attention_masks)
         h = self.norm(h)
         logits = self.output(h)
 
@@ -414,8 +405,7 @@ class NemotronSuperModel(ModelProtocol):
             mtp_input_ids = tokens[:, 1:]
             mtp_hidden = h[:, :-1]
             mtp_h = self.mtp(
-                mtp_hidden, mtp_input_ids, self.tok_embeddings,
-                self.rope_cache, attention_masks,
+                mtp_hidden, mtp_input_ids, self.tok_embeddings, attention_masks,
             )
             mtp_logits = self.output(mtp_h)  # reuse lm_head
             return logits, mtp_logits

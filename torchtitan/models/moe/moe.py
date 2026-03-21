@@ -9,6 +9,7 @@ from collections.abc import Callable
 from typing import Any, Literal, Optional
 
 import torch
+from torch._C import NoneType
 import torch.nn.functional as F
 from torch import nn
 from torch.distributed.tensor import DTensor
@@ -36,7 +37,7 @@ class LLEPConfig:
     """Least-Loaded Expert Parallelism (LLEP) configuration.
 
     Default values from the paper (Section 5.1):
-        "For LLEP, we use λ=1.3, α=1, m=1024."
+        "For LLEP, we use ?=1.3, a=1, m=1024."
     Reference: "Least-Loaded Expert Parallelism: Load Balancing An Imbalanced
     Mixture-of-Experts" (Nguyen et al., Salesforce AI Research)
 
@@ -45,7 +46,7 @@ class LLEPConfig:
     """
 
     max_tokens_factor: float = 1.1
-    """α (alpha): GPU capacity factor. max_tokens_per_gpu = α × (total_tokens / num_gpus).
+    """a (alpha): GPU capacity factor. max_tokens_per_gpu = a x (total_tokens / num_gpus).
     1.1 = allow 10% overload before spilling. Paper recommends 1.0 (Section 5.1)."""
 
     min_tokens_per_gemm: int = 1024
@@ -53,7 +54,7 @@ class LLEPConfig:
     Below this threshold, the GEMM is too small to be efficient. Paper default: 1024 (Section 5.1)."""
 
     adaptive_threshold: float = 0.0
-    """λ (lambda): imbalance ratio (max_gpu_load / mean_gpu_load) to trigger LLEP.
+    """? (lambda): imbalance ratio (max_gpu_load / mean_gpu_load) to trigger LLEP.
     Below this ratio, standard EP is used instead. 0 = always use LLEP. Paper recommends 1.3 (Section 5.1)."""
 
     verbose: bool = False
@@ -679,7 +680,7 @@ class TokenChoiceTopKRouter(nn.Module):
         top_k: int,
         score_func: Literal["softmax", "sigmoid"],
         route_norm: bool,
-        route_scale: float,
+        # route_scale: float,
         gate_bias: bool,
         _debug_force_load_balance: bool = False,
     ):
@@ -691,7 +692,6 @@ class TokenChoiceTopKRouter(nn.Module):
         self.top_k = top_k
         self.score_func = score_func
         self.route_norm = route_norm
-        self.route_scale = route_scale
         self._debug_force_load_balance = _debug_force_load_balance
 
     def _debug_force_load_balance_routing(
@@ -772,8 +772,8 @@ class TokenChoiceTopKRouter(nn.Module):
                     Number of tokens assigned to each expert with shape ``(num_experts,)``.
         """
         # scores shape (bs*slen, num_experts)
-        scores = self.gate(x)
-
+        # scores = self.gate(x)
+        scores = F.linear(x.type(torch.float32), self.gate.weight.type(torch.float32))
         # By default, sigmoid or softmax is performed in float32 to avoid loss explosion
         if self.score_func == "sigmoid":
             scores = torch.sigmoid(scores.to(torch.float32))
@@ -805,7 +805,6 @@ class TokenChoiceTopKRouter(nn.Module):
         if self.route_norm:
             denominator = top_scores.sum(dim=-1, keepdim=True) + 1e-20
             top_scores = top_scores / denominator
-        top_scores = top_scores * self.route_scale
 
         # group tokens together by expert indices from 0 to num_experts and pass that to experts forward
         num_tokens_per_expert = torch.histc(
@@ -925,7 +924,7 @@ class MoE(nn.Module):
 
         # LLEP flag (read by parallelize.py to select ExpertParallelLLEP)
         self.use_llep = moe_args.use_llep
-        self._llep_config = moe_args.llep if moe_args.use_llep else None
+        self._llep_config = moe_args.llep if moe_args.use_llep else NoneType
 
         # Latent MoE: project tokens to a bottleneck dim before/after experts.
         # Router still operates at full dim; only routed tokens get projected.
@@ -937,6 +936,7 @@ class MoE(nn.Module):
             expert_dim = dim
             self.latent_in = None
             self.latent_out = None
+        self.expert_dim = expert_dim
 
         if peft_config is not None and peft_config.enable_peft:
             # TODO:
@@ -966,10 +966,10 @@ class MoE(nn.Module):
             top_k=moe_args.top_k,
             score_func=moe_args.score_func,
             route_norm=moe_args.route_norm,
-            route_scale=moe_args.route_scale,
             gate_bias=moe_args.gate_bias,
             _debug_force_load_balance=moe_args._debug_force_load_balance,
         )
+        self.route_scale = moe_args.route_scale
         if peft_config is not None and peft_config.enable_peft:
             self.router.gate.weight.requires_grad = False
         self.reorderer = TokenReorderer(num_experts=num_experts, top_k=moe_args.top_k)
@@ -1076,6 +1076,8 @@ class MoE(nn.Module):
         # shape (bs*slen*top_k, dim)
         routed_input = x[token_indices_experts_sorted // self.router.top_k]
 
+        router_dim = self.expert_dim if self.latent_in is not None else dim
+
         if self.score_before_experts:
             routed_input = (
                 routed_input.to(torch.float32)
@@ -1087,11 +1089,7 @@ class MoE(nn.Module):
             routed_input = self.latent_in(routed_input)
 
         # shape (bs*slen*top_k, expert_dim)
-        routed_output = self.experts(routed_input, num_tokens_per_expert)
-
-        # Latent projection: latent_size -> dim after experts
-        if self.latent_out is not None:
-            routed_output = self.latent_out(routed_output)
+        routed_output = self.experts(routed_input, num_tokens_per_expert) * self.route_scale
 
         # shared expert
         # Note: we execute the shared expert before scoring the output of the routed expert
@@ -1104,13 +1102,13 @@ class MoE(nn.Module):
 
         # Unsort routed outputs
         routed_output_unsorted = torch.zeros(
-            (bs * slen * self.router.top_k, dim),
+            (bs * slen * self.router.top_k, router_dim),
             dtype=routed_output.dtype,
             device=routed_output.device,
         )
         routed_output_unsorted[token_indices_experts_sorted] = routed_output
         routed_output_unsorted = routed_output_unsorted.reshape(
-            -1, self.router.top_k, dim
+            -1, self.router.top_k, router_dim
         )
         if not self.score_before_experts:
             out_experts = (
@@ -1123,6 +1121,10 @@ class MoE(nn.Module):
             )
         else:
             out_experts = routed_output_unsorted.sum(dim=1)
+
+        # Latent projection: latent_size -> dim after experts
+        if self.latent_out is not None:
+            out_experts = self.latent_out(out_experts)
 
         if out is None:
             return out_experts.reshape(bs, slen, dim)

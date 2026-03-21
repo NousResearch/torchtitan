@@ -2,7 +2,7 @@
 #SBATCH --job-name=multinode_online_runner
 #SBATCH --output=logs/%j.out
 #SBATCH --error=logs/%j.err
-#SBATCH --nodes=2
+#SBATCH --nodes=6
 #SBATCH --ntasks-per-node=1
 #SBATCH --exclusive
 #SBATCH --gpus-per-task=8
@@ -25,9 +25,11 @@ export MODEL_NAME=${MODEL_NAME:-"default_model"}
 export PYTHON_SCRIPT=${PYTHON_SCRIPT:-"/path/to/default/script.py"}
 export PYTHON_ARGS=${PYTHON_ARGS:-""}
 export TRAINING_ARGS=${TRAINING_ARGS:-""}
-export NUM_TRAINING_NODES=${NUM_TRAINING_NODES:-1}
-export NUM_INFERENCE_NODES=${NUM_INFERENCE_NODES:-1}
+export NUM_TRAINING_NODES=${NUM_TRAINING_NODES:-4}
+export NUM_INFERENCE_NODES=${NUM_INFERENCE_NODES:-2}
 export VLLM_PP=${VLLM_PP:-1}
+export VLLM_DP=${VLLM_DP:-4}
+export USE_EP=${USE_EP:-1}
 export NCCL_BUFFSIZE=33554432
 export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export NCCL_IB_AR_THRESHOLD=0
@@ -38,12 +40,14 @@ export NCCL_IGNORE_CPU_AFFINITY=1
 export NCCL_IB_HCA=mlx5_4:1,mlx5_7:1,mlx5_8:1,mlx5_9:1,mlx5_10:1,mlx5_13:1,mlx5_14:1,mlx5_15:1
 export NCCL_SOCKET_IFNAME=bond0
 export UCX_NET_DEVICES=bond0
+export PATH=/usr/local/cuda-12.8/bin:${PATH}
+export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda-12.8/targets/x86_64-linux/lib
 
 
 # Define environment paths
-export TRAIN_PATH="/home/dakota/github/torchtitan"
+export TRAIN_PATH="/home/dakota/github/torchtitan-2_10"
 export TRAIN_ENV="${TRAIN_PATH}/.venv"
-export VLLM_ENV="/home/dakota/github/torchtitan/.venv"
+export VLLM_ENV="/home/dakota/github/torchtitan-2_10/.venv"
 export API_ENV="/home/dakota/github/atropos/.venv"
 
 nodes=( $( scontrol show hostnames $SLURM_JOB_NODELIST ) )

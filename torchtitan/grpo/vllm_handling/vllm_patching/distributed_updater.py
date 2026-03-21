@@ -23,6 +23,16 @@ def is_lora_param(name: str) -> bool:
         ]
     )
 
+def is_moe_param(name: str) -> bool:
+    """Check if a parameter name corresponds to a MoE weight."""
+    return any(
+        suffix in name
+        for suffix in [
+            ".experts.w13",
+            ".experts.w2",
+        ]
+    )
+
 
 def init_process_group(
     backend=None,
@@ -330,7 +340,7 @@ def weight_updater_process(
 ):
     NUM_SGLANG_NODES = int(os.environ.get("NUM_INFERENCE_NODES", -1))
     CUDA_VISIBLE_DEVICES = str(os.environ.get("CUDA_VISIBLE_DEVICES", -1)).split(",")
-    SGLANG_UPDATE_PROC_DEBUG = int(os.environ.get("SGLANG_UPDATE_PROC_DEBUG", 0))
+    SGLANG_UPDATE_PROC_DEBUG = int(os.environ.get("SGLANG_UPDATE_PROC_DEBUG", 1))
     # if NUM_SGLANG_NODES == -1:
     #     print(f"NUM_SGLANG_NODES is not set, exiting weight updater process", flush=True)
     #     return
@@ -343,7 +353,7 @@ def weight_updater_process(
     torch.cuda.set_device(gpu_id)
     print(
         f"Beginning weight updater process on TP rank {tp_rank} of {tp_size}, "
-        f"PP rank {pp_rank} of {pp_size}, "
+        f"PP rank {pp_rank} of {pp_size}, EP rank {ep_rank} of {ep_size}, "
         f"with q heads: {q_heads} and kv heads: {kv_heads} and gpu_id {gpu_id} "
         f"with CUDA_VISIBLE_DEVICES={CUDA_VISIBLE_DEVICES} "
         f"with hostname: {hostnames[1]}, master {master_addr}, and world size: {world_size}",
@@ -377,8 +387,10 @@ def weight_updater_process(
         # keys in its state_dict, but all params share the same dtype in practice.
         common_dtype = str(next(iter(state_dict.values())).dtype).split(".")[-1]
         weight_dtypes = {
-            tt_name: common_dtype for tt_name in json_data["param_mappings"]
+            # tt_name: common_dtype for tt_name in json_data["param_mappings"]
         }
+        for param_name in param_name_list:
+            weight_dtypes[param_name] = str(state_dict[json_data["param_mappings"][param_name]["sglang_name"]].dtype).split(".")[-1]
         with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "w") as f:
             json.dump(weight_dtypes, f)
     print("Got json", flush=True)
@@ -388,7 +400,7 @@ def weight_updater_process(
     )
     vllm_global_rank = rank  # vLLM rank before any offset
 
-    # ── Signal group ──────────────────────────────────────────────
+    # -- Signal group ----------------------------------------------
     # All training dp_replicate_rank==0 ranks (across PP stages) +
     # all vLLM ranks.  Used for heartbeat/start-update signals only.
     signal_training_size = train_pp_size * num_training_gpus_per_pp
@@ -426,7 +438,7 @@ def weight_updater_process(
     )
     print("Created signal NCCL group", flush=True)
 
-    # ── Per-PP data groups ────────────────────────────────────────
+    # -- Per-PP data groups ----------------------------------------
     # One per training PP stage that maps to this vLLM PP stage.
     # Subgroups of the signal NCCL group - share its store via
     # PrefixStore namespacing, no extra TCP ports needed.
@@ -460,7 +472,7 @@ def weight_updater_process(
             flush=True,
         )
 
-    # ── Build per-PP param lists + interleaved iteration order ────
+    # -- Build per-PP param lists + interleaved iteration order ----
     per_pp_params = defaultdict(list)
     for tt_name in param_name_list:
         pp_stage = json_data["param_mappings"][tt_name].get("train_pp_stage", 0)
@@ -485,6 +497,16 @@ def weight_updater_process(
     )
     # setup ep shard dim modifier
     gpus_per_ep_dp = json_data["ep_degree"] * json_data["dp_shard_degree"]
+
+    # Precompute how many training params map to each vLLM w13_weight target.
+    # Non-gated experts (e.g. Nemotron Super) have only w1 -> w13_weight (count=1),
+    # gated experts have w1+w3 -> w13_weight (count=2).
+    name_conversions = get_name_conversions(json_data["param_mappings"])
+    w13_source_count = {}
+    for vllm_name, tt_names in name_conversions.items():
+        if "w13_weight" in vllm_name:
+            w13_source_count[vllm_name] = len(tt_names)
+
     # Dump interleaved iteration order for debugging
     if pp_rank == 0:
         import json as _json
@@ -561,7 +583,7 @@ def weight_updater_process(
                 # all_gather on the per-PP data group
                 if SGLANG_UPDATE_PROC_DEBUG:
                     print(
-                        f"[vLLM PP {pp_rank}] all_gather {tt_name} -> {name} "
+                        f"[vLLM PP {pp_rank}] all_gather starting {tt_name} -> {name} "
                         f"(train PP {train_pp_stage}, owns={owns_param})",
                         flush=True,
                     )
@@ -580,12 +602,18 @@ def weight_updater_process(
                 )
                 if SGLANG_UPDATE_PROC_DEBUG:
                     print(
-                        f"[vLLM PP {pp_rank}] all_gather {tt_name} -> {name} "
+                        f"[vLLM PP {pp_rank}] all_gather finished {tt_name} -> {name} "
                         f"(train PP {train_pp_stage}, owns={owns_param})",
                         flush=True,
                     )
 
                 if not owns_param:
+                    if SGLANG_UPDATE_PROC_DEBUG:
+                        print(
+                            f"[vLLM PP {pp_rank}] not owning {tt_name} -> {name} deleting tensor_list",
+                            f"(train PP {train_pp_stage})",
+                            flush=True,
+                        )
                     del tensor_list
                     continue
 
@@ -593,8 +621,17 @@ def weight_updater_process(
                 # Now merge them together...
                 # First, data parallel...
                 if json_data["dp_shard_degree"] > 1:
+                    # Not DP sharded case:
+                    if tensor_list[0].shape == state_dict[name].shape:
+                        tensor = tensor_list[0].contiguous()
                     # TODO: support tp in ep case
-                    if json_data["param_mappings"][tt_name]["ep_enabled"]:
+                    elif json_data["param_mappings"][tt_name]["ep_enabled"]:
+                        if SGLANG_UPDATE_PROC_DEBUG:
+                            print(
+                                f"[vLLM PP {pp_rank}] EP enabled for {tt_name} -> {name} "
+                                f"(train PP {train_pp_stage})",
+                                flush=True,
+                            )
                         expert_parallel_tensors = []
                         for i in range(json_data["ep_degree"]):
                             expert_parallel_tensors.append(
@@ -606,6 +643,12 @@ def weight_updater_process(
                                 )
                             )
                         if json_data["ep_degree"] > 1:
+                            if SGLANG_UPDATE_PROC_DEBUG:
+                                print(
+                                    f"[vLLM PP {pp_rank}] EP degree > 1 for {tt_name} -> {name} "
+                                    f"(train PP {train_pp_stage})",
+                                    flush=True,
+                                )
                             if (
                                 expert_parallel_tensors[0].shape
                                 == state_dict[name].shape
@@ -617,7 +660,19 @@ def weight_updater_process(
                                     dim=0,
                                 ).contiguous()
                         else:
-                            tensor = expert_parallel_tensors[0].contiguous()
+                            if SGLANG_UPDATE_PROC_DEBUG:
+                                print(
+                                    f"[vLLM PP {pp_rank}] EP degree = 1 for {tt_name} -> {name} "
+                                    f"(train PP {train_pp_stage})",
+                                    flush=True,
+                                )
+                            if expert_parallel_tensors[0].shape == state_dict[name].shape:
+                                tensor = expert_parallel_tensors[0].contiguous()
+                            else:
+                                tensor = torch.cat(
+                                    expert_parallel_tensors,
+                                    dim=0,
+                                ).contiguous()
                     else:
                         tensor_parallel_tensors = []
                         for i in range(json_data["tp_degree"]):
@@ -641,7 +696,13 @@ def weight_updater_process(
                                 ).contiguous()
 
                         else:
-                            tensor = tensor_parallel_tensors[0].contiguous()
+                            if tensor_parallel_tensors[0].shape == state_dict[name].shape:
+                                tensor = tensor_parallel_tensors[0].contiguous()
+                            else:
+                                tensor = torch.cat(
+                                    tensor_parallel_tensors,
+                                    dim=json_data["param_mappings"][tt_name]["tp_shard_dim"],
+                                ).contiguous()
                 else:
                     # No fsdp?
                     tensor = torch.cat(
@@ -651,19 +712,56 @@ def weight_updater_process(
                 if tensor.dtype != state_dict[name].dtype:
                     tensor = tensor.to(state_dict[name].dtype)
 
-                def _debug_diff(name, old, new):
+                # EP shard selection: if vLLM uses expert parallelism and the
+                # gathered tensor has more experts than this rank's state_dict
+                # expects, slice dim-0 to keep only this rank's shard.
+                if (
+                    owns_param
+                    and ep_size > 1
+                    and is_moe_param(name)
+                    and tensor.dim() >= 2
+                    and tensor.shape[0] > state_dict[name].shape[0]
+                ):
+                    total_experts = tensor.shape[0]
+                    tensor = torch.chunk(tensor, ep_size)[ep_rank].contiguous()
                     if SGLANG_UPDATE_PROC_DEBUG:
-                        diff = (new.float() - old.float()).abs()
                         print(
-                            f"[WEIGHT DIFF] {name}: mean={diff.mean().item():.6e}, "
-                            f"std={diff.std().item():.6e}, "
-                            f"old_mean={old.float().mean().item():.6e}, "
-                            f"new_mean={new.float().mean().item():.6e}",
+                            f"[EP SHARD] {name}: sliced experts [{ep_rank * tensor.shape[0]} :{(ep_rank + 1) * tensor.shape[0] // ep_size}] "
+                            f"of {total_experts} (ep_rank={ep_rank}, ep_size={ep_size})",
                             flush=True,
                         )
+
+                def _debug_diff(name, old, new):
+                    if SGLANG_UPDATE_PROC_DEBUG:
                         print(
                             f"[STRIDE COMP] {name}: new: {new.stride()}, "
-                            f"old: {old.stride()}",
+                            f"old: {old.stride()} shapes: {new.shape} {old.shape}, "
+                            f"dtypes: {new.dtype} {old.dtype}, "
+                            f"Devices: {new.device} {old.device}",
+                            flush=True,
+                        )
+                        if len(new.shape) != len(old.shape) or any(
+                            [new.shape[i] != old.shape[i] for i in range(len(new.shape))]
+                        ):
+                            print(
+                                f"[SHAPE MISMATCH] {name}: new: {new.shape}, "
+                                f"old: {old.shape}",
+                                flush=True,
+                            )
+                            return
+                        diff = (new.float() - old.float()).abs()
+                        
+                        wd_mean = diff.mean().item()
+                        diff += 1e-6  # avoid division by zero
+                        wd_std = diff.std().item()
+                        old_mean = old.float().mean().item()
+                        new_mean = new.float().mean().item()
+                        print(
+                            f"[WEIGHT DIFF]: {diff.shape}, {diff.dtype}, {diff.device} "
+                            f"{name}: mean={wd_mean:.6e}, "
+                            f"std={wd_std:.6e}, "
+                            f"old_mean={old_mean:.6e}, "
+                            f"new_mean={new_mean:.6e}",
                             flush=True,
                         )
 
@@ -680,6 +778,12 @@ def weight_updater_process(
                     vllm_shape = state_dict[name].shape
                     tensor = reshape_lora_for_vllm(tensor, name, vllm_shape)
 
+                    _debug_diff(name, state_dict[name].data, tensor)
+                    state_dict[name].data.copy_(tensor)
+                elif (".A_log" in tt_name) and (".A_log" not in name):
+                    # need to convert from log space
+                    # see https://github.com/vllm-project/vllm/blob/v0.18.0/vllm/model_executor/layers/mamba/mamba_mixer2.py#L451
+                    tensor = -torch.exp(tensor)
                     _debug_diff(name, state_dict[name].data, tensor)
                     state_dict[name].data.copy_(tensor)
                 elif "qkv_proj.weight" in name:
@@ -709,7 +813,18 @@ def weight_updater_process(
                         ).contiguous()
                         del qkv_buffer[name]
                         _debug_diff(name, state_dict[name].data, tensor)
-                        state_dict[name].data.copy_(tensor)
+                        
+                        if len(state_dict[name].shape) != len(tensor.shape) or any(
+                            [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                        ):
+                            print(
+                                f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                                f"old: {state_dict[name].shape}",
+                                flush=True,
+                            )
+                        else:
+                            _debug_diff(name, state_dict[name].data, tensor)
+                            state_dict[name].data.copy_(tensor)
                 elif "gate_up_proj.weight" in name:
                     key_val = "w1" if ".w1." in tt_name else "w3"
                     gate_up_buffer[name][key_val] = tensor
@@ -723,15 +838,43 @@ def weight_updater_process(
                         _debug_diff(name, state_dict[name].data, tensor)
                         state_dict[name].data.copy_(tensor)
                 elif "w13_weight" in name:
-                    key_val = "w1" if ".w1" in tt_name else "w3"
-                    w1w3_buffer[name][key_val] = tensor
-                    if len(w1w3_buffer[name]) == 2:
-                        tensor = torch.cat(
-                            [w1w3_buffer[name]["w1"], w1w3_buffer[name]["w3"]], dim=1
-                        ).contiguous()
-                        del w1w3_buffer[name]
+                    expected_sources = w13_source_count.get(name, 2)
+                    if expected_sources == 1:
+                        # Non-gated experts (e.g. Nemotron Super): only w1,
+                        # copy directly as w13_weight with no concat.
                         _debug_diff(name, state_dict[name].data, tensor)
-                        state_dict[name].data.copy_(tensor)
+                        if len(state_dict[name].shape) != len(tensor.shape) or any(
+                            [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                        ):
+                            print(
+                                f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                                f"old: {state_dict[name].shape}",
+                                flush=True,
+                            )
+                        else:
+                            _debug_diff(name, state_dict[name].data, tensor)
+                            state_dict[name].data.copy_(tensor)
+                    else:
+                        # Gated experts: buffer w1 and w3, concat when both arrive.
+                        key_val = "w1" if ".w1" in tt_name else "w3"
+                        w1w3_buffer[name][key_val] = tensor
+                        if len(w1w3_buffer[name]) == 2:
+                            tensor = torch.cat(
+                                [w1w3_buffer[name]["w1"], w1w3_buffer[name]["w3"]], dim=1
+                            ).contiguous()
+                            del w1w3_buffer[name]
+                            _debug_diff(name, state_dict[name].data, tensor)
+                        if len(state_dict[name].shape) != len(tensor.shape) or any(
+                            [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                        ):
+                            print(
+                                f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                                f"old: {state_dict[name].shape}",
+                                flush=True,
+                            )
+                        else:
+                            _debug_diff(name, state_dict[name].data, tensor)
+                            state_dict[name].data.copy_(tensor)
                 elif "qkv_proj.bias" in name:
                     key_val = (
                         "q" if ".wq." in tt_name else "v" if ".wv." in tt_name else "k"
@@ -759,7 +902,17 @@ def weight_updater_process(
                         ).contiguous()
                         del qkv_bias_buffer[name]
                         _debug_diff(name, state_dict[name].data, tensor)
-                        state_dict[name].data.copy_(tensor)
+                        if len(state_dict[name].shape) != len(tensor.shape) or any(
+                            [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                        ):
+                            print(
+                                f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                                f"old: {state_dict[name].shape}",
+                                flush=True,
+                            )
+                        else:
+                            _debug_diff(name, state_dict[name].data, tensor)
+                            state_dict[name].data.copy_(tensor)
                 elif json_data["param_mappings"][tt_name]["needs_permute"]:
                     if len(shape) == 2:
                         tensor = permute(tensor, shape[0]).contiguous()
@@ -776,7 +929,26 @@ def weight_updater_process(
                             f"permute, but is not 1D or 2D"
                         )
                     _debug_diff(name, state_dict[name].data, tensor)
-                    state_dict[name].data.copy_(tensor)
+                    if len(state_dict[name].shape) != len(tensor.shape) or any(
+                        [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                    ):
+                        print(
+                            f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                            f"old: {state_dict[name].shape}",
+                            flush=True,
+                        )
+                    else:
+                        _debug_diff(name, state_dict[name].data, tensor)
+                        state_dict[name].data.copy_(tensor)
                 else:
-                    _debug_diff(name, state_dict[name].data, tensor)
-                    state_dict[name].data.copy_(tensor)
+                    if len(state_dict[name].shape) != len(tensor.shape) or any(
+                        [state_dict[name].shape[i] != tensor.shape[i] for i in range(len(state_dict[name].shape))]
+                    ):
+                        print(
+                            f"[SHAPE MISMATCH] {name}: new: {tensor.shape}, "
+                            f"old: {state_dict[name].shape}",
+                            flush=True,
+                        )
+                    else:
+                        _debug_diff(name, state_dict[name].data, tensor)
+                        state_dict[name].data.copy_(tensor)

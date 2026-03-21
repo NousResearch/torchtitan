@@ -14,6 +14,7 @@ import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import Replicate, Shard
 from torch.distributed.tensor.parallel import (
+    PrepareModuleInputOutput,
     parallelize_module,
     PrepareModuleInput,
     SequenceParallel,
@@ -245,9 +246,18 @@ def apply_non_moe_tp(
     positions_sharding = Replicate() if positions_enabled else None
     # pyrefly: ignore [not-callable]
     for transformer_block in model.layers.values():
+        # TODO: investigate how to TP mamba
         layer_plan = {
             "mamba_norm": SequenceParallel(),
             "ffn_norm": SequenceParallel(),
+            "mamba": PrepareModuleInputOutput(
+                    input_layouts=(Shard(1), Replicate(), None),
+                    desired_input_layouts=(Replicate(), Replicate(), None),
+                    use_local_input=True,
+                    output_layouts=(Replicate()),
+                    desired_output_layouts=(Shard(1)),
+                    use_local_output=False,
+            ),
         }
 
         # Attention TP (only on layers that have it)

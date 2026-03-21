@@ -631,6 +631,13 @@ def apply_moe_ep_tp(
                 # are effectively running Sequence Parallel (split along the folded bs*slen dim)
                 # pyrefly: ignore [no-matching-overload]
                 moe_layer_plan.update({"moe.reorderer": ReordererSequenceParallel()})
+            if hasattr(transformer_block.moe, "latent_in"):
+                moe_layer_plan.update(
+                    {
+                        "moe.latent_in": ReordererSequenceParallel(),
+                        "moe.latent_out": ReordererSequenceParallel(),
+                    }
+                )
             # pyrefly: ignore [missing-attribute]
             if transformer_block.moe.shared_experts is not None:
                 # input Replicate, output Partial
@@ -641,9 +648,14 @@ def apply_moe_ep_tp(
                         "moe.shared_experts.w2": LoraRowwiseParallel(
                             output_layouts=Partial()
                         ),
-                        "moe.shared_experts.w3": LoraColwiseParallel(),
                     }
                 )
+                if hasattr(transformer_block.moe.shared_experts, "w3"):
+                    moe_layer_plan.update(
+                        {
+                            "moe.shared_experts.w3": LoraColwiseParallel(),
+                        }
+                    )
             parallelize_module(
                 # pyrefly: ignore [bad-argument-type]
                 module=transformer_block,

@@ -27,8 +27,9 @@ def get_sglang_urls(job_config: JobConfig):
         for node in nodelist:
             if node == "":
                 continue
+            sglang_ep = getattr(job_config.grpo, "sglang_ep", 1)
             instances_per_node = 8 // (
-                job_config.grpo.sglang_tp * job_config.grpo.sglang_pp
+                job_config.grpo.sglang_tp * job_config.grpo.sglang_pp * sglang_ep
             )
             for i in range(instances_per_node):
                 urls.append(f"{node}:{9000 + i}")
@@ -165,7 +166,7 @@ def init_process_group(
 
 
 def new_group(parent_pg, backend, world_size, rank, group_name, timeout=None):
-    """Create a subgroup reusing an existing PG's store — no new TCP rendezvous.
+    """Create a subgroup reusing an existing PG's store - no new TCP rendezvous.
 
     Like ``torch.distributed.new_group`` but uses a custom parent PG
     instead of the default process group. Extracts the store from
@@ -184,7 +185,7 @@ def new_group(parent_pg, backend, world_size, rank, group_name, timeout=None):
     if isinstance(backend, str):
         backend = Backend(backend)
 
-    # Extract store from parent PG — same as torch.distributed.new_group
+    # Extract store from parent PG - same as torch.distributed.new_group
     _, parent_store = _world.pg_map[parent_pg]
 
     pg_options_param_name = "backend_options"
@@ -221,7 +222,157 @@ def get_hostname_url():
         return None
 
 
-def param_to_sglang_data(name, needs_permute=False):
+def _build_nemotron_super_flat_map(n_layers=40, attn_layer_idxs=None):
+    """Build the flat HF layer index mapping for Nemotron Super.
+
+    Each torchtitan layer expands to 2 or 3 flat layers:
+      mamba (always), attn (if in attn_layer_idxs), moe (always).
+
+    Returns dict: {layer_idx: {"mamba": flat, "attn": flat|None, "moe": flat}}
+    """
+    if attn_layer_idxs is None:
+        attn_layer_idxs = [3, 7, 11, 16, 21, 26, 31, 35]
+    attn_set = set(attn_layer_idxs)
+    layer_to_flat = {}
+    flat_idx = 0
+    for layer_idx in range(n_layers):
+        layer_to_flat[layer_idx] = {}
+        layer_to_flat[layer_idx]["mamba"] = flat_idx
+        flat_idx += 1
+        if layer_idx in attn_set:
+            layer_to_flat[layer_idx]["attn"] = flat_idx
+            flat_idx += 1
+        else:
+            layer_to_flat[layer_idx]["attn"] = None
+        layer_to_flat[layer_idx]["moe"] = flat_idx
+        flat_idx += 1
+    return layer_to_flat
+
+
+# Lazily initialized on first call with model_name="nemotron_super"
+_nemotron_super_flat_map = None
+
+
+def _param_to_sglang_data_nemotron_super(name):
+    """Map a torchtitan Nemotron Super param name to the vLLM/SGLang name.
+
+    Returns (vllm_name, needs_permute=False).
+    Nemotron Super never needs rotary permutation.
+    """
+    import re
+
+    global _nemotron_super_flat_map
+    if _nemotron_super_flat_map is None:
+        _nemotron_super_flat_map = _build_nemotron_super_flat_map()
+
+    flat_map = _nemotron_super_flat_map
+
+    # Strip checkpoint / compile wrapper prefixes
+    name = (
+        name.replace("._checkpoint_wrapped_module.", ".")
+        .replace("._orig_mod.", ".")
+    )
+
+    # -- Global params --
+    if name == "tok_embeddings.weight":
+        return "model.embed_tokens.weight", False
+    if name == "norm.weight":
+        return "model.norm_f.weight", False
+    if name == "output.weight":
+        return "lm_head.weight", False
+
+    # -- Layer params -- expect "layers.{i}.{sublayer}.{rest}"
+    m = re.match(r"layers\.(\d+)\.(.*)", name)
+    if m is None:
+        raise ValueError(f"Cannot map nemotron_super param name: {name}")
+
+    layer_idx = int(m.group(1))
+    rest = m.group(2)
+    layer_flat = flat_map[layer_idx]
+
+    # -- Mamba sublayer --
+    if rest == "mamba_norm.weight":
+        f = layer_flat["mamba"]
+        return f"model.layers.{f}.norm.weight", False
+    if rest.startswith("mamba."):
+        f = layer_flat["mamba"]
+        mamba_rest = rest[len("mamba."):]
+        # A_log -> A (just a rename, vLLM does exp internally)
+        if mamba_rest == "A_log":
+            return f"model.layers.{f}.mixer.A", False
+        # Everything else maps directly: in_proj, conv1d, dt_bias, D, norm, out_proj
+        return f"model.layers.{f}.mixer.{mamba_rest}", False
+
+    # -- Attention sublayer --
+    if rest == "attn_norm.weight":
+        f = layer_flat["attn"]
+        assert f is not None, f"Layer {layer_idx} has attn_norm but no attn flat index"
+        return f"model.layers.{f}.norm.weight", False
+    if rest.startswith("attention."):
+        f = layer_flat["attn"]
+        assert f is not None, f"Layer {layer_idx} has attention but no attn flat index"
+        attn_rest = rest[len("attention."):]
+        # wq/wk/wv -> fused qkv_proj (updater merges via qkv_buffer)
+        if attn_rest in ("wq.weight", "wk.weight", "wv.weight"):
+            return f"model.layers.{f}.mixer.qkv_proj.weight", False
+        # wo -> o_proj
+        if attn_rest == "wo.weight":
+            return f"model.layers.{f}.mixer.o_proj.weight", False
+        raise ValueError(f"Unknown nemotron_super attention param: {rest}")
+
+    # -- MoE sublayer --
+    if rest == "ffn_norm.weight":
+        f = layer_flat["moe"]
+        return f"model.layers.{f}.norm.weight", False
+    if rest.startswith("moe."):
+        f = layer_flat["moe"]
+        moe_rest = rest[len("moe."):]
+
+        # Router gate
+        if moe_rest == "router.gate.weight":
+            return f"model.layers.{f}.mixer.gate.weight", False
+
+        # Expert bias (e_score_correction_bias)
+        if moe_rest == "expert_bias":
+            return f"model.layers.{f}.mixer.experts.e_score_correction_bias", False
+
+        # Shared experts: w1->up_proj, w2->down_proj
+        if moe_rest == "shared_experts.w1.weight":
+            return f"model.layers.{f}.mixer.shared_experts.up_proj.weight", False
+        if moe_rest == "shared_experts.w2.weight":
+            return f"model.layers.{f}.mixer.shared_experts.down_proj.weight", False
+
+        # Latent projections
+        if moe_rest == "latent_in.weight":
+            return f"model.layers.{f}.mixer.fc1_latent_proj.weight", False
+        if moe_rest == "latent_out.weight":
+            return f"model.layers.{f}.mixer.fc2_latent_proj.weight", False
+
+        # Routed experts: w1->w13_weight (no w3, non-gated), w2->w2_weight
+        if moe_rest == "experts.w1":
+            return f"model.layers.{f}.mixer.experts.w13_weight", False
+        if moe_rest == "experts.w2":
+            return f"model.layers.{f}.mixer.experts.w2_weight", False
+
+        raise ValueError(f"Unknown nemotron_super moe param: {rest}")
+
+    raise ValueError(f"Cannot map nemotron_super param name: {name}")
+
+
+def param_to_sglang_data(name, needs_permute=False, model_name=None):
+    """Map a torchtitan param name to the vLLM/SGLang inference-side name.
+
+    Args:
+        name: torchtitan parameter name
+        needs_permute: whether rotary permutation may be needed (ignored for nemotron_super)
+        model_name: model architecture name for dispatch
+
+    Returns:
+        (vllm_name, needs_permute)
+    """
+    if model_name == "nemotron_super":
+        return _param_to_sglang_data_nemotron_super(name)
+
     out_permute = False
     is_lora = (
         ".lora_a" in name or ".lora_b" in name or "_lora_a" in name or "_lora_b" in name
@@ -366,7 +517,7 @@ def setup_group(hostname, sglang_port, total_group_size, local_rank):
 
     This group includes ALL training dp_replicate_rank==0 ranks (across all PP
     stages) plus ALL vLLM ranks.  Used only for heartbeat (-1) and start-update
-    (1) broadcasts — NOT for weight data.
+    (1) broadcasts - NOT for weight data.
     """
     gloo_group = init_process_group(
         backend="gloo",

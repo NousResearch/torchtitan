@@ -19,7 +19,7 @@ enable_wandb = true
 [model]
 name = "nemotron_super"
 flavor = "120B-A12B"
-tokenizer_path = "nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-Base-BF16"
+hf_assets_path = "/home/shared/torchtitan/assets/NVIDIA-Nemotron-3-Super-120B-A12B-Base-BF16"
 
 [optimizer]
 name = "AdamW"
@@ -65,3 +65,7 @@ selective_ac_option = "op"
 [compile]
 enable = false
 components = ["loss"]
+
+[comm]
+init_timeout_seconds = 3000
+

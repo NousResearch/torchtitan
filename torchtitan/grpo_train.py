@@ -342,7 +342,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"does not support pipelining"
                 )
 
-            # ── Validate PP constraints (Phase 1) ─────────────────
+            # -- Validate PP constraints (Phase 1) -----------------
             assert (
                 job_config.grpo.kl_beta == 0
             ), "Reference model (kl_beta > 0) not yet supported with PP"
@@ -363,7 +363,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"or decrease pipeline_parallel_microbatch_size."
             )
 
-            # ── Create GRPO PP loss context and closure ────────────
+            # -- Create GRPO PP loss context and closure ------------
             self.grpo_pp_context = GRPOPPLossContext(
                 loss_fn=self.loss_fn,
                 entropy_loss_fn=self.entropy_loss_fn,
@@ -572,7 +572,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self._pp_local_to_original = {}
             self._pp_original_to_local = {}
 
-        # ── Build global param list across all PP stages ──────────────
+        # -- Build global param list across all PP stages --------------
         # Each PP stage has different params (different layers). We need the
         # GLOBAL sorted param list so both training and vLLM iterate in the
         # same deterministic order.
@@ -587,9 +587,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         param_name, param_name
                     )
                     new_name, needs_permute = param_to_sglang_data(
-                        original_name, self.job_config.model.name != "qwen3"
+                        original_name,
+                        self.job_config.model.name != "qwen3",
+                        model_name=self.job_config.model.name,
                     )
-                    local_shape = list(param.to_local().shape)
+                    try:
+                        local_shape = list(param.to_local().shape)
+                    except AttributeError:
+                        logger.warning(f"Parameter {original_name} is not sharded, using global shape")
+                        local_shape = list(param.shape)
                     local_param_info[original_name] = {
                         "sglang_name": new_name,
                         "needs_permute": needs_permute,
@@ -603,6 +609,55 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         "train_pp_stage": self.pp_rank,
                     }
 
+        # Include expert_bias buffers when the router gate is trainable.
+        # expert_bias is a persistent buffer that changes via the load-balance
+        # optimizer hook and needs to be synced to vLLM.
+        for model_part in self.model_parts:
+            # Collect which layers have trainable gate weights
+            trainable_gate_layers = set()
+            for pname, p in model_part.named_parameters():
+                if "moe.router.gate.weight" in pname and p.requires_grad:
+                    # Extract the layer prefix (e.g. "layers.5.")
+                    prefix = pname.rsplit("moe.router.gate.weight", 1)[0]
+                    trainable_gate_layers.add(prefix)
+            # Now scan buffers for expert_bias in those layers
+            for buf_name, buf in model_part.named_buffers():
+                if "moe.expert_bias" not in buf_name:
+                    continue
+                buf_prefix = buf_name.rsplit("moe.expert_bias", 1)[0]
+                if buf_prefix not in trainable_gate_layers:
+                    continue
+                original_name = self._pp_local_to_original.get(
+                    buf_name, buf_name
+                )
+                new_name, needs_permute = param_to_sglang_data(
+                    original_name,
+                    False,
+                    model_name=self.job_config.model.name,
+                )
+                if hasattr(buf, "to_local"):
+                    local_shape = list(buf.to_local().shape)
+                    tp_shard_dim = (
+                        buf.placements[-1].dim
+                        if buf.placements[-1].is_shard()
+                        else 0
+                    )
+                    buf_shape = buf.shape
+                else:
+                    local_shape = list(buf.shape)
+                    tp_shard_dim = 0
+                    buf_shape = buf.shape
+                local_param_info[original_name] = {
+                    "sglang_name": new_name,
+                    "needs_permute": needs_permute,
+                    "tp_shard_dim": tp_shard_dim,
+                    "local_shape": local_shape,
+                    "ep_enabled": False,
+                    "shape": buf_shape,
+                    "dtype": str(buf.dtype).split(".")[-1],
+                    "train_pp_stage": self.pp_rank,
+                }
+
         # Gather param info from all PP stages
         if parallel_dims.pp_enabled:
             all_param_infos = [None] * self.train_pp_size
@@ -615,9 +670,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         else:
             global_param_info = local_param_info
 
-        # Global sorted param list — both sides iterate this in lockstep
+        # Global sorted param list � both sides iterate this in lockstep
         self.param_name_to_send_list = sorted(global_param_info.keys())
-        # Map from param name → which PP stage owns it
+        # Map from param name ? which PP stage owns it
         self.param_pp_stages = {
             name: info["train_pp_stage"] for name, info in global_param_info.items()
         }
@@ -650,11 +705,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 json.dump(train_send_order, f, indent=2)
         self.data_handler.register_atropos(job_config, self.step, global_batch_size)
 
-        # ── Setup weight-sync process groups ──────────────────────────
+        # -- Setup weight-sync process groups --------------------------
+        self.sglang_ep = getattr(job_config.grpo, "sglang_ep", 1)
         vllm_total_ranks = (
             len(job_config.grpo.sglang_urls)
             * job_config.grpo.sglang_tp
             * self.sglang_pp
+            * self.sglang_ep
         )
         # Signal group: ALL training dp_replicate_rank==0 ranks (across PP
         # stages) + ALL vLLM ranks.  Used for heartbeat/start signals only.
@@ -706,7 +763,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 signal_group_size,
                 signal_local_rank,
             )
-            # Per-PP data group — subgroup of the signal group's PG.
+            # Per-PP data group � subgroup of the signal group's PG.
             self.pp_data_nccl_group = new_group(
                 self.sglang_nccl_group,
                 "nccl",
@@ -875,9 +932,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
     def _reset_pp_shape_cache(self, input_ids: torch.Tensor):
         """Reset PP schedule shape cache if input shape changed.
 
-        GRPO's variable packing produces nanobatches with different [B, S]
+        GRPO's variable packing produces nanobatches with different [B, S],
         shapes.  The PP schedule caches shapes from the first step() call and
-        validates all subsequent calls against them — causing
+        validates all subsequent calls against them - causing
         PipeliningShapeError.  We only reset when the shape actually changes
         to avoid unnecessary shape re-inference P2P overhead (expensive at
         high PP degrees).
@@ -960,7 +1017,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
 
         if parallel_dims.pp_enabled:
-            # ── PP forward / backward ─────────────────────────────
+            # -- PP forward / backward -----------------------------
             # Update the closure's mutable context with this nanobatch's data.
             # Tensors are pre-chunked into n_microbatches pieces to match
             # the PP schedule's internal batch splitting.
@@ -977,7 +1034,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 total_masked_tokens=total_masked_tokens,
             )
 
-            # Reset PP schedule shape cache if shape changed — avoids
+            # Reset PP schedule shape cache if shape changed � avoids
             # PipeliningShapeError from GRPO's variable packing while
             # skipping expensive shape re-inference when shapes are stable.
             self._reset_pp_shape_cache(input_ids)
@@ -1001,14 +1058,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         losses=losses,
                     )
 
-            # Collect loss — only meaningful on last stage
+            # Collect loss � only meaningful on last stage
             loss = (
                 torch.sum(torch.stack(losses)).to(self.device)
                 if self.pp_has_last_stage
                 else torch.tensor([-1.0], device=self.device)
             )
 
-            # Metrics — merge across PP microbatch chunks (last stage only)
+            # Metrics � merge across PP microbatch chunks (last stage only)
             if self.pp_has_last_stage:
                 metrics = self.grpo_pp_context.merge_chunk_metrics()
             else:
@@ -1703,10 +1760,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
     def send_weights(self):
         rank = torch.distributed.get_rank()
-        # Build named_params from all local model_parts
+        # Build named_params from all local model_parts (include buffers
+        # like expert_bias that are in the param sync list).
         named_params = {}
         for model_part in self.model_parts:
             named_params.update({k: v for (k, v) in model_part.named_parameters()})
+            named_params.update({k: v for (k, v) in model_part.named_buffers()})
 
         if self.dp_replicate_rank == 0:
             # Signal on the signal group -- all vLLM ranks receive this.
@@ -1736,7 +1795,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"sending {name} (PP stage {self.pp_rank}, "
                     f"shape={param.shape})"
                 )
-                local_param = param.to_local()
+                local_param = (
+                    param.to_local() if hasattr(param, "to_local") else param
+                )
                 send_param(
                     local_param,
                     name,

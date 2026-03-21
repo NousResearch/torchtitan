@@ -1268,6 +1268,9 @@ class GRPO:
     sglang_pp: int = 1
     """sglang pipeline parallelism (vLLM PP degree). train_pp must be a multiple of this."""
 
+    sglang_ep: int = 1
+    """sglang expert parallelism (vLLM EP degree). Affects GPUs per instance and weight sync ranks."""
+
     pos_scaler: float = 1.0
     """Positive reward scaling factor for GRPO"""
 
