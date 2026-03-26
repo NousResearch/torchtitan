@@ -32,7 +32,8 @@ def get_dynamic_batch_gas(
 
 
 def pad_data_to_good_offset(
-    data, cp_degree, dp_degree, scale_adv_by_len=True, num_microbatches=1
+    data, cp_degree, dp_degree, scale_adv_by_len=True, num_microbatches=1,
+    advantage_normalization="standard",
 ):
     max_token_len = max(
         [max([len(x) for x in item["tokens"]]) for item in data["batch"]]
@@ -70,7 +71,7 @@ def pad_data_to_good_offset(
             unmasked_lengths = np.array(unmasked_lengths)
             scores = scores * unmasked_lengths
         # check if we have more than 1 score...
-        if len(scores) > 1:
+        if advantage_normalization != "none" and len(scores) > 1:
             scores = scores - scores.mean()
             scores = scores / max(scores.std(), 1e-8)
         item["scores"] = scores
@@ -178,6 +179,7 @@ def prep_data(
     seq_len,
     scale_adv_by_len=True,
     num_microbatches=1,
+    advantage_normalization="standard",
 ):
 
     # Now prepare the batch
@@ -197,6 +199,7 @@ def prep_data(
         dp_degree,
         scale_adv_by_len=scale_adv_by_len,
         num_microbatches=num_microbatches,
+        advantage_normalization=advantage_normalization,
     )
 
     dynamic_batch_size, dynamic_grad_accum_size = get_dynamic_batch_gas(
@@ -263,6 +266,7 @@ def data_worker(
     gradient_accumulation_steps,
     seq_len,
     grpo_scale_adv_by_len,
+    grpo_advantage_normalization="standard",
 ):
     while True:
         if not queue.empty():
@@ -288,6 +292,7 @@ def data_worker(
                 gradient_accumulation_steps,
                 seq_len,
                 scale_adv_by_len=grpo_scale_adv_by_len,
+                advantage_normalization=grpo_advantage_normalization,
             )
             queue.put(
                 (
@@ -416,6 +421,7 @@ class OnlineDataHandler:
                         job_config.training.seq_len,
                         scale_adv_by_len=job_config.grpo.scale_adv_by_len,
                         num_microbatches=job_config.grpo.num_microbatches,
+                        advantage_normalization=job_config.grpo.advantage_normalization,
                     )
                     prep_time = time.perf_counter() - start_data_prep_time
 

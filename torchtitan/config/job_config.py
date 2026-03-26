@@ -1305,6 +1305,10 @@ class GRPO:
     scale_adv_by_len: bool = False
     """Whether to scale advantages by sequence length, defaults to False"""
 
+    advantage_normalization: str = "standard"
+    """Advantage normalization mode: 'standard' (mean-subtract + std-normalize) or
+    'none' (skip normalization, use pre-computed advantages as-is, e.g. from TTT-Discover)."""
+
     policy_ratio_type: Literal["token", "sequence"] = "token"
     """
     Policy ratio type. Switches between token level (e.g. GRPO) and sequence level (e.g. GSPO)

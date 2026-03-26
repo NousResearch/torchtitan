@@ -1,0 +1,86 @@
+[job]
+dump_folder = "./outputs/qwen3_30b_a3b_base_combined_ds_100_50"
+description = "Qwen3-30B-A3B Base SFT training, combined dataset 100/50"
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 100
+
+[metrics]
+log_freq = 10
+enable_tensorboard = true
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "qwen3"
+flavor = "30B-A3B"
+# Path to HF model for tokenizer and initial weights
+hf_assets_path = "/data/home/mormio/torchtitan/assets/hf/Qwen3-30B-A3B-Base"
+
+[optimizer]
+name = "AdamW"
+lr = 8e-5  # Scaled 4x: 2x from TP2->TP1, 2x from microbatch doubling
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 100
+decay_type = "cosine"
+
+[training]
+#local_batch_size = 2  # (not) Doubled microbatch
+#global_batch_size = -1  # DP=32 * local_batch=2 = 64
+
+local_batch_size = 1
+global_batch_size = 64  # DP=32 * local_batch=1, grad_accum=2
+steps = 577  
+
+seq_len = 65536
+max_norm = 1.0
+#steps = 577  # 12220 samples / 64 batch = 1 full pass through (1 epoch)
+gc_freq = 50
+
+# SFT dataset settings
+dataset = "preprocessed"
+dataset_type = "preprocessed"
+dataset_path = "/home/mormio/data/science_qa_plus_math_code/combined_scienceqa_100pct_mathcode_50pct"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1  # Auto-calculate from remaining GPUs
+fsdp_reshard_after_forward = "always"
+tensor_parallel_degree = 1  # TP1: causal_conv1d doesn't support DTensors
+context_parallel_degree = 1  # CP disabled due to freqs_cis compatibility
+# MoE parallelism
+expert_parallel_degree = 4
+expert_tensor_parallel_degree = 1
+# Total: DP_replicate=1 × DP_shard=8 × EP=4 = 32 GPUs
+
+[checkpoint]
+enable = true
+folder = "checkpoint"
+interval = 144  # Per epoch: 577 total steps / 4 epochs
+last_save_model_only = true
+export_dtype = "bfloat16"
+async_mode = "async"
+# Load from HF checkpoint on first run
+initial_load_path = "/home/mormio/torchtitan/assets/hf/Qwen3-30B-A3B-Base"
+initial_load_in_hf = true
+
+[activation_checkpoint]
+mode = "full"
+selective_ac_option = "op"
+
+[compile]
+enable = true  # causal_conv1d from fla crashes under torch.compile; flex_attention still compiles internally
+fullgraph = false
+components = ["model", "loss"]
+
+[comm]
+init_timeout_seconds = 3600  # Allow up to 1hr for initial HF checkpoint load
+
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output"]
