@@ -10,7 +10,7 @@ from torchtitan.components.optimizer import build_optimizers_with_moe_load_balan
 from torchtitan.distributed.pipeline_parallel import pipeline_llm
 from torchtitan.experiments.kimi_linear.model.tokenizer import build_kimi_tokenizer
 from torchtitan.hf_datasets.dataloader import build_dataloader
-from torchtitan.models.moe import MoEArgs
+from torchtitan.models.moe import MoEArgs, ScMoEConfig
 from torchtitan.protocols.train_spec import TrainSpec
 
 from .infra.parallelize import parallelize_deepseekv3
@@ -27,6 +27,193 @@ __all__ = [
 
 
 deepseekv3_args = {
+    # Mini model with ScMoE enabled for communication hiding testing
+    # 8 layers, 8 GPUs with EP=8, suitable for single-node testing
+    "mini_scmoe": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=1024,
+        inter_dim=4096,
+        moe_inter_dim=2048,
+        n_layers=8,
+        n_dense_layers=2,  # First 2 layers are dense
+        n_heads=8,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=64,
+            num_shared_experts=2,
+            top_k=6,
+            score_func="sigmoid",
+            route_norm=True,
+            route_scale=2.0,
+            score_before_experts=False,
+            use_scmoe=True,
+            scmoe=ScMoEConfig(
+                shortcut_position="pos1",
+                use_separate_streams=True,
+            ),
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=256,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
+    # ScMoE benchmark model - 128 experts, top_k=8, with shared experts for overlap
+    # More shared experts = larger overlap window to hide communication
+    "debugmodel_scmoe": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=1024,
+        inter_dim=4096,
+        moe_inter_dim=512,  # Small per-expert, 128 experts
+        n_layers=8,
+        n_dense_layers=1,
+        n_heads=8,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=128,
+            num_shared_experts=4,  # Larger shared = more overlap compute
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            use_scmoe=True,
+            scmoe=ScMoEConfig(
+                shortcut_position="pos1",
+                use_separate_streams=True,
+            ),
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=256,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
+    # Baseline: SAME ScMoE architecture but runs sequentially (no stream overlap)
+    "debugmodel_scmoe_baseline": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=1024,  # Same as debugmodel_scmoe
+        inter_dim=4096,
+        moe_inter_dim=512,
+        n_layers=8,
+        n_dense_layers=1,
+        n_heads=8,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=128,
+            num_shared_experts=4,  # Same as debugmodel_scmoe
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            use_scmoe=True,
+            scmoe=ScMoEConfig(
+                shortcut_position="pos1",
+                use_separate_streams=False,  # Only difference: NO stream overlap
+            ),
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=256,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
+    # Standard MoE baseline — SAME architecture but NO shortcut
+    "debugmodel_moe_baseline": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=1024,
+        inter_dim=4096,
+        moe_inter_dim=512,
+        n_layers=8,
+        n_dense_layers=1,
+        n_heads=8,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=128,
+            num_shared_experts=4,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            use_scmoe=False,  # Standard MoE, no shortcut
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=256,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
+    # Large ScMoE for 8xB200 EP=8 benchmarking (~70% memory target)
+    # ~9.5B total, dim=2048, 128 experts, 16 layers
+    "bench_scmoe_ep8": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=2048,
+        inter_dim=8192,
+        moe_inter_dim=1536,
+        n_layers=16,
+        n_dense_layers=1,
+        n_heads=16,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=128,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            use_scmoe=True,
+            scmoe=ScMoEConfig(
+                shortcut_position="pos1",
+                use_separate_streams=True,
+            ),
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=512,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
+    # Same large model, standard MoE (no ScMoE)
+    "bench_moe_ep8": DeepSeekV3ModelArgs(
+        vocab_size=2048,
+        dim=2048,
+        inter_dim=8192,
+        moe_inter_dim=1536,
+        n_layers=16,
+        n_dense_layers=1,
+        n_heads=16,
+        norm_eps=1e-5,
+        moe_args=MoEArgs(
+            num_experts=128,
+            num_shared_experts=1,
+            top_k=8,
+            score_func="softmax",
+            route_norm=True,
+            route_scale=1.0,
+            score_before_experts=False,
+            use_scmoe=False,
+        ),
+        q_lora_rank=0,
+        kv_lora_rank=512,
+        qk_nope_head_dim=64,
+        qk_rope_head_dim=32,
+        v_head_dim=64,
+        rope_theta=10000.0,
+        rope_factor=1.0,
+    ),
     # Mini debug model with LLEP enabled for testing load balancing
     "debugmodel_llep": DeepSeekV3ModelArgs(
         vocab_size=2048,

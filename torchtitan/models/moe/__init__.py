@@ -11,6 +11,18 @@ from .moe import (
     LLEPConfig,
     MoE,
     MoEArgs,
+    ScMoEConfig,
+)
+from .scmoe import (
+    build_scmoe,
+    ScMoE,
+    ScMoEStreamManager,
+    ScMoETransformerBlock,
+)
+from .scmoe_deepep import (
+    build_scmoe_deepep,
+    ScMoEDeepEP,
+    ScMoEDeepEPTransformerBlock,
 )
 
 __all__ = [
@@ -18,6 +30,14 @@ __all__ = [
     "LLEPConfig",
     "MoE",
     "MoEArgs",
+    "ScMoEConfig",
     "build_moe",
+    "build_scmoe",
+    "build_scmoe_deepep",
+    "ScMoE",
+    "ScMoEDeepEP",
+    "ScMoEStreamManager",
+    "ScMoETransformerBlock",
+    "ScMoEDeepEPTransformerBlock",
     "ExpertRoutingHistogram",
 ]

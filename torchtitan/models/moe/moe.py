@@ -62,6 +62,37 @@ class LLEPConfig:
 
 
 @dataclass
+class ScMoEConfig:
+    """Shortcut Connected MoE (ScMoE) configuration.
+
+    ScMoE enables Single Batch Overlap (SBO) by rearranging computation order:
+    - Shared experts process layer L's output on the default stream
+    - Routed experts process layer L-1's output (shortcut) on comm_stream
+    These run in parallel, hiding EP all-to-all communication behind
+    the shared experts compute. No new modules are added.
+
+    Reference: "Shortcut-connected Expert Parallelism for Accelerating
+    Mixture-of-Experts" (arXiv:2404.05019)
+    """
+
+    shortcut_position: Literal["pos1", "pos2", "pos3"] = "pos1"
+    """Shortcut connection position:
+    - pos1: Layer L-1 post-attention output (overlap = T_Attn + T_SE)
+    - pos2: Layer L-1 intermediate output (overlap = T_Attn + T_SE + T_MLP)
+    - pos3: Layer L-2 output (overlap = 2×T_Attn + T_SE + T_MLP)
+    Default is pos1 (simplest, validated in papers)."""
+
+    use_separate_streams: bool = True
+    """Whether to use separate CUDA streams for shared and routed expert paths.
+    When True, routed experts (dispatch/combine) run on comm_stream while
+    shared experts run on default stream, enabling overlap."""
+
+    sync_before_combine: bool = False
+    """Whether to sync streams before combine. Usually not needed since
+    combine only depends on routed path, but can help debugging."""
+
+
+@dataclass
 class MoEArgs:
     num_experts: int = 8
     num_shared_experts: int = 1
@@ -93,6 +124,10 @@ class MoEArgs:
     # Least-Loaded Expert Parallelism (LLEP)
     use_llep: bool = False
     llep: "LLEPConfig" = field(default_factory=lambda: LLEPConfig())
+
+    # Shortcut Connected MoE (ScMoE) for communication hiding
+    use_scmoe: bool = False
+    scmoe: "ScMoEConfig" = field(default_factory=lambda: ScMoEConfig())
 
     def validate_deepep_config(self) -> None:
         """Validate DeepEP configuration consistency.

@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import math
+import os
 from typing import cast
 
 import torch
@@ -22,7 +23,7 @@ from torchtitan.models.attention import (
     get_document_mask_mod,
     ScaledDotProductAttentionWrapper,
 )
-from torchtitan.models.moe import build_moe, FeedForward, MoE
+from torchtitan.models.moe import build_moe, build_scmoe, FeedForward, MoE, ScMoE
 from torchtitan.models.utils import normal_, trunc_normal_
 from torchtitan.protocols.model import AttentionMasksType
 from torchtitan.protocols.train_spec import ModelProtocol
@@ -392,6 +393,10 @@ class Attention(nn.Module):
 class TransformerBlock(nn.Module):
     """
     Transformer block with attention and feed-forward layers.
+
+    Supports both standard MoE and ScMoE (Shortcut Connected MoE) for
+    communication hiding. When ScMoE is enabled, the block takes an additional
+    shortcut input from the previous layer and returns both output and next shortcut.
     """
 
     def __init__(
@@ -408,14 +413,28 @@ class TransformerBlock(nn.Module):
             self.ffn_norm.weight.requires_grad = False
 
         self.moe_enabled = layer_id >= model_args.n_dense_layers
+
+        # Check if ScMoE is enabled
+        self.scmoe_enabled = self.moe_enabled and model_args.moe_args.use_scmoe
+
         if self.moe_enabled:
-            self.moe = build_moe(
-                args=model_args.moe_args,
-                dim=model_args.dim,
-                hidden_dim=model_args.moe_inter_dim,
-                moe_impl=model_args.moe_impl,
-                peft_config=peft_config,
-            )
+            if self.scmoe_enabled:
+                # Use ScMoE for communication hiding
+                self.moe = build_scmoe(
+                    args=model_args.moe_args,
+                    dim=model_args.dim,
+                    hidden_dim=model_args.moe_inter_dim,
+                    peft_config=peft_config,
+                )
+            else:
+                # Standard MoE
+                self.moe = build_moe(
+                    args=model_args.moe_args,
+                    dim=model_args.dim,
+                    hidden_dim=model_args.moe_inter_dim,
+                    moe_impl=model_args.moe_impl,
+                    peft_config=peft_config,
+                )
         else:
             self.feed_forward = FeedForward(
                 model_args.dim, model_args.inter_dim, peft_config=peft_config
@@ -431,7 +450,8 @@ class TransformerBlock(nn.Module):
         freqs_cis: torch.Tensor,
         attention_masks: AttentionMasksType | None,
         positions: torch.Tensor | None = None,
-    ):
+        shortcut_input: torch.Tensor | None = None,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass for the Transformer block.
 
@@ -440,27 +460,59 @@ class TransformerBlock(nn.Module):
             freqs_cis (torch.Tensor): Precomputed complex exponential values for rotary embeddings.
             attention_masks (AttentionMasksType | None): Masks used when calculating attention scores.
             positions (torch.Tensor | None): Position indices used to access/shuffle RoPE cache. Defaults to None.
+            shortcut_input (torch.Tensor | None): Shortcut input from previous layer for ScMoE.
+                Only used when ScMoE is enabled.
 
         Returns:
-            torch.Tensor: Output tensor with the same shape as the input.
+            If ScMoE is enabled: tuple of (output, next_shortcut)
+            Otherwise: output tensor with the same shape as the input.
         """
-        x = x + self.attention(
+        # Attention sublayer
+        x_attn = x + self.attention(
             self.attention_norm(x), freqs_cis, attention_masks, positions
         )
+
         if self.moe_enabled:
-            x = x + self.moe(self.ffn_norm(x))
+            if self.scmoe_enabled:
+                # ScMoE: routed experts process shortcut, shared experts process current
+                # If no shortcut provided (first ScMoE layer), use attention output
+                if shortcut_input is None:
+                    shortcut_input = x_attn
+
+                # ScMoE takes both current and shortcut inputs
+                moe_output = self.moe(x_current=x_attn, x_shortcut=shortcut_input)
+                output = x_attn + moe_output
+
+                # Return output and next shortcut (post-attention for pos1)
+                return output, x_attn
+            else:
+                # Standard MoE (with optional simulated comm delay)
+                _delay = int(float(os.environ.get("SCMOE_COMM_DELAY_MS", "0")) * 2_000_000)
+                if _delay > 0 and x_attn.is_cuda:
+                    torch.cuda._sleep(_delay)  # simulate dispatch
+                moe_out = self.moe(self.ffn_norm(x_attn))
+                if _delay > 0 and x_attn.is_cuda:
+                    torch.cuda._sleep(_delay)  # simulate combine
+                output = x_attn + moe_out
+                return output
         else:
-            x = x + self.feed_forward(self.ffn_norm(x))
-        return x
+            # Dense FFN layer
+            output = x_attn + self.feed_forward(self.ffn_norm(x_attn))
+            return output
 
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):
             norm.reset_parameters()
         self.attention.init_weights(self.weight_init_std)
         if self.moe_enabled:
-            cast(MoE, self.moe).init_weights(
-                self.weight_init_std, buffer_device, self.n_layers
-            )
+            if self.scmoe_enabled:
+                cast(ScMoE, self.moe).init_weights(
+                    self.weight_init_std, buffer_device, self.n_layers
+                )
+            else:
+                cast(MoE, self.moe).init_weights(
+                    self.weight_init_std, buffer_device, self.n_layers
+                )
         else:
             self.feed_forward.init_weights(self.weight_init_std)
 
@@ -572,6 +624,11 @@ class DeepSeekV3Model(ModelProtocol):
         """
         Forward pass for the Transformer model.
 
+        When ScMoE is enabled, this method tracks a shortcut buffer that passes
+        activations from layer L-1 to the ScMoE in layer L. This enables the
+        MoE to process the previous layer's output while the Dense FFN processes
+        the current layer's output in parallel, hiding communication latency.
+
         Args:
             tokens (torch.Tensor): Input token indices if pipeline parallelism is not enabled.
                 If pipeline parallelism is enabled, this will be the input token indices
@@ -586,8 +643,32 @@ class DeepSeekV3Model(ModelProtocol):
 
         h = self.tok_embeddings(tokens) if self.tok_embeddings is not None else tokens
 
-        for layer in self.layers.values():
-            h = layer(h, self.freqs_cis, attention_masks, positions)
+        # Check if any layer uses ScMoE
+        use_scmoe = self.model_args.moe_args.use_scmoe
+
+        if use_scmoe:
+            # Track shortcut buffer for ScMoE layers
+            shortcut_buffer: torch.Tensor | None = None
+
+            for layer in self.layers.values():
+                layer_block = cast(TransformerBlock, layer)
+
+                if layer_block.scmoe_enabled:
+                    # ScMoE layer: pass shortcut and receive (output, next_shortcut)
+                    result = layer_block(
+                        h, self.freqs_cis, attention_masks, positions, shortcut_buffer
+                    )
+                    h, shortcut_buffer = result
+                else:
+                    # Dense or standard MoE layer
+                    h = layer_block(h, self.freqs_cis, attention_masks, positions)
+                    # Store output as shortcut for next ScMoE layer
+                    shortcut_buffer = h
+        else:
+            # Standard forward pass (no ScMoE)
+            for layer in self.layers.values():
+                h = layer(h, self.freqs_cis, attention_masks, positions)
+
         h = self.norm(h) if self.norm is not None else h
         output = self.output(h) if self.output is not None else h
         return output
