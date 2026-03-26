@@ -123,6 +123,15 @@ class ChunkOffloadHandler:
             return False
         if hasattr(tensor, "offloading_activation") and not tensor.offloading_activation:
             return False
+        # Skip tensors with freed/invalid storage (e.g., FSDP/EP temporaries)
+        try:
+            if tensor.untyped_storage().size() == 0:
+                return False
+        except Exception:
+            return False
+        # Skip non-CUDA tensors
+        if tensor.device.type != "cuda":
+            return False
         return True
 
     # ── Group management ───────────────────────────────────────────────
@@ -199,7 +208,11 @@ class ChunkOffloadHandler:
         with torch.cuda.stream(self.d2h_stream):
             for tag, tensor_on_device in group._tensors.items():
                 if self.should_offload_tensor(tensor_on_device):
-                    state = self.offload(tensor_on_device, use_cpu_pool=group.use_cpu_pool)
+                    try:
+                        state = self.offload(tensor_on_device, use_cpu_pool=group.use_cpu_pool)
+                    except RuntimeError:
+                        # Tensor storage may have been freed by FSDP/EP — skip it
+                        continue
                     if self.is_warmup:
                         group.update_offload_info(tensor_on_device)
                     tensor_on_device.record_stream(self.d2h_stream)

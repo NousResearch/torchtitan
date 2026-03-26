@@ -934,6 +934,10 @@ class MoE(nn.Module):
             self.shared_gate.weight.requires_grad = False
         self.score_before_experts = moe_args.score_before_experts
 
+        # Activation offloading flags (set externally via config)
+        self.offload_expert_fc1 = False
+        self.offload_moe_act = False
+
         # define fields for auxiliary-loss-free load balancing (https://arxiv.org/abs/2408.15664)
         # NOTE: tokens_per_expert is accumulated in the model forward pass.
         #       expert_bias is updated outside the model in an optimizer step pre hook

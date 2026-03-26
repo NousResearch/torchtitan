@@ -429,6 +429,26 @@ class Training:
     Whether to apply CPU offloading of parameters, gradients, and optimizer states in FSDP
     """
 
+    enable_activation_offload: bool = False
+    """
+    Whether to enable fine-grained activation offloading to CPU.
+    Offloads intermediate activations to pinned CPU memory during forward
+    and reloads them during backward using dedicated async CUDA streams.
+    """
+
+    activation_offload_modules: str = "expert_fc1,moe_act"
+    """
+    Comma-separated list of module names to offload activations for.
+    Options: expert_fc1, moe_act. Only used when enable_activation_offload=True.
+    """
+
+    activation_offload_min_tensor_size: int = 1048576
+    """
+    Minimum tensor size (in number of elements) to offload. Tensors smaller than
+    this are skipped to avoid PCIe overhead exceeding memory savings.
+    Default: 1M elements (~4MB for float32).
+    """
+
     dtype: Literal["bfloat16", "float32"] = "float32"
     """
     torch dtype for training. In contrast to mixed precision training, setting training_dtype=bfloat16 will
