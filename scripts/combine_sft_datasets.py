@@ -23,10 +23,10 @@ Usage:
 
 import argparse
 import os
+import random
 import shutil
 import subprocess
 import sys
-import random
 
 import pyarrow as pa
 import pyarrow.dataset as pa_ds
@@ -86,15 +86,23 @@ def run_preprocess(dataset, output_path, tokenizer, epochs, limit=None, seed=42)
     script = os.path.join(os.path.dirname(__file__), "preprocess_data.py")
     python = PREPROCESS_PYTHON if os.path.exists(PREPROCESS_PYTHON) else sys.executable
     cmd = [
-        python, script,
-        "--dataset", dataset,
-        "--tokenizer", tokenizer,
+        python,
+        script,
+        "--dataset",
+        dataset,
+        "--tokenizer",
+        tokenizer,
         "--chat",
-        "--pack-to-sequence-length", "65536",
-        "--epochs", str(epochs),
-        "--seed", str(seed),
-        "--save-to-disk", output_path,
-        "--num-proc", "16",
+        "--pack-to-sequence-length",
+        "65536",
+        "--epochs",
+        str(epochs),
+        "--seed",
+        str(seed),
+        "--save-to-disk",
+        output_path,
+        "--num-proc",
+        "16",
     ]
     if limit is not None:
         cmd += ["--limit", str(limit)]
@@ -159,7 +167,7 @@ def save_combined_as_arrow(combined_ds, output_dir, seed=42):
 
 
 def combine_and_save(ds1_path_or_hf, ds2_path, output_dir, label, seed=42):
-    from datasets import load_dataset, concatenate_datasets
+    from datasets import concatenate_datasets, load_dataset
 
     print(f"\n{'='*60}")
     print(f"Combining datasets → {label}")
@@ -196,44 +204,54 @@ def combine_and_save(ds1_path_or_hf, ds2_path, output_dir, label, seed=42):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--preprocess", action="store_true",
-        help="Run preprocess_data.py for science-math-code-combined (50% and 100%)"
+        "--preprocess",
+        action="store_true",
+        help="Run preprocess_data.py for science-math-code-combined (50% and 100%)",
     )
     parser.add_argument(
-        "--tokenizer", type=str,
+        "--tokenizer",
+        type=str,
         default="/data/home/mormio/models/Qwen3-30B-A3B",
-        help="Path to tokenizer"
+        help="Path to tokenizer",
     )
     parser.add_argument(
-        "--epochs", type=int, default=4,
-        help="Number of epochs to pack dataset 2 for"
+        "--epochs", type=int, default=4, help="Number of epochs to pack dataset 2 for"
     )
     parser.add_argument(
-        "--ds1-hf", type=str,
+        "--ds1-hf",
+        type=str,
         default="NousResearch/20260128_science_qa_speciale_filtered_unverified_packed",
-        help="HuggingFace dataset ID for the packed science_qa dataset (dataset 1)"
+        help="HuggingFace dataset ID for the packed science_qa dataset (dataset 1)",
     )
     parser.add_argument(
-        "--ds2-50pct-path", type=str,
+        "--ds2-50pct-path",
+        type=str,
         default=None,
-        help="Path to pre-packed science-math-code at 50%% (if --preprocess not used)"
+        help="Path to pre-packed science-math-code at 50%% (if --preprocess not used)",
     )
     parser.add_argument(
-        "--ds2-100pct-path", type=str,
+        "--ds2-100pct-path",
+        type=str,
         default=None,
-        help="Path to pre-packed science-math-code at 100%% (if --preprocess not used)"
+        help="Path to pre-packed science-math-code at 100%% (if --preprocess not used)",
     )
     parser.add_argument(
-        "--output-dir", type=str, required=True,
-        help="Directory to write combined datasets into (two subdirs will be created)"
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Directory to write combined datasets into (two subdirs will be created)",
     )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    ds2_50_path = args.ds2_50pct_path or os.path.join(args.output_dir, "science_math_code_packed_50pct")
-    ds2_100_path = args.ds2_100pct_path or os.path.join(args.output_dir, "science_math_code_packed_100pct")
+    ds2_50_path = args.ds2_50pct_path or os.path.join(
+        args.output_dir, "science_math_code_packed_50pct"
+    )
+    ds2_100_path = args.ds2_100pct_path or os.path.join(
+        args.output_dir, "science_math_code_packed_100pct"
+    )
 
     # Step 1: optionally preprocess dataset 2
     if args.preprocess:
@@ -268,8 +286,20 @@ def main():
     out_50 = os.path.join(args.output_dir, "combined_scienceqa_100pct_mathcode_50pct")
     out_100 = os.path.join(args.output_dir, "combined_scienceqa_100pct_mathcode_100pct")
 
-    rows_50 = combine_and_save(args.ds1_hf, ds2_50_path, out_50, label="100% sci_qa + 50% math_code", seed=args.seed)
-    rows_100 = combine_and_save(args.ds1_hf, ds2_100_path, out_100, label="100% sci_qa + 100% math_code", seed=args.seed)
+    rows_50 = combine_and_save(
+        args.ds1_hf,
+        ds2_50_path,
+        out_50,
+        label="100% sci_qa + 50% math_code",
+        seed=args.seed,
+    )
+    rows_100 = combine_and_save(
+        args.ds1_hf,
+        ds2_100_path,
+        out_100,
+        label="100% sci_qa + 100% math_code",
+        seed=args.seed,
+    )
 
     print(f"\n{'='*60}")
     print("Done!")

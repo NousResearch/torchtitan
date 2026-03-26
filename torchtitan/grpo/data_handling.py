@@ -32,7 +32,11 @@ def get_dynamic_batch_gas(
 
 
 def pad_data_to_good_offset(
-    data, cp_degree, dp_degree, scale_adv_by_len=True, num_microbatches=1,
+    data,
+    cp_degree,
+    dp_degree,
+    scale_adv_by_len=True,
+    num_microbatches=1,
     advantage_normalization="standard",
 ):
     max_token_len = max(

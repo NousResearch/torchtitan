@@ -34,7 +34,7 @@ decay_type = "cosine"
 
 local_batch_size = 1
 global_batch_size = 64  # DP=32 * local_batch=1, grad_accum=2
-steps = 577  
+steps = 577
 
 seq_len = 65536
 max_norm = 1.0

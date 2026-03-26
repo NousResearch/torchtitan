@@ -34,7 +34,7 @@ decay_type = "cosine"
 
 local_batch_size = 2
 global_batch_size = 64  # will become 64 (32 DP ranks × local_bs=2)
-steps = 191  
+steps = 191
 
 seq_len = 32768
 max_norm = 1.0
