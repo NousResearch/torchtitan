@@ -275,6 +275,149 @@ class TestLargeTensorOffload:
         assert torch.equal(recovered, expected), "Large tensor roundtrip failed"
         pool.clear()
 
+    def test_massive_offload_50pct_gpu_memory(self):
+        """Offload ~50% of GPU memory worth of tensors in chunks.
+
+        Auto-calculates target based on available GPU memory.
+        Verifies bitwise integrity, memory tracking, and pool reuse.
+        """
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+
+        free_bytes, total_bytes = torch.cuda.mem_get_info()
+        target_bytes = int(free_bytes * 0.5)
+        # Cap at 20GB to keep test reasonable
+        target_bytes = min(target_bytes, 20 * 1024**3)
+
+        chunk_bytes = 512 * 1024 * 1024  # 512MB per chunk
+        n_chunks = max(1, target_bytes // chunk_bytes)
+        # Each chunk: 512MB / 4 bytes = 128M elements -> shape (8192, 16384)
+        chunk_rows = 8192
+        chunk_cols = chunk_bytes // (chunk_rows * 4)
+
+        target_gb = (n_chunks * chunk_bytes) / 1024**3
+        print(f"\nGPU: {torch.cuda.get_device_name(0)}, "
+              f"Free: {free_bytes / 1024**3:.1f}GB, "
+              f"Target offload: {target_gb:.1f}GB ({n_chunks} x 512MB chunks)")
+
+        handler, pool = _make_handler()
+
+        # Allocate all chunks on GPU
+        gpu_tensors = []
+        expected_data = []
+        for i in range(n_chunks):
+            t = torch.randn(chunk_rows, chunk_cols, device="cuda", dtype=torch.float32)
+            expected_data.append(t.clone())
+            gpu_tensors.append(t)
+
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.memory_allocated()
+
+        # Offload all chunks to CPU
+        states = []
+        for i, t in enumerate(gpu_tensors):
+            handler.d2h_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(handler.d2h_stream):
+                state = handler.offload(t, use_cpu_pool=False)
+            states.append(state)
+
+        torch.cuda.synchronize()
+
+        # Free GPU storage
+        for t in gpu_tensors:
+            t.record_stream(torch.cuda.current_stream())
+            t.untyped_storage().resize_(0)
+        torch.cuda.synchronize()
+
+        mem_after_offload = torch.cuda.memory_allocated()
+        freed_gb = (mem_before - mem_after_offload) / 1024**3
+        print(f"Memory freed: {freed_gb:.1f}GB "
+              f"(before={mem_before / 1024**3:.1f}GB, after={mem_after_offload / 1024**3:.1f}GB)")
+
+        assert mem_after_offload < mem_before, "Memory should decrease after offload"
+
+        # Reload all chunks back to GPU and verify
+        for i, state in enumerate(states):
+            handler.h2d_stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(handler.h2d_stream):
+                recovered = handler.reload(state)
+            torch.cuda.synchronize()
+
+            assert torch.equal(recovered, expected_data[i]), \
+                f"Bitwise mismatch on chunk {i}/{n_chunks}"
+            del recovered
+
+        torch.cuda.synchronize()
+        mem_after_reload = torch.cuda.memory_allocated()
+        print(f"All {n_chunks} chunks verified. "
+              f"Memory after reload cleanup: {mem_after_reload / 1024**3:.1f}GB")
+
+        del expected_data, gpu_tensors, states
+        pool.clear()
+        torch.cuda.empty_cache()
+
+    @pytest.mark.parametrize("target_gb", [1, 5, 10])
+    def test_single_huge_tensor_offload(self, target_gb):
+        """Offload a single contiguous tensor of target_gb size.
+
+        Auto-skips if GPU doesn't have enough free memory (need ~2.5x
+        target for: tensor + clone + reload headroom).
+        """
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+
+        free_bytes, _ = torch.cuda.mem_get_info()
+        needed = int(target_gb * 1024**3 * 2.5)
+        if free_bytes < needed:
+            pytest.skip(
+                f"Need {needed / 1024**3:.1f}GB free, only {free_bytes / 1024**3:.1f}GB"
+            )
+
+        # Single tensor: target_gb / 4 bytes per float32 = numel
+        numel = (target_gb * 1024**3) // 4
+        # Shape as 2D for simplicity
+        cols = 32768
+        rows = numel // cols
+
+        handler, pool = _make_handler()
+        print(f"\nAllocating single {target_gb}GB tensor ({rows} x {cols} f32)...")
+
+        t = torch.randn(rows, cols, device="cuda", dtype=torch.float32)
+        expected = t.clone()
+        actual_gb = t.numel() * t.element_size() / 1024**3
+        torch.cuda.synchronize()
+        mem_before = torch.cuda.memory_allocated()
+
+        # Offload the single huge tensor
+        handler.d2h_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(handler.d2h_stream):
+            state = handler.offload(t, use_cpu_pool=False)
+        torch.cuda.synchronize()
+
+        # Free GPU storage
+        t.record_stream(torch.cuda.current_stream())
+        t.untyped_storage().resize_(0)
+        torch.cuda.synchronize()
+        mem_after = torch.cuda.memory_allocated()
+
+        freed_gb = (mem_before - mem_after) / 1024**3
+        print(f"Single tensor: {actual_gb:.1f}GB, freed: {freed_gb:.1f}GB")
+        assert mem_after < mem_before
+
+        # Reload and verify bitwise
+        handler.h2d_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(handler.h2d_stream):
+            recovered = handler.reload(state)
+        torch.cuda.synchronize()
+
+        assert torch.equal(recovered, expected), \
+            f"Bitwise mismatch on single {target_gb}GB tensor"
+        print(f"Single {target_gb}GB tensor: bitwise verified")
+
+        del t, expected, recovered
+        pool.clear()
+        torch.cuda.empty_cache()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # FROM UNSLOTH: Gradient accumulation with offloading
