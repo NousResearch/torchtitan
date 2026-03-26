@@ -99,32 +99,6 @@ Reloads layer N's activations from CPU while computing layer N+1's backward. Onl
 - **`forced_released_tensors`**: Explicitly calls `untyped_storage().resize_(0)` to free GPU memory immediately instead of waiting for Python GC.
 - **CUDA events**: Per-group offload/reload events synchronize streams without blocking. Compatible with CUDA Graphs (uses external events, not stream sync).
 
-## Architecture
-
-```
-torchtitan/distributed/cpu_offload/
-├── __init__.py           # Public API
-├── utils.py              # is_graph_capturing(), debug, summary printer
-├── tensor_pool.py        # TensorPool — pinned CPU memory, O(1) reuse
-├── offload_group.py      # OffloadTensorGroup — tensor batch + CUDA events
-├── chunk_handler.py      # ChunkOffloadHandler — D2H/H2D copy engine
-├── offload_manager.py    # OffloadManager — singleton orchestrator
-├── autograd_hooks.py     # ActivationOffloadContext, group_start/commit
-└── hybrid_optimizer.py   # HybridDeviceOptimizer (GPU/CPU split)
-```
-
-### Module Responsibilities
-
-| Module | What It Does |
-|---|---|
-| `TensorPool` | Pools pinned CPU tensors by (shape, dtype). Deque-based O(1) allocate/free. |
-| `OffloadTensorGroup` | Groups tensors for batch offload. Owns CUDA events for D2H/H2D sync. |
-| `ChunkOffloadHandler` | Core copy engine: `offload()` = GPU→CPU, `reload()` = CPU→GPU. Bulk operations with stream context. |
-| `OffloadManager` | Singleton. Owns D2H/H2D streams + tensor pool. Manages chunks across microbatches and VP stages. |
-| `ActivationOffloadContext` | User-facing context manager. Calls `group_start()` on enter, installs autograd hooks. |
-| `group_commit()` | Triggers D2H copy. Autograd Function that calls `on_group_commit_backward` during backward. |
-| `HybridDeviceOptimizer` | Splits optimizer across GPU+CPU with async gradient sync and parameter copy-back. |
-
 ## API Reference
 
 ### Activation Offloading
@@ -173,39 +147,6 @@ HybridDeviceOptimizer(
     overlap_cpu_optimizer_d2h_h2d=True,  # Async streams
 )
 ```
-
-## Tests
-
-136 tests across 9 files, all passing on 8xB200 in ~20s:
-
-```bash
-pytest tests/unit_tests/cpu_offload/ -v
-```
-
-| File | Tests | Coverage |
-|---|---|---|
-| `test_tensor_pool.py` | 13 | Alloc/free, pool reuse, reset, pinned memory |
-| `test_offload_group.py` | 8 | Push/pop, CUDA events, offload stats |
-| `test_chunk_handler.py` | 13 | D2H/H2D roundtrips, bulk ops, size filtering |
-| `test_offload_manager.py` | 12 | Singleton, streams, VP, delayed offload |
-| `test_e2e_activation_offload.py` | 10 | Linear, MLP, MoE forward/backward correctness |
-| `test_hybrid_optimizer.py` | 11 | GPU/CPU split, overlap, FP32 mixed precision |
-| `test_utils.py` | 6 | Debug, graph capture, summary table |
-| `test_async_and_performance.py` | 20 | Async overlap proof, pool speedup, event sync |
-| `test_gaps_from_other_frameworks.py` | 25 | Memory tracking, device placement, large tensors |
-
-### Key Verified Properties
-
-| Property | Measured |
-|---|---|
-| D2H overlaps with compute | 13ms vs 168ms standalone |
-| Pool reuse vs fresh alloc | 11.3x faster |
-| Bitwise exact roundtrip | `torch.equal()` for f32, f16, bf16 |
-| Single tensor offload | 1GB, 5GB, 10GB verified |
-| Multi-chunk offload | 20GB (40 x 512MB), all bitwise exact |
-| Memory freed after offload | `memory_allocated()` drops by tensor size |
-| Gradient accumulation | 3 micro-batches, grads match baseline |
-| Multiple cycles | 20 offload/reload cycles, 1 pool miss |
 
 ## Configuration Tips
 
