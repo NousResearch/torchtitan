@@ -23,7 +23,14 @@ from torchtitan.models.attention import (
     get_document_mask_mod,
     ScaledDotProductAttentionWrapper,
 )
-from torchtitan.models.moe import build_moe, build_scmoe, FeedForward, MoE, ScMoE
+from torchtitan.models.moe import (
+    build_moe,
+    build_scmoe,
+    build_scmoe_deepep,
+    FeedForward,
+    MoE,
+    ScMoE,
+)
 from torchtitan.models.utils import normal_, trunc_normal_
 from torchtitan.protocols.model import AttentionMasksType
 from torchtitan.protocols.train_spec import ModelProtocol
@@ -419,13 +426,23 @@ class TransformerBlock(nn.Module):
 
         if self.moe_enabled:
             if self.scmoe_enabled:
-                # Use ScMoE for communication hiding
-                self.moe = build_scmoe(
-                    args=model_args.moe_args,
-                    dim=model_args.dim,
-                    hidden_dim=model_args.moe_inter_dim,
-                    peft_config=peft_config,
-                )
+                moe_impl = getattr(model_args, "moe_impl", "standard")
+                if moe_impl in ("deepep", "deepep_llep"):
+                    # ScMoE with DeepEP backend
+                    self.moe = build_scmoe_deepep(
+                        args=model_args.moe_args,
+                        dim=model_args.dim,
+                        hidden_dim=model_args.moe_inter_dim,
+                        peft_config=peft_config,
+                    )
+                else:
+                    # ScMoE with standard EP
+                    self.moe = build_scmoe(
+                        args=model_args.moe_args,
+                        dim=model_args.dim,
+                        hidden_dim=model_args.moe_inter_dim,
+                        peft_config=peft_config,
+                    )
             else:
                 # Standard MoE
                 self.moe = build_moe(

@@ -317,8 +317,6 @@ def build_scmoe_deepep(
     """Factory for ScMoE with DeepEP backend."""
     if not args.use_scmoe:
         raise ValueError("build_scmoe_deepep called but use_scmoe=False")
-    if not args.use_deepep:
-        raise ValueError("build_scmoe_deepep called but use_deepep=False")
 
     logger.info(
         f"ScMoE+DeepEP: num_experts={args.num_experts}, top_k={args.top_k}, "

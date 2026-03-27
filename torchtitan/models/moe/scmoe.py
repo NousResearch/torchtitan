@@ -126,10 +126,14 @@ class ScMoE(nn.Module):
         peft_config: Optional PEFT configuration
     """
 
-    # Simulated comm delay (cycles). Set via SCMOE_COMM_DELAY_MS env var.
-    # ~2M cycles per ms on B200. Calibrate for your GPU if needed.
+    # Simulated delays (cycles). ~2M cycles per ms on B200.
+    # SCMOE_COMM_DELAY_MS: simulates slow dispatch/combine all-to-all
+    # SCMOE_COMPUTE_PAD_MS: pads shared_experts compute to simulate large overlap window
     _comm_delay_cycles: int = int(
         float(os.environ.get("SCMOE_COMM_DELAY_MS", "0")) * 2_000_000
+    )
+    _compute_pad_cycles: int = int(
+        float(os.environ.get("SCMOE_COMPUTE_PAD_MS", "0")) * 2_000_000
     )
 
     def __init__(
@@ -340,10 +344,14 @@ class ScMoE(nn.Module):
         x_routed = self.routed_norm(x_shortcut_flat)
         x_shared = self.shared_norm(x_current_flat)
 
-        delay = self._comm_delay_cycles
+        comm_delay = self._comm_delay_cycles
+        compute_pad = self._compute_pad_cycles
 
-        if delay > 0 and self.use_separate_streams and x_current.is_cuda:
+        if comm_delay > 0 and self.use_separate_streams and x_current.is_cuda:
             # --- ScMoE overlap: shared_experts || dispatch, then GEMM, then combine ---
+            #
+            # Comm stream:    [Dispatch(sleep)] ............. [Combine(sleep)]
+            # Default stream: [SharedExperts+pad] → sync → [Expert GEMM] → sync
             stream_mgr = ScMoEStreamManager.get_instance()
             comm_stream = stream_mgr.get_comm_stream(x_current.device)
 
@@ -352,12 +360,14 @@ class ScMoE(nn.Module):
             ready.record()
             with torch.cuda.stream(comm_stream):
                 comm_stream.wait_event(ready)
-                torch.cuda._sleep(delay)
+                torch.cuda._sleep(comm_delay)
                 dispatch_done = torch.cuda.Event()
                 dispatch_done.record(comm_stream)
 
             # SharedExperts on default stream — overlaps with dispatch
             shared_out = self._shared_forward(x_shared)
+            if compute_pad > 0:
+                torch.cuda._sleep(compute_pad)  # pad to simulate larger compute
 
             # Wait for dispatch, then Expert GEMM on default stream
             torch.cuda.current_stream().wait_event(dispatch_done)
@@ -368,19 +378,21 @@ class ScMoE(nn.Module):
             gemm_done.record()
             with torch.cuda.stream(comm_stream):
                 comm_stream.wait_event(gemm_done)
-                torch.cuda._sleep(delay)
+                torch.cuda._sleep(comm_delay)
                 combine_done = torch.cuda.Event()
                 combine_done.record(comm_stream)
 
             # Wait for combine
             torch.cuda.current_stream().wait_event(combine_done)
 
-        elif delay > 0:
+        elif comm_delay > 0:
             # --- Sequential: dispatch, GEMM, combine, shared (no overlap) ---
-            torch.cuda._sleep(delay)  # dispatch
+            torch.cuda._sleep(comm_delay)  # dispatch
             routed_out = self._routed_forward(x_routed, bs, slen, dim)
-            torch.cuda._sleep(delay)  # combine
+            torch.cuda._sleep(comm_delay)  # combine
             shared_out = self._shared_forward(x_shared)
+            if compute_pad > 0:
+                torch.cuda._sleep(compute_pad)  # same compute pad, but sequential
 
         else:
             # --- No delay: pure sequential ---
