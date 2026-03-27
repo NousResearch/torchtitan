@@ -48,3 +48,11 @@ slurm-*
 
 # Vibe coding
 .claude
+ColossalAI/
+DeepSpeed/
+TransformerEngine/
+unsloth/
+Megatron-LM/
+Paddle/
+StepMesh/
+pytorch/

@@ -1,6 +1,6 @@
 [job]
-dump_folder = "/tmp/10b_bench"
-description = "10B A: FSDP baseline"
+dump_folder = "/tmp/probe"
+description = "probe 30B"
 [profiling]
 enable_profiling = false
 [metrics]
@@ -9,7 +9,7 @@ enable_tensorboard = false
 enable_wandb = false
 [model]
 name = "qwen3"
-flavor = "10B-A1B"
+flavor = "30B-A3B"
 [optimizer]
 name = "AdamW"
 lr = 8e-4
@@ -24,18 +24,17 @@ max_norm = 1.0
 steps = 10
 dataset = "c4"
 enable_cpu_offload = false
-enable_activation_offload = false
+enable_activation_offload = true
 activation_offload_modules = "expert_fc1"
 activation_offload_min_tensor_size = 1024
+activation_offload_mode = "both"
 [parallelism]
 data_parallel_replicate_degree = 1
 data_parallel_shard_degree = -1
 fsdp_reshard_after_forward = "default"
 tensor_parallel_degree = 1
 context_parallel_degree = 1
-enable_async_tensor_parallel = false
 expert_parallel_degree = 8
-expert_tensor_parallel_degree = 1
 [checkpoint]
 enable = false
 [activation_checkpoint]
