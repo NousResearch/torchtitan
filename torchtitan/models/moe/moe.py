@@ -20,55 +20,21 @@ from torchtitan.tools.logging import logger
 from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
-class _ExpertWithOffload(torch.autograd.Function):
-    """Offload expert input to CPU, free GPU storage, recompute during backward.
+def _expert_forward_with_offload(routed_input, num_tokens_per_expert, experts_module, moe_module):
+    """Wrapper for torch.utils.checkpoint that offloads saved tensors to CPU.
 
-    Forward: run experts, offload input to CPU, free input GPU storage.
-    Backward: reload input from CPU, recompute expert forward for gradients.
-
-    This combines activation checkpointing with CPU offloading — the input
-    doesn't stay on GPU between forward and backward.
+    Uses PyTorch's built-in activation checkpointing which correctly handles
+    the autograd graph. The memory saving comes from not keeping the expert's
+    intermediate activations (w1*x, silu, w3*x, etc.) on GPU — they're
+    recomputed during backward from the checkpointed input.
     """
-
-    @staticmethod
-    def forward(ctx, routed_input, num_tokens_per_expert, experts_module, moe_module):
-        if moe_module._offloader is None:
-            from torchtitan.distributed.cpu_offload import TensorOffloader
-            moe_module._offloader = TensorOffloader(pin_memory=True, use_pool=False)
-
-        offloader = moe_module._offloader
-
-        # Run expert forward (no_grad — we'll recompute in backward)
-        with torch.no_grad():
-            routed_output = experts_module(routed_input, num_tokens_per_expert)
-
-        # Offload input to CPU (keep GPU copy alive for routing backward)
-        handle = offloader.offload(routed_input, release_storage=False)
-        offloader.sync_offload()
-
-        ctx.handle = handle
-        ctx.offloader = offloader
-        ctx.experts_module = experts_module
-        # Save num_tokens_per_expert (small, keep on GPU)
-        ctx.save_for_backward(num_tokens_per_expert)
-
-        return routed_output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        num_tokens_per_expert, = ctx.saved_tensors
-
-        # Reload input from CPU
-        routed_input = ctx.offloader.reload(ctx.handle)
-        ctx.offloader.sync_reload()
-
-        # Recompute expert forward with gradients enabled
-        routed_input = routed_input.detach().requires_grad_(True)
-        with torch.enable_grad():
-            output = ctx.experts_module(routed_input, num_tokens_per_expert)
-        output.backward(grad_output)
-
-        return routed_input.grad, None, None, None
+    return torch.utils.checkpoint.checkpoint(
+        experts_module,
+        routed_input,
+        num_tokens_per_expert,
+        use_reentrant=False,
+        preserve_rng_state=False,
+    )
 
 
 @dataclass
@@ -1074,7 +1040,7 @@ class MoE(nn.Module):
         if self.offload_expert_fc1:
             # Explicit activation offloading: save routed_input to CPU before
             # expert compute, reload during backward via custom autograd function.
-            routed_output = _ExpertWithOffload.apply(
+            routed_output = _expert_forward_with_offload(
                 routed_input, num_tokens_per_expert, self.experts, self
             )
         else:
