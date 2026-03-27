@@ -449,6 +449,14 @@ class Training:
     Default: 1M elements (~4MB for float32).
     """
 
+    activation_offload_mode: str = "save_on_cpu"
+    """
+    Mode for activation offloading:
+      "save_on_cpu"  — save expert activations to pinned CPU (async D2H overlaps with next-layer attention)
+      "checkpoint"   — recompute expert forward in backward (no CPU, trades compute for memory)
+      "both"         — checkpoint + save boundary tensors to CPU
+    """
+
     dtype: Literal["bfloat16", "float32"] = "float32"
     """
     torch dtype for training. In contrast to mixed precision training, setting training_dtype=bfloat16 will

@@ -21,20 +21,49 @@ from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
 def _expert_forward_with_offload(routed_input, num_tokens_per_expert, experts_module, moe_module):
-    """Wrapper for torch.utils.checkpoint that offloads saved tensors to CPU.
+    """Run expert forward with activations saved to pinned CPU memory.
 
-    Uses PyTorch's built-in activation checkpointing which correctly handles
-    the autograd graph. The memory saving comes from not keeping the expert's
-    intermediate activations (w1*x, silu, w3*x, etc.) on GPU — they're
-    recomputed during backward from the checkpointed input.
+    Uses torch.autograd.graph.save_on_cpu — PyTorch's built-in mechanism
+    that intercepts save_for_backward and copies tensors to CPU (pinned).
+    During backward, they're automatically reloaded to GPU.
+
+    The D2H copies happen asynchronously and overlap with the NEXT layer's
+    attention forward. The H2D reloads overlap with the PREVIOUS layer's
+    attention backward. This is the real async overlap.
+
+    mode (set via moe_module._offload_mode):
+      "save_on_cpu"  — save all autograd tensors to CPU (async D2H)
+      "checkpoint"   — recompute expert forward in backward (no CPU)
+      "both"         — checkpoint + save boundary tensor to CPU
     """
-    return torch.utils.checkpoint.checkpoint(
-        experts_module,
-        routed_input,
-        num_tokens_per_expert,
-        use_reentrant=False,
-        preserve_rng_state=False,
-    )
+    mode = getattr(moe_module, "_offload_mode", "save_on_cpu")
+
+    if mode == "checkpoint":
+        # Pure recompute — no CPU involvement
+        return torch.utils.checkpoint.checkpoint(
+            experts_module,
+            routed_input,
+            num_tokens_per_expert,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+    elif mode == "save_on_cpu":
+        # Save all expert activations to pinned CPU — async D2H overlaps
+        # with next layer's attention
+        with torch.autograd.graph.save_on_cpu(pin_memory=True):
+            return experts_module(routed_input, num_tokens_per_expert)
+    elif mode == "both":
+        # Checkpoint + save boundary tensors to CPU
+        with torch.autograd.graph.save_on_cpu(pin_memory=True):
+            return torch.utils.checkpoint.checkpoint(
+                experts_module,
+                routed_input,
+                num_tokens_per_expert,
+                use_reentrant=False,
+                preserve_rng_state=False,
+            )
+    else:
+        return experts_module(routed_input, num_tokens_per_expert)
 
 
 @dataclass
@@ -955,6 +984,7 @@ class MoE(nn.Module):
         self.offload_expert_fc1 = False
         self.offload_moe_act = False
         self._offloader = None  # Lazy-init TensorOffloader
+        self._offload_mode = "save_on_cpu"  # "save_on_cpu", "checkpoint", "both"
 
         # define fields for auxiliary-loss-free load balancing (https://arxiv.org/abs/2408.15664)
         # NOTE: tokens_per_expert is accumulated in the model forward pass.

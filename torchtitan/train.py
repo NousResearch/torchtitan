@@ -338,8 +338,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     if hasattr(module, "offload_expert_fc1"):
                         module.offload_expert_fc1 = "expert_fc1" in offload_modules
                         module.offload_moe_act = "moe_act" in offload_modules
+                        module._offload_mode = job_config.training.activation_offload_mode
             logger.info(
-                f"Activation offloading enabled for modules: {offload_modules}"
+                f"Activation offloading enabled: modules={offload_modules}, "
+                f"mode={job_config.training.activation_offload_mode}"
             )
 
         # initialize device memory monitor and get peak flops for MFU calculation
