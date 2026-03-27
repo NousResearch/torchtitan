@@ -449,12 +449,19 @@ class Training:
     Default: 1M elements (~4MB for float32).
     """
 
-    activation_offload_mode: str = "save_on_cpu"
+    activation_offload_mode: str = "async"
     """
     Mode for activation offloading:
-      "save_on_cpu"  — save expert activations to pinned CPU (async D2H overlaps with next-layer attention)
-      "checkpoint"   — recompute expert forward in backward (no CPU, trades compute for memory)
-      "both"         — checkpoint + save boundary tensors to CPU
+      "async"        — checkpoint + async D2H (overlaps with post-MoE compute)
+      "save_on_cpu"  — PyTorch save_on_cpu (sync D2H)
+      "checkpoint"   — recompute expert forward in backward (no CPU)
+    """
+
+    enable_weight_offload: bool = False
+    """
+    Whether to offload expert weights to CPU between layers.
+    Async D2H after expert forward overlaps with post-MoE attention.
+    Async H2D reload before next layer's expert forward.
     """
 
     dtype: Literal["bfloat16", "float32"] = "float32"

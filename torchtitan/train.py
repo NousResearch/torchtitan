@@ -344,6 +344,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"mode={job_config.training.activation_offload_mode}"
             )
 
+        # Configure weight offloading on TransformerBlocks
+        if job_config.training.enable_weight_offload:
+            for model_part in self.model_parts:
+                for module in model_part.modules():
+                    if hasattr(module, "_weight_offload_enabled"):
+                        module._weight_offload_enabled = True
+            logger.info("Expert weight offloading enabled")
+
         # initialize device memory monitor and get peak flops for MFU calculation
         device_memory_monitor = self.metrics_processor.device_memory_monitor
         gpu_peak_flops = utils.get_peak_flops(device_memory_monitor.device_name)
