@@ -344,13 +344,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"mode={job_config.training.activation_offload_mode}"
             )
 
-        # Configure weight offloading on TransformerBlocks
+        # Configure weight offloading — one call per expert module
         if job_config.training.enable_weight_offload:
+            from torchtitan.distributed.cpu_offload.offload_api import offload_weights
             for model_part in self.model_parts:
                 for module in model_part.modules():
-                    if hasattr(module, "_weight_offload_enabled"):
-                        module._weight_offload_enabled = True
-            logger.info("Expert weight offloading enabled")
+                    if hasattr(module, "experts") and hasattr(module, "router"):
+                        offload_weights(module.experts, name="expert_weights")
+            logger.info("Expert weight offloading enabled via offload_api")
 
         # initialize device memory monitor and get peak flops for MFU calculation
         device_memory_monitor = self.metrics_processor.device_memory_monitor

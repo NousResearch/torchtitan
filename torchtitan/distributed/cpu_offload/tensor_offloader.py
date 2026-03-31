@@ -110,10 +110,14 @@ class TensorOffloader:
 
         # Optionally free GPU storage
         if release_storage:
-            # record_stream tells allocator not to reuse until D2H stream catches up
             tensor.record_stream(self._d2h_stream)
-            # resize_(0) returns storage to pool — pool won't reuse until stream done
-            tensor.untyped_storage().resize_(0)
+            # Wait for D2H to complete before freeing
+            event.synchronize()
+            # Use .data to bypass autograd view tracking
+            if hasattr(tensor, 'data'):
+                tensor.data.untyped_storage().resize_(0)
+            else:
+                tensor.untyped_storage().resize_(0)
 
         return (tensor.device, cpu_buf, self._pool is not None)
 
@@ -172,12 +176,13 @@ class TensorOffloader:
         if self._last_offload_event is not None:
             self._h2d_stream.wait_event(self._last_offload_event)
 
-        # Resize storage back to original size
+        # Resize storage back to original size (bypass autograd with .data)
         needed_bytes = cpu_buf.numel() * cpu_buf.element_size()
-        target_tensor.untyped_storage().resize_(needed_bytes)
+        data = target_tensor.data if hasattr(target_tensor, 'data') else target_tensor
+        data.untyped_storage().resize_(needed_bytes)
 
         with torch.cuda.stream(self._h2d_stream):
-            target_tensor.copy_(cpu_buf, non_blocking=cpu_buf.is_pinned())
+            data.copy_(cpu_buf, non_blocking=cpu_buf.is_pinned())
 
         event = torch.cuda.Event()
         event.record(self._h2d_stream)

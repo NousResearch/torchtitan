@@ -466,15 +466,6 @@ class TransformerBlock(nn.Module):
         if self.moe_enabled:
             moe_output = self.moe(self.ffn_norm(x))
             x = x + moe_output
-
-            # Weight offload: after expert forward, move weights to CPU.
-            # Before expert backward, a hook reloads them from CPU.
-            # D2H overlaps with post_moe_attn forward.
-            # H2D overlaps with post_moe_attn backward.
-            if getattr(self, "_weight_offload_enabled", False):
-                self._offload_expert_weights()
-                # Register backward hook: reload weights before expert backward
-                x.register_hook(lambda grad: self._reload_expert_weights() or grad)
         else:
             x = x + self.feed_forward(self.ffn_norm(x))
 
@@ -484,36 +475,6 @@ class TransformerBlock(nn.Module):
         )
         return x
 
-    def _offload_expert_weights(self):
-        """Offload expert weights to CPU via TensorOffloader.
-
-        Uses our async engine: D2H on dedicated stream, pinned memory,
-        release_storage=True frees GPU after copy completes.
-        """
-        if not hasattr(self, "_weight_offloader"):
-            from torchtitan.distributed.cpu_offload import TensorOffloader
-            self._weight_offloader = TensorOffloader(pin_memory=True, use_pool=False)
-            self._weight_handles = {}
-
-        for name, param in self.moe.experts.named_parameters():
-            data = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-            self._weight_handles[name] = self._weight_offloader.offload(
-                data, release_storage=True
-            )
-
-    def _reload_expert_weights(self):
-        """Reload expert weights from CPU via TensorOffloader.
-
-        Uses reload_into() to restore data into the existing DTensor storage.
-        """
-        if not hasattr(self, "_weight_offloader"):
-            return
-
-        for name, param in self.moe.experts.named_parameters():
-            data = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-            self._weight_offloader.reload_into(self._weight_handles[name], data)
-
-        self._weight_offloader.sync_reload()
 
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):
