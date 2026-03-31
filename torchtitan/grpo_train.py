@@ -42,6 +42,7 @@ from torchtitan.grpo.grpo_step import (
     scale_rewards,
 )
 from torchtitan.grpo.sglang_handling import (
+    AsyncWeightUpdater,
     get_hostname_url,
     get_sglang_urls,
     new_group,
@@ -50,7 +51,6 @@ from torchtitan.grpo.sglang_handling import (
     send_start_update,
     setup_group,
     wait_for_sglang,
-    AsyncWeightUpdater,
 )
 from torchtitan.grpo.utils import VocabParallelEntropyFunction
 from torchtitan.protocols import ModelProtocol
@@ -236,7 +236,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         self.metrics_rank = _get_metrics_rank(parallel_dims, job_config)
         self.data_handler = OnlineDataHandler(metrics_rank=self.metrics_rank)
-        self.async_weight_updater = AsyncWeightUpdater(self)
+        if self.job_config.grpo.async_weight_update:
+            self.async_weight_updater = AsyncWeightUpdater(self)
+        else:
+            self.async_weight_updater = None
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
@@ -1900,7 +1903,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 self.ema_ref_weights()
                 ema_weight_end = time.perf_counter()
                 send_weight_start = time.perf_counter()
-                self.send_weights()
+                if self.async_weight_updater:
+                    self.async_weight_updater.trigger_sync(self.step)
+                else:
+                    self.send_weights()
                 send_weight_end = time.perf_counter()
                 if self.use_ref_model and (
                     0.0 < self.job_config.grpo.ref_model_ema < 1.0
