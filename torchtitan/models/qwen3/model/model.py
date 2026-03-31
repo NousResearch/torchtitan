@@ -485,72 +485,35 @@ class TransformerBlock(nn.Module):
         return x
 
     def _offload_expert_weights(self):
-        """Async D2H of expert weights after expert forward.
+        """Offload expert weights to CPU via TensorOffloader.
 
-        Copies weight data to pinned CPU, frees GPU storage.
-        The D2H runs on a dedicated stream and overlaps with post_moe_attn.
+        Uses our async engine: D2H on dedicated stream, pinned memory,
+        release_storage=True frees GPU after copy completes.
         """
-        if not hasattr(self, "_weight_d2h_stream"):
-            self._weight_d2h_stream = torch.cuda.Stream()
-            self._weight_h2d_stream = torch.cuda.Stream()
-            self._weight_cpu_bufs = {}
+        if not hasattr(self, "_weight_offloader"):
+            from torchtitan.distributed.cpu_offload import TensorOffloader
+            self._weight_offloader = TensorOffloader(pin_memory=True, use_pool=False)
+            self._weight_handles = {}
 
-        d2h = self._weight_d2h_stream
-        d2h.wait_stream(torch.cuda.current_stream())
-
-        with torch.cuda.stream(d2h):
-            for name, param in self.moe.experts.named_parameters():
-                # Get the actual local tensor data
-                data = param.data
-                if hasattr(data, "to_local"):
-                    data = data.to_local()
-                # Allocate pinned CPU buffer (reuse across iterations)
-                if name not in self._weight_cpu_bufs:
-                    self._weight_cpu_bufs[name] = torch.empty(
-                        data.shape, dtype=data.dtype, device="cpu", pin_memory=True
-                    )
-                self._weight_cpu_bufs[name].copy_(data, non_blocking=True)
-
-        self._weight_d2h_event = torch.cuda.Event()
-        self._weight_d2h_event.record(d2h)
-
-        # Free GPU storage AFTER D2H copy is queued
-        # (record_stream ensures GC waits for D2H to finish)
         for name, param in self.moe.experts.named_parameters():
-            data = param.data
-            if hasattr(data, "to_local"):
-                data = data.to_local()
-            data.record_stream(d2h)
-            data.untyped_storage().resize_(0)
+            data = param.data.to_local() if hasattr(param.data, "to_local") else param.data
+            self._weight_handles[name] = self._weight_offloader.offload(
+                data, release_storage=True
+            )
 
     def _reload_expert_weights(self):
-        """Async H2D reload of expert weights before expert backward.
+        """Reload expert weights from CPU via TensorOffloader.
 
-        Called from a backward hook. H2D overlaps with post_moe_attn backward.
+        Uses reload_into() to restore data into the existing DTensor storage.
         """
-        if not hasattr(self, "_weight_d2h_stream"):
+        if not hasattr(self, "_weight_offloader"):
             return
 
-        h2d = self._weight_h2d_stream
-        # Wait for D2H to finish
-        h2d.wait_event(self._weight_d2h_event)
+        for name, param in self.moe.experts.named_parameters():
+            data = param.data.to_local() if hasattr(param.data, "to_local") else param.data
+            self._weight_offloader.reload_into(self._weight_handles[name], data)
 
-        with torch.cuda.stream(h2d):
-            for name, param in self.moe.experts.named_parameters():
-                cpu_buf = self._weight_cpu_bufs[name]
-                gpu_buf = torch.empty(
-                    cpu_buf.shape, dtype=cpu_buf.dtype, device="cuda"
-                )
-                gpu_buf.copy_(cpu_buf, non_blocking=True)
-                # Restore the parameter's storage
-                data = param.data
-                if hasattr(data, "to_local"):
-                    data = data.to_local()
-                data.untyped_storage().resize_(gpu_buf.untyped_storage().size())
-                data.copy_(gpu_buf)
-
-        # Main stream must wait for H2D before expert backward uses weights
-        torch.cuda.current_stream().wait_stream(h2d)
+        self._weight_offloader.sync_reload()
 
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):

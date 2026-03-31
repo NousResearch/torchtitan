@@ -108,9 +108,11 @@ class TensorOffloader:
         event.record(self._d2h_stream)
         self._last_offload_event = event
 
-        # Optionally free GPU storage immediately
+        # Optionally free GPU storage
         if release_storage:
+            # record_stream tells allocator not to reuse until D2H stream catches up
             tensor.record_stream(self._d2h_stream)
+            # resize_(0) returns storage to pool — pool won't reuse until stream done
             tensor.untyped_storage().resize_(0)
 
         return (tensor.device, cpu_buf, self._pool is not None)
@@ -153,6 +155,36 @@ class TensorOffloader:
             self._pool.free(cpu_buf)
 
         return gpu_tensor
+
+    def reload_into(self, handle: OffloadHandle, target_tensor: torch.Tensor) -> None:
+        """Reload from CPU into an existing GPU tensor's storage.
+
+        Resizes the target tensor's storage and copies data back.
+        Use this for DTensor/FSDP params where you need to restore
+        the original tensor rather than creating a new one.
+
+        Args:
+            handle: The OffloadHandle from offload().
+            target_tensor: The GPU tensor to restore data into.
+        """
+        _, cpu_buf, used_pool = handle
+
+        if self._last_offload_event is not None:
+            self._h2d_stream.wait_event(self._last_offload_event)
+
+        # Resize storage back to original size
+        needed_bytes = cpu_buf.numel() * cpu_buf.element_size()
+        target_tensor.untyped_storage().resize_(needed_bytes)
+
+        with torch.cuda.stream(self._h2d_stream):
+            target_tensor.copy_(cpu_buf, non_blocking=cpu_buf.is_pinned())
+
+        event = torch.cuda.Event()
+        event.record(self._h2d_stream)
+        self._last_reload_event = event
+
+        if used_pool and self._pool is not None:
+            self._pool.free(cpu_buf)
 
     def sync_offload(self) -> None:
         """Block until the last offload (D2H) completes."""
