@@ -464,16 +464,8 @@ class TransformerBlock(nn.Module):
         )
 
         if self.moe_enabled:
-            # Reload expert weights from CPU if they were offloaded by previous layer
-            if getattr(self, "_weight_offload_enabled", False):
-                self._reload_expert_weights()
-
             moe_output = self.moe(self.ffn_norm(x))
             x = x + moe_output
-
-            # Async D2H expert weights to CPU — overlaps with post_moe_attn below
-            if getattr(self, "_weight_offload_enabled", False):
-                self._offload_expert_weights()
         else:
             x = x + self.feed_forward(self.ffn_norm(x))
 
@@ -483,49 +475,30 @@ class TransformerBlock(nn.Module):
         )
         return x
 
-    def _init_weight_offloader(self):
-        """Lazy-init offloader and create CPU buffers for expert weights."""
-        from torchtitan.distributed.cpu_offload import TensorOffloader
-        self._weight_offloader = TensorOffloader(pin_memory=True, use_pool=False)
-        self._weight_cpu_bufs = {}
-        for name, param in self.moe.experts.named_parameters():
-            local = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-            cpu_buf = torch.empty(local.shape, dtype=local.dtype, device="cpu", pin_memory=True)
-            self._weight_cpu_bufs[name] = cpu_buf
-
     def _offload_expert_weights(self):
-        """Async D2H of expert weights — overlaps with post_moe_attn."""
-        if not hasattr(self, "_weight_offloader"):
-            self._init_weight_offloader()
-        d2h = self._weight_offloader.d2h_stream
-        d2h.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(d2h):
-            for name, param in self.moe.experts.named_parameters():
-                # Handle DTensor (FSDP-wrapped) — get local tensor
-                local = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-                self._weight_cpu_bufs[name].copy_(local, non_blocking=True)
-        self._weight_offload_event = torch.cuda.Event()
-        self._weight_offload_event.record(d2h)
-        # Free GPU weight storage
-        for name, param in self.moe.experts.named_parameters():
-            local = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-            local.set_(torch.empty(0, dtype=local.dtype, device=local.device))
+        """Offload expert weight shards to CPU after forward.
+
+        FSDP stays intact — it still manages sharding/allgather. We just move
+        the local sharded data to CPU between forward passes. FSDP's next
+        allgather will fetch from CPU (same as CPUOffloadPolicy does internally).
+        """
+        # Move expert params to CPU — FSDP stores the sharded shard,
+        # this moves that shard to CPU via non-blocking copy
+        for param in self.moe.experts.parameters():
+            if param.device.type == "cuda":
+                cpu_data = param.data.to("cpu", non_blocking=True)
+                param.data = cpu_data
 
     def _reload_expert_weights(self):
-        """Async H2D reload of expert weights before expert forward."""
-        if not hasattr(self, "_weight_offloader"):
-            return
-        h2d = self._weight_offloader.h2d_stream
-        if hasattr(self, "_weight_offload_event"):
-            h2d.wait_event(self._weight_offload_event)
-        with torch.cuda.stream(h2d):
-            for name, param in self.moe.experts.named_parameters():
-                cpu_buf = self._weight_cpu_bufs[name]
-                gpu_buf = torch.empty(cpu_buf.shape, dtype=cpu_buf.dtype, device="cuda")
-                gpu_buf.copy_(cpu_buf, non_blocking=True)
-                local = param.data.to_local() if hasattr(param.data, "to_local") else param.data
-                local.set_(gpu_buf)
-        torch.cuda.current_stream().wait_stream(h2d)
+        """Reload expert weight shards to GPU before forward.
+
+        Moves sharded data back to GPU so FSDP can allgather from it.
+        """
+        for param in self.moe.experts.parameters():
+            if param.device.type == "cpu":
+                gpu_data = param.data.to("cuda", non_blocking=True)
+                param.data = gpu_data
+        torch.cuda.synchronize()
 
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):
