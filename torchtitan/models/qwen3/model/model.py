@@ -463,6 +463,7 @@ class TransformerBlock(nn.Module):
             x = x + self.feed_forward(self.ffn_norm(x))
         return x
 
+
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):
             norm.reset_parameters()

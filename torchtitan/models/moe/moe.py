@@ -20,6 +20,46 @@ from torchtitan.tools.logging import logger
 from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
+def _expert_forward_with_offload(routed_input, num_tokens_per_expert, experts_module, moe_module):
+    """Run expert forward with activation offloading — Megatron pattern.
+
+    Uses our async engine (ActivationOffloadContext + group_commit), exactly
+    like Megatron's off_interface. Autograd saved-tensor hooks intercept
+    save_for_backward, async D2H to pinned CPU on dedicated stream.
+
+    mode (set via moe_module._offload_mode):
+      "async"        — our Megatron-style engine (async D2H/H2D, dedicated streams)
+      "save_on_cpu"  — PyTorch's save_on_cpu (sync, for comparison)
+      "checkpoint"   — recompute expert in backward (no CPU, for comparison)
+    """
+    mode = getattr(moe_module, "_offload_mode", "async")
+
+    if mode == "async":
+        # Megatron pattern: context manager installs autograd hooks,
+        # group_commit triggers async D2H and optionally frees input storage
+        from torchtitan.distributed.cpu_offload import (
+            ActivationOffloadContext,
+            group_commit,
+        )
+        with ActivationOffloadContext(True, routed_input, "expert_fc1") as x:
+            output = experts_module(x, num_tokens_per_expert)
+        output = group_commit(
+            output, "expert_fc1",
+            forced_released_tensors=[],
+        )
+        return output
+    elif mode == "save_on_cpu":
+        with torch.autograd.graph.save_on_cpu(pin_memory=True):
+            return experts_module(routed_input, num_tokens_per_expert)
+    elif mode == "checkpoint":
+        return torch.utils.checkpoint.checkpoint(
+            experts_module, routed_input, num_tokens_per_expert,
+            use_reentrant=False, preserve_rng_state=False,
+        )
+    else:
+        return experts_module(routed_input, num_tokens_per_expert)
+
+
 @dataclass
 class ExpertRoutingHistogram:
     counts: list[float]
@@ -934,6 +974,10 @@ class MoE(nn.Module):
             self.shared_gate.weight.requires_grad = False
         self.score_before_experts = moe_args.score_before_experts
 
+        # Activation offloading (set externally via config)
+        self.offload_expert_fc1 = False
+        self._offload_mode = "save_on_cpu"  # "save_on_cpu" or "checkpoint"
+
         # define fields for auxiliary-loss-free load balancing (https://arxiv.org/abs/2408.15664)
         # NOTE: tokens_per_expert is accumulated in the model forward pass.
         #       expert_bias is updated outside the model in an optimizer step pre hook
@@ -1015,7 +1059,14 @@ class MoE(nn.Module):
             ).to(x.dtype)
 
         # shape (bs*slen*top_k, dim)
-        routed_output = self.experts(routed_input, num_tokens_per_expert)
+        if self.offload_expert_fc1:
+            # Explicit activation offloading: save routed_input to CPU before
+            # expert compute, reload during backward via custom autograd function.
+            routed_output = _expert_forward_with_offload(
+                routed_input, num_tokens_per_expert, self.experts, self
+            )
+        else:
+            routed_output = self.experts(routed_input, num_tokens_per_expert)
 
         # shared expert
         # Note: we execute the shared expert before scoring the output of the routed expert

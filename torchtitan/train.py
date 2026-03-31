@@ -328,6 +328,29 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         self.ft_manager.maybe_set_all_reduce_hook(self.model_parts)
 
+        # Configure CPU offloading on MoE expert modules
+        if job_config.training.enable_activation_offload:
+            mode = job_config.training.activation_offload_mode
+            from torchtitan.distributed.cpu_offload import ActivationOffloadContext
+            # Mark ALL parameters as not-offloadable (Megatron pattern)
+            # This prevents the autograd hooks from trying to offload weight tensors
+            for model_part in self.model_parts:
+                for param in model_part.parameters():
+                    ActivationOffloadContext.mark_not_offloadable(param)
+                for module in model_part.modules():
+                    if hasattr(module, "offload_expert_fc1"):
+                        module.offload_expert_fc1 = True
+                        module._offload_mode = mode
+            logger.info(f"Expert activation offloading enabled (mode={mode})")
+
+        if job_config.training.enable_weight_offload:
+            from torchtitan.distributed.cpu_offload.offload_api import offload_weights
+            for model_part in self.model_parts:
+                for module in model_part.modules():
+                    if hasattr(module, "experts") and hasattr(module, "router"):
+                        offload_weights(module.experts)
+            logger.info("Expert weight offloading enabled")
+
         # initialize device memory monitor and get peak flops for MFU calculation
         device_memory_monitor = self.metrics_processor.device_memory_monitor
         gpu_peak_flops = utils.get_peak_flops(device_memory_monitor.device_name)
@@ -790,6 +813,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         else:
             global_valid_tokens = local_valid_tokens.float()
 
+        # Initialize activation offload engine for this training step
+        _activation_offload_enabled = self.job_config.training.enable_activation_offload
+        if _activation_offload_enabled:
+            from torchtitan.distributed.cpu_offload import (
+                ActivationOffloadContext,
+                OffloadManager,
+            )
+            OffloadManager.get_instance().reset()
+
         # Process each microbatch: move to GPU, forward/backward, then free
         accumulated_losses = []
         for input_dict, labels in microbatches:
@@ -802,6 +834,14 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                         x.to(self.device) for x in v if isinstance(x, torch.Tensor)
                     ]
             labels = labels.to(self.device)
+
+            # Init offload chunk handler for this microbatch
+            if _activation_offload_enabled:
+                ActivationOffloadContext.init_chunk_handler(
+                    vp_size=1,
+                    vp_stage=0,
+                    min_offloaded_tensor_size=self.job_config.training.activation_offload_min_tensor_size,
+                )
 
             loss = self.forward_backward_step(
                 input_dict=input_dict,
