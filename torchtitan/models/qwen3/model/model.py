@@ -423,11 +423,6 @@ class TransformerBlock(nn.Module):
         self.attention_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
         self.ffn_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
 
-        # Additional attention block AFTER MoE — all runs pay this cost.
-        # For async offload runs, the D2H of expert activations overlaps with this.
-        self.post_moe_attn = Attention(model_args, peft_config)
-        self.post_moe_norm = nn.RMSNorm(model_args.dim, eps=model_args.norm_eps)
-
         if peft_config.enable_peft and not peft_config.lora_train_norm:
             self.attention_norm.weight.requires_grad = False
             self.ffn_norm.weight.requires_grad = False
@@ -436,8 +431,6 @@ class TransformerBlock(nn.Module):
             self.weight_init_std = 0.02 / (2 * (layer_id + 1)) ** 0.5
         else:
             self.weight_init_std = 0.02 / (2 * model_args.n_layers) ** 0.5
-
-        self._weight_offload_enabled = False
 
     def forward(
         self,
@@ -468,11 +461,6 @@ class TransformerBlock(nn.Module):
             x = x + moe_output
         else:
             x = x + self.feed_forward(self.ffn_norm(x))
-
-        # Additional attention — same for all runs. Weight D2H overlaps with this.
-        x = x + self.post_moe_attn(
-            self.post_moe_norm(x), rope_cache, attention_masks, positions
-        )
         return x
 
 
@@ -484,8 +472,6 @@ class TransformerBlock(nn.Module):
             self.moe.init_weights(self.weight_init_std, buffer_device, self.n_layers)
         else:
             self.feed_forward.init_weights(self.weight_init_std)
-        self.post_moe_norm.reset_parameters()
-        self.post_moe_attn.init_weights(self.weight_init_std)
 
 
 class Qwen3Model(ModelProtocol):

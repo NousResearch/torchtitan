@@ -20,104 +20,30 @@ from torchtitan.tools.logging import logger
 from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
-class _AsyncOffloadExpert(torch.autograd.Function):
-    """Expert forward with ASYNC D2H offload of input activations.
-
-    Forward:
-      1. Run expert with torch.no_grad() (don't save intermediates)
-      2. Start async D2H of expert input on dedicated stream (NO sync!)
-      3. Return output — D2H overlaps with post_moe_compute on default stream
-
-    Backward:
-      1. Start async H2D reload of input (overlaps with post_moe_compute backward)
-      2. Sync H2D
-      3. Recompute expert forward with torch.enable_grad() for parameter gradients
-    """
-
-    @staticmethod
-    def forward(ctx, x, num_tokens, expert_module, offloader):
-        with torch.no_grad():
-            y = expert_module(x, num_tokens)
-
-        # Async D2H — does NOT block. Overlaps with post_moe_compute.
-        offloader.d2h_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(offloader.d2h_stream):
-            cpu_buf = torch.empty(x.shape, dtype=x.dtype, device="cpu", pin_memory=True)
-            cpu_buf.copy_(x.detach(), non_blocking=True)
-        offloader._last_offload_event = torch.cuda.Event()
-        offloader._last_offload_event.record(offloader.d2h_stream)
-        # NO sync here — that's the whole point
-
-        ctx.cpu_buf = cpu_buf
-        ctx.offloader = offloader
-        ctx.expert_module = expert_module
-        ctx.save_for_backward(num_tokens)
-        ctx.x_device = x.device
-
-        return y
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        num_tokens, = ctx.saved_tensors
-
-        # Async H2D reload — overlaps with post_moe_compute backward
-        offloader = ctx.offloader
-        if offloader._last_offload_event is not None:
-            offloader.h2d_stream.wait_event(offloader._last_offload_event)
-        x_gpu = torch.empty(ctx.cpu_buf.shape, dtype=ctx.cpu_buf.dtype, device=ctx.x_device)
-        with torch.cuda.stream(offloader.h2d_stream):
-            x_gpu.copy_(ctx.cpu_buf, non_blocking=True)
-        # Sync H2D before recompute
-        torch.cuda.current_stream().wait_stream(offloader.h2d_stream)
-
-        x_gpu = x_gpu.detach().requires_grad_(True)
-        with torch.enable_grad():
-            y = ctx.expert_module(x_gpu, num_tokens)
-        y.backward(grad_output)
-
-        return x_gpu.grad, None, None, None
-
-
 def _expert_forward_with_offload(routed_input, num_tokens_per_expert, experts_module, moe_module):
-    """Run expert forward with activation offloading.
+    """Run expert forward with activation offloading via clean API.
+
+    Uses offload_activation context manager + offload_commit:
+    - Activations saved for backward go to pinned CPU memory
+    - D2H overlaps with whatever compute follows (e.g., post_moe attention)
+    - H2D reload happens automatically during backward
 
     mode (set via moe_module._offload_mode):
-      "async"        — async D2H to CPU, overlaps with post_moe_compute (our engine)
-      "save_on_cpu"  — PyTorch's save_on_cpu (sync D2H, for comparison)
-      "checkpoint"   — recompute expert in backward (no CPU, for comparison)
+      "save_on_cpu"  — save expert activations to pinned CPU (PyTorch built-in)
+      "checkpoint"   — recompute expert in backward (no CPU, trades compute for memory)
     """
-    mode = getattr(moe_module, "_offload_mode", "async")
+    mode = getattr(moe_module, "_offload_mode", "save_on_cpu")
 
-    if mode == "async":
-        # checkpoint (works with EP) + async D2H of checkpoint boundary tensor
-        # The D2H of routed_input overlaps with post_moe_attn (added to TransformerBlock)
-        if moe_module._offloader is None:
-            from torchtitan.distributed.cpu_offload import TensorOffloader
-            moe_module._offloader = TensorOffloader(pin_memory=True, use_pool=False)
-        offloader = moe_module._offloader
-
-        # Start async D2H of expert input BEFORE checkpoint
-        offloader.d2h_stream.wait_stream(torch.cuda.current_stream())
-        with torch.cuda.stream(offloader.d2h_stream):
-            cpu_buf = torch.empty(routed_input.shape, dtype=routed_input.dtype,
-                                  device="cpu", pin_memory=True)
-            cpu_buf.copy_(routed_input.detach(), non_blocking=True)
-        # NO sync — D2H overlaps with expert compute + post_moe_attn
-
-        # Checkpoint handles the autograd graph correctly with EP
-        output = torch.utils.checkpoint.checkpoint(
-            experts_module, routed_input, num_tokens_per_expert,
-            use_reentrant=False, preserve_rng_state=False,
-        )
+    if mode == "save_on_cpu":
+        from torchtitan.distributed.cpu_offload import offload_activation, offload_commit
+        with offload_activation(True, routed_input, "expert_fc1") as x:
+            output = experts_module(x, num_tokens_per_expert)
         return output
     elif mode == "checkpoint":
         return torch.utils.checkpoint.checkpoint(
             experts_module, routed_input, num_tokens_per_expert,
             use_reentrant=False, preserve_rng_state=False,
         )
-    elif mode == "save_on_cpu":
-        with torch.autograd.graph.save_on_cpu(pin_memory=True):
-            return experts_module(routed_input, num_tokens_per_expert)
     else:
         return experts_module(routed_input, num_tokens_per_expert)
 
@@ -1036,11 +962,9 @@ class MoE(nn.Module):
             self.shared_gate.weight.requires_grad = False
         self.score_before_experts = moe_args.score_before_experts
 
-        # Activation offloading flags (set externally via config)
+        # Activation offloading (set externally via config)
         self.offload_expert_fc1 = False
-        self.offload_moe_act = False
-        self._offloader = None  # Lazy-init TensorOffloader
-        self._offload_mode = "save_on_cpu"  # "save_on_cpu", "checkpoint", "both"
+        self._offload_mode = "save_on_cpu"  # "save_on_cpu" or "checkpoint"
 
         # define fields for auxiliary-loss-free load balancing (https://arxiv.org/abs/2408.15664)
         # NOTE: tokens_per_expert is accumulated in the model forward pass.

@@ -328,30 +328,23 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         self.ft_manager.maybe_set_all_reduce_hook(self.model_parts)
 
-        # Configure activation offloading on MoE modules if enabled
+        # Configure CPU offloading on MoE expert modules
         if job_config.training.enable_activation_offload:
-            offload_modules = set(
-                job_config.training.activation_offload_modules.split(",")
-            )
+            mode = job_config.training.activation_offload_mode
             for model_part in self.model_parts:
                 for module in model_part.modules():
                     if hasattr(module, "offload_expert_fc1"):
-                        module.offload_expert_fc1 = "expert_fc1" in offload_modules
-                        module.offload_moe_act = "moe_act" in offload_modules
-                        module._offload_mode = job_config.training.activation_offload_mode
-            logger.info(
-                f"Activation offloading enabled: modules={offload_modules}, "
-                f"mode={job_config.training.activation_offload_mode}"
-            )
+                        module.offload_expert_fc1 = True
+                        module._offload_mode = mode
+            logger.info(f"Expert activation offloading enabled (mode={mode})")
 
-        # Configure weight offloading — one call per expert module
         if job_config.training.enable_weight_offload:
             from torchtitan.distributed.cpu_offload.offload_api import offload_weights
             for model_part in self.model_parts:
                 for module in model_part.modules():
                     if hasattr(module, "experts") and hasattr(module, "router"):
-                        offload_weights(module.experts, name="expert_weights")
-            logger.info("Expert weight offloading enabled via offload_api")
+                        offload_weights(module.experts)
+            logger.info("Expert weight offloading enabled")
 
         # initialize device memory monitor and get peak flops for MFU calculation
         device_memory_monitor = self.metrics_processor.device_memory_monitor
