@@ -331,7 +331,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         # Configure CPU offloading on MoE expert modules
         if job_config.training.enable_activation_offload:
             mode = job_config.training.activation_offload_mode
+            from torchtitan.distributed.cpu_offload import ActivationOffloadContext
+            # Mark ALL parameters as not-offloadable (Megatron pattern)
+            # This prevents the autograd hooks from trying to offload weight tensors
             for model_part in self.model_parts:
+                for param in model_part.parameters():
+                    ActivationOffloadContext.mark_not_offloadable(param)
                 for module in model_part.modules():
                     if hasattr(module, "offload_expert_fc1"):
                         module.offload_expert_fc1 = True

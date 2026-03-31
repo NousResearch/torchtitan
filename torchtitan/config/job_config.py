@@ -452,9 +452,9 @@ class Training:
     activation_offload_mode: str = "async"
     """
     Mode for activation offloading:
-      "async"        — checkpoint + async D2H (overlaps with post-MoE compute)
-      "save_on_cpu"  — PyTorch save_on_cpu (sync D2H)
-      "checkpoint"   — recompute expert forward in backward (no CPU)
+      "async"        — Megatron-style async D2H/H2D via autograd hooks (fastest)
+      "save_on_cpu"  — PyTorch save_on_cpu (sync D2H, for comparison)
+      "checkpoint"   — recompute expert forward in backward (no CPU, for comparison)
     """
 
     enable_weight_offload: bool = False

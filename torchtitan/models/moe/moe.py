@@ -21,24 +21,36 @@ from .utils import indices_padding_wrapper, indices_padding_wrapper_lora
 
 
 def _expert_forward_with_offload(routed_input, num_tokens_per_expert, experts_module, moe_module):
-    """Run expert forward with activation offloading via clean API.
+    """Run expert forward with activation offloading — Megatron pattern.
 
-    Uses offload_activation context manager + offload_commit:
-    - Activations saved for backward go to pinned CPU memory
-    - D2H overlaps with whatever compute follows (e.g., post_moe attention)
-    - H2D reload happens automatically during backward
+    Uses our async engine (ActivationOffloadContext + group_commit), exactly
+    like Megatron's off_interface. Autograd saved-tensor hooks intercept
+    save_for_backward, async D2H to pinned CPU on dedicated stream.
 
     mode (set via moe_module._offload_mode):
-      "save_on_cpu"  — save expert activations to pinned CPU (PyTorch built-in)
-      "checkpoint"   — recompute expert in backward (no CPU, trades compute for memory)
+      "async"        — our Megatron-style engine (async D2H/H2D, dedicated streams)
+      "save_on_cpu"  — PyTorch's save_on_cpu (sync, for comparison)
+      "checkpoint"   — recompute expert in backward (no CPU, for comparison)
     """
-    mode = getattr(moe_module, "_offload_mode", "save_on_cpu")
+    mode = getattr(moe_module, "_offload_mode", "async")
 
-    if mode == "save_on_cpu":
-        from torchtitan.distributed.cpu_offload import offload_activation, offload_commit
-        with offload_activation(True, routed_input, "expert_fc1") as x:
+    if mode == "async":
+        # Megatron pattern: context manager installs autograd hooks,
+        # group_commit triggers async D2H and optionally frees input storage
+        from torchtitan.distributed.cpu_offload import (
+            ActivationOffloadContext,
+            group_commit,
+        )
+        with ActivationOffloadContext(True, routed_input, "expert_fc1") as x:
             output = experts_module(x, num_tokens_per_expert)
+        output = group_commit(
+            output, "expert_fc1",
+            forced_released_tensors=[],
+        )
         return output
+    elif mode == "save_on_cpu":
+        with torch.autograd.graph.save_on_cpu(pin_memory=True):
+            return experts_module(routed_input, num_tokens_per_expert)
     elif mode == "checkpoint":
         return torch.utils.checkpoint.checkpoint(
             experts_module, routed_input, num_tokens_per_expert,

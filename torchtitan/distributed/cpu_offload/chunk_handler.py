@@ -118,19 +118,43 @@ class ChunkOffloadHandler:
     # ── Tensor filtering ───────────────────────────────────────────────
 
     def should_offload_tensor(self, tensor: torch.Tensor) -> bool:
-        """Decide whether a tensor should be offloaded."""
+        """Decide whether a tensor should be offloaded.
+
+        Filters match Megatron's pattern + additional FSDP safety:
+        - Skip small tensors (PCIe overhead > memory savings)
+        - Skip nn.Parameter (weights, not activations)
+        - Skip DTensor (FSDP internal)
+        - Skip tensors marked offloading_activation=False
+        - Skip tensors with freed storage (FSDP/EP temporaries)
+        - Skip non-CUDA tensors
+        """
+        # Size filter (same as Megatron: min_offloaded_tensor_size)
         if tensor.numel() < self.min_offloaded_tensor_size:
             return False
+        # Skip parameters — like Megatron's mark_not_offloadable + TE's isinstance check
+        if isinstance(tensor, torch.nn.Parameter):
+            return False
+        # Skip explicit opt-out (Megatron's offloading_activation=False)
         if hasattr(tensor, "offloading_activation") and not tensor.offloading_activation:
             return False
-        # Skip tensors with freed/invalid storage (e.g., FSDP/EP temporaries)
+        # Skip DTensor (FSDP wraps params/buffers as DTensor)
+        try:
+            from torch.distributed.tensor import DTensor
+            if isinstance(tensor, DTensor):
+                return False
+        except ImportError:
+            pass
+        # Skip non-CUDA tensors
+        if tensor.device.type != "cuda":
+            return False
+        # Skip tensors with freed/invalid storage (FSDP/EP temporaries)
         try:
             if tensor.untyped_storage().size() == 0:
                 return False
+            # Verify storage is actually accessible
+            if tensor.data_ptr() == 0:
+                return False
         except Exception:
-            return False
-        # Skip non-CUDA tensors
-        if tensor.device.type != "cuda":
             return False
         return True
 
