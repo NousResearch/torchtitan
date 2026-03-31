@@ -50,6 +50,7 @@ from torchtitan.grpo.sglang_handling import (
     send_start_update,
     setup_group,
     wait_for_sglang,
+    AsyncWeightUpdater,
 )
 from torchtitan.grpo.utils import VocabParallelEntropyFunction
 from torchtitan.protocols import ModelProtocol
@@ -235,6 +236,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         self.metrics_rank = _get_metrics_rank(parallel_dims, job_config)
         self.data_handler = OnlineDataHandler(metrics_rank=self.metrics_rank)
+        self.async_weight_updater = AsyncWeightUpdater(self)
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
@@ -1111,6 +1113,39 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self.step,
         )
         data_loading_time = time.perf_counter() - data_load_start
+        return (
+            batches,
+            max_token_len,
+            dynamic_batch_size,
+            dynamic_grad_acc_size,
+            data_lens,
+            prep_time,
+            get_time,
+            dump_time,
+            data_loading_time,
+        )
+
+    def train_step(self, data_iterator):
+        """Perform a single GRPO training step."""
+        # Wait for any previous background weight sync to complete 
+        # before we start new logic that might depend on it.
+        if self.dp_replicate_rank == 0:
+            logger.debug("Waiting for previous background weight sync...")
+            self.async_weight_updater.sync_queue.join()
+            logger.debug("Previous background weight sync done.")
+            
+        train_step_start = time.perf_counter()
+        (
+            batches,
+            max_token_len,
+            dynamic_batch_size,
+            dynamic_grad_acc_size,
+            data_lens,
+            prep_time,
+            get_time,
+            dump_time,
+            data_loading_time,
+        ) = self.grab_batch()
         # Slice to just this dp index
         start = self.batch_rank * dynamic_grad_acc_size
         end = (self.batch_rank + 1) * dynamic_grad_acc_size
@@ -1436,6 +1471,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
         ] = None,
     ):
+        # Wait for any previous background weight sync to complete 
+        # before we start new logic that might depend on it.
+        if self.dp_replicate_rank == 0:
+            logger.debug("Waiting for previous background weight sync...")
+            self.async_weight_updater.sync_queue.join()
+            logger.debug("Previous background weight sync done.")
+
         logger.debug("prepping training step...")
         # Save the current step learning rate for logging
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
@@ -1708,59 +1750,53 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         for model_part in self.model_parts:
             named_params.update({k: v for (k, v) in model_part.named_parameters()})
 
+        """Trigger an asynchronous weight sync."""
         if self.dp_replicate_rank == 0:
-            # Signal on the signal group -- all vLLM ranks receive this.
-            logger.info(
-                f"[rank {rank}] send_weights: broadcasting start signal "
-                f"(PP stage {self.pp_rank})"
-            )
-            send_start_update(self.sglang_nccl_group, self.device)
-
-            # Iterate global sorted param list.  Only send params that belong
-            # to this PP stage (other stages send theirs on their own groups).
-            sent_count = 0
-            my_total = sum(
-                1
-                for n in self.param_name_to_send_list
-                if self.param_pp_stages[n] == self.pp_rank
-            )
-            for name in self.param_name_to_send_list:
-                if self.param_pp_stages[name] != self.pp_rank:
-                    continue  # belongs to another PP stage's group
-                # Look up by local name (PP re-indexes layers from 0)
-                local_name = self._pp_original_to_local.get(name, name)
-                param = named_params[local_name]
-                sent_count += 1
-                logger.info(
-                    f"[rank {rank}] send_weights: [{sent_count}/{my_total}] "
-                    f"sending {name} (PP stage {self.pp_rank}, "
-                    f"shape={param.shape})"
-                )
-                local_param = param.to_local()
-                send_param(
-                    local_param,
-                    name,
-                    param.shape,
-                    self.weight_dtypes,
-                    max(self.tp_degree, self.ep_degree),
-                    self.dp_shard_degree,
-                    self.pp_data_nccl_group,
-                    self.pp_data_group_size,
-                )
-            logger.info(
-                f"[rank {rank}] send_weights: done sending {sent_count} "
-                f"params, entering barrier"
-            )
+            self.async_weight_updater.trigger_sync(self.step)
         else:
-            logger.info(
-                f"[rank {rank}] send_weights: dp_replicate_rank="
-                f"{self.dp_replicate_rank}, skipping send, entering barrier"
+            # Ranks that don't participate in the sync still need to synchronize
+            # with the group at appropriate points if barriers are used.
+            # However, with AsyncWeightUpdater, only rank 0 of DP group acts.
+            pass
+
+    def _send_weights_internal(self):
+        """Internal weight sync logic executed by the background thread."""
+        rank = torch.distributed.get_rank()
+        named_params = {
+            n: p for m in self.model_parts for n, p in m.named_parameters()
+        }
+        
+        # Signal the vLLM/SGLang weight updater to start receiving
+        send_start_update(self.sglang_nccl_group, self.device)
+        
+        sent_count = 0
+        my_total = sum(
+            1 for name in self.param_name_to_send_list 
+            if self.param_pp_stages[name] == self.pp_rank
+        )
+        for name in self.param_name_to_send_list:
+            if self.param_pp_stages[name] != self.pp_rank:
+                continue
+            
+            local_name = self._pp_original_to_local.get(name, name)
+            param = named_params[local_name]
+            sent_count += 1
+            
+            local_param = param.to_local()
+            send_param(
+                local_param,
+                name,
+                param.shape,
+                self.weight_dtypes,
+                max(self.tp_degree, self.ep_degree),
+                self.dp_shard_degree,
+                self.pp_data_nccl_group,
+                self.pp_data_group_size,
             )
-        # Sync across all ranks (including dp_replicate > 0)
+        
+        # Final sync for this update batch
         torch.cuda.synchronize()
-        logger.info(f"[rank {rank}] send_weights: cuda synced, calling barrier")
-        torch.distributed.barrier()
-        logger.info(f"[rank {rank}] send_weights: barrier passed")
+        torch.distributed.barrier(group=self.sglang_nccl_group)
 
     def batch_generator(
         self, data_iterable: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
