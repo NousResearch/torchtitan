@@ -6,21 +6,44 @@
 #
 # Copyright (c) Meta Platforms, Inc. All Rights Reserved.
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from typing import ClassVar, NamedTuple
 
 import torch
 import torch.nn.functional as F
-from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.nn.attention.flex_attention import (
-    _mask_mod_signature,
-    _score_mod_signature,
-    BlockMask,
-    create_block_mask,
-    flex_attention,
-)
+try:
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+except ImportError:
+    sdpa_kernel = None
+    SDPBackend = None
 
-from torch.nn.attention.varlen import varlen_attn
+try:
+    from torch.nn.attention.flex_attention import (
+        _mask_mod_signature,
+        _score_mod_signature,
+        BlockMask,
+        create_block_mask,
+        flex_attention,
+    )
+    _HAS_FLEX_ATTENTION = True
+except ImportError:
+    _HAS_FLEX_ATTENTION = False
+    # Stubs for PyTorch < 2.4
+    from collections.abc import Callable as _mask_mod_signature  # type: ignore
+    _score_mod_signature = _mask_mod_signature
+    BlockMask = None
+    create_block_mask = None
+    flex_attention = None
+
+try:
+    from torch.nn.attention.varlen import varlen_attn
+    _HAS_VARLEN = True
+except ImportError:
+    _HAS_VARLEN = False
+    varlen_attn = None
+
 from torch.types import Number
 
 
@@ -52,9 +75,12 @@ class VarlenMetadata(NamedTuple):
 
 
 class VarlenAttentionWrapper(torch.nn.Module):
-    _compiled_varlen_attn: ClassVar[Callable] = torch.compile(
-        varlen_attn, mode="max-autotune-no-cudagraphs"
-    )
+    if _HAS_VARLEN:
+        _compiled_varlen_attn: ClassVar[Callable] = torch.compile(
+            varlen_attn, mode="max-autotune-no-cudagraphs"
+        )
+    else:
+        _compiled_varlen_attn = None
 
     def forward(
         self,
@@ -115,16 +141,18 @@ class FlexAttentionWrapper(torch.nn.Module):
         either positionally or as keywords to be compatible with _ContextParallel.
     """
 
-    _compiled_flex_attn: ClassVar[Callable] = torch.compile(
-        flex_attention,
-        # This options also encapsulate max-autotune-no-cudagraphs.
-        options={
-            "wrap_inductor_compiled_regions": True,
-            "max_autotune": True,
-            "coordinate_descent_tuning": True,
-            "triton.cudagraphs": False,
-        },
-    )
+    if _HAS_FLEX_ATTENTION:
+        _compiled_flex_attn: ClassVar[Callable] = torch.compile(
+            flex_attention,
+            # This options also encapsulate max-autotune-no-cudagraphs.
+            options={
+                "max_autotune": True,
+                "coordinate_descent_tuning": True,
+                "triton.cudagraphs": False,
+            },
+        )
+    else:
+        _compiled_flex_attn = None
 
     def forward(
         self,
@@ -189,7 +217,7 @@ class ScaledDotProductAttentionWrapper(torch.nn.Module):
         enable_gqa: bool = False,
         is_casual: bool = True,
     ) -> torch.Tensor:
-        with sdpa_kernel(self.sdpa_backends, set_priority=True):
+        with sdpa_kernel(self.sdpa_backends):
             return F.scaled_dot_product_attention(
                 q, k, v, scale=scale, is_causal=is_casual, enable_gqa=enable_gqa
             )
@@ -341,7 +369,7 @@ def get_sliding_window_mask_mod(window_size: int) -> _mask_mod_signature:
     return sliding_window_mod
 
 
-_compiled_create_block_mask = torch.compile(create_block_mask)
+_compiled_create_block_mask = torch.compile(create_block_mask) if _HAS_FLEX_ATTENTION else None
 
 
 def create_attention_mask(*args, **kwargs):

@@ -10,15 +10,28 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.experimental._attention import (
-    _context_parallel_shard,
-    _ContextParallel,
-    _enable_context_parallel_dispatcher,
-    _HeadTailLoadBalancer,
-    _PTRRLoadBalancer,
-)
-from torch.distributed.tensor.parallel import parallelize_module
-from torch.nn.attention.flex_attention import BlockMask
+try:
+    from torch.distributed.tensor.experimental._attention import (
+        _context_parallel_shard,
+        _ContextParallel,
+        _HeadTailLoadBalancer,
+        _PTRRLoadBalancer,
+    )
+    try:
+        from torch.distributed.tensor.experimental._attention import _enable_context_parallel_dispatcher
+    except ImportError:
+        from torch.distributed.tensor.experimental._attention import _enable_cp_dispatcher as _enable_context_parallel_dispatcher
+    _HAS_CP = True
+except ImportError:
+    _HAS_CP = False
+try:
+    from torch.distributed.tensor.parallel import parallelize_module
+except ImportError:
+    parallelize_module = None
+try:
+    from torch.nn.attention.flex_attention import BlockMask
+except ImportError:
+    BlockMask = None
 
 from torchtitan.protocols.model import AttentionMasksType
 from torchtitan.tools.logging import logger

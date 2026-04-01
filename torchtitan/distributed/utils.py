@@ -15,11 +15,21 @@ from typing import Protocol
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
-import torch.distributed.tensor._random
-import torch.distributed.tensor.parallel
+try:
+    import torch.distributed.tensor._random
+    _HAS_DTENSOR_RANDOM = True
+except ImportError:
+    _HAS_DTENSOR_RANDOM = False
+try:
+    import torch.distributed.tensor.parallel
+except ImportError:
+    pass
 from torch import distributed as dist
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor import DTensor
+try:
+    from torch.distributed.tensor import DTensor
+except (ImportError, AttributeError):
+    from torch.distributed._tensor import DTensor
 
 from torchtitan.config import Comm as CommConfig, Debug as DebugConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed.parallel_dims import ParallelDims
@@ -146,7 +156,7 @@ def set_determinism(
         # seeds for unique SPMD groups
         seed_tensor = torch.get_rng_state()[:8].to(device)
         torch.distributed.broadcast(seed_tensor, src=0)
-        seed = seed_tensor.to("cpu").view(torch.uint64).item()
+        seed = seed_tensor.to("cpu").view(torch.int64).abs().item()
     assert isinstance(seed, int)
 
     # Set distinct seed for each rank in mesh dimensions, with dimension names provided by `distinct_seed_mesh_dims`
@@ -173,7 +183,7 @@ def set_determinism(
             cumulative_size *= distinct_mesh.size()
 
         seed += seed_offset
-        seed %= 2**64
+        seed %= 2**63  # Use 2**63 to prevent overflow when packing into torch.int64
 
         logger.debug(
             f"Distinct dims {distinct_seed_mesh_dims}, Global rank {c10d.get_rank()} using seed: {seed}"
@@ -194,7 +204,12 @@ def set_determinism(
     if parallel_dims.world_size > parallel_dims.pp:
         # We just need to pass the world_mesh as the device_id is the only information
         # this API uses.
-        torch.distributed.tensor._random.manual_seed(seed, parallel_dims.world_mesh)
+        if _HAS_DTENSOR_RANDOM:
+            torch.distributed.tensor._random.manual_seed(seed, parallel_dims.world_mesh)
+        else:
+            # Fallback for PyTorch < 2.4 where DTensor random seeding is unavailable
+            logger.warning("DTensor random seeding unavailable, using torch.manual_seed")
+            torch.manual_seed(seed)
 
 
 def create_context_parallel_ctx(
@@ -233,7 +248,8 @@ def get_train_context(enable_loss_parallel: bool) -> TrainContext:
     def context():
         with contextlib.ExitStack() as stack:
             if enable_loss_parallel:
-                stack.enter_context(torch.distributed.tensor.parallel.loss_parallel())
+                if hasattr(torch.distributed.tensor, 'parallel') and hasattr(torch.distributed.tensor.parallel, 'loss_parallel'):
+                    stack.enter_context(torch.distributed.tensor.parallel.loss_parallel())
 
             yield
 
@@ -350,7 +366,6 @@ def init_distributed(
     torch.distributed.init_process_group(
         backend=_get_distributed_backend(enable_cpu_backend),
         timeout=timedelta(seconds=comm_config.init_timeout_seconds),
-        _ranks=ranks if ranks is not None else [],
     )
 
     return torch.distributed.get_world_size()
@@ -441,7 +456,13 @@ def clip_grad_norm_(
         # prevent generators from being exhausted
         parameters = list(parameters)
     grads = [p.grad for p in parameters if p.grad is not None]
-    total_norm = torch.nn.utils.get_total_norm(
+    total_norm_fn = getattr(torch.nn.utils, 'get_total_norm', None)
+    if total_norm_fn is None:
+        # Fallback for PyTorch < 2.4
+        total_norm_fn = lambda grads, nt, einf, fe: torch.nn.utils.clip_grad_norm_(
+            [torch.zeros(1)] if not grads else [p for p in [torch.nn.Parameter(g) for g in grads]], float('inf'), nt
+        ) if grads else torch.tensor(0.0)
+    total_norm = total_norm_fn(
         grads, norm_type, error_if_nonfinite, foreach
     )
 
@@ -465,7 +486,10 @@ def clip_grad_norm_(
             total_norm **= 1.0 / norm_type
 
     if max_norm > 0:
-        torch.nn.utils.clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
+        if hasattr(torch.nn.utils, 'clip_grads_with_norm_'):
+            torch.nn.utils.clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
+        else:
+            torch.nn.utils.clip_grad_norm_(parameters, max_norm, norm_type=norm_type)
     return total_norm
 
 
@@ -501,14 +525,17 @@ def _clip_grad_norm_with_ep(
     # - In autoparallel, all params may live on a single sparse mesh with "ep" dimension,
     #   so non_ep_grads would be empty
     # - In PP + EP setups, certain PP ranks may only own EP or non-EP layers
-    ep_grads_total_norm = torch.nn.utils.get_total_norm(
+    _get_total_norm = getattr(torch.nn.utils, 'get_total_norm', None)
+    if _get_total_norm is None:
+        _get_total_norm = lambda g, nt, einf, fe: torch.tensor(0.0)
+    ep_grads_total_norm = _get_total_norm(
         ep_grads, norm_type, error_if_nonfinite, foreach
     )
     # get_total_norm returns tensor(0.) for empty list, which is a non-DTensor
     if isinstance(ep_grads_total_norm, DTensor):
         ep_grads_total_norm = ep_grads_total_norm.full_tensor()
 
-    non_ep_grads_total_norm = torch.nn.utils.get_total_norm(
+    non_ep_grads_total_norm = _get_total_norm(
         non_ep_grads, norm_type, error_if_nonfinite, foreach
     )
     # get_total_norm returns tensor(0.) for empty list, which is a non-DTensor
@@ -532,7 +559,12 @@ def _clip_grad_norm_with_ep(
             total_norm **= 1.0 / norm_type
 
     if max_norm > 0:
-        torch.nn.utils.clip_grads_with_norm_(ep_params, max_norm, total_norm, foreach)
-        torch.nn.utils.clip_grads_with_norm_(non_ep_params, max_norm, total_norm, foreach)
+        if hasattr(torch.nn.utils, 'clip_grads_with_norm_'):
+            torch.nn.utils.clip_grads_with_norm_(ep_params, max_norm, total_norm, foreach)
+            torch.nn.utils.clip_grads_with_norm_(non_ep_params, max_norm, total_norm, foreach)
+        else:
+            all_params = ep_params + non_ep_params
+            if all_params:
+                torch.nn.utils.clip_grad_norm_(all_params, max_norm, norm_type=norm_type)
 
     return total_norm

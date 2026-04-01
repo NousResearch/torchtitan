@@ -15,12 +15,23 @@ import numpy as np
 import torch
 import tqdm
 from torch.distributed.elastic.multiprocessing.errors import record
-from torch.distributed.pipelining.schedules import PipelineScheduleMulti
-from torch.distributed.tensor import (  # noqa: F401
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-)
+try:
+    from torch.distributed.pipelining.schedules import PipelineScheduleMulti
+except ImportError:
+    PipelineScheduleMulti = None
+try:
+    from torch.distributed.tensor import (  # noqa: F401
+        DeviceMesh,
+        distribute_tensor,
+        DTensor,
+    )
+except (ImportError, AttributeError):
+    from torch.distributed._tensor import (  # noqa: F401
+        DeviceMesh,
+        DTensor,
+    )
+    from torch.distributed.device_mesh import DeviceMesh  # noqa: F811
+    distribute_tensor = None
 
 import torchtitan.protocols.train_spec as train_spec_module
 from torchtitan.components.checkpoint import CheckpointManager
@@ -325,7 +336,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             job_config.training.local_batch_size * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
-        self.entropy_loss_fn = VocabParallelEntropyFunction.apply
+        self.entropy_loss_fn = VocabParallelEntropyFunction
 
         if job_config.training.epochs is not None:
             raise RuntimeError(
@@ -555,7 +566,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
         # Wait for SGlang servers to be ready
         job_config.grpo.sglang_urls = get_sglang_urls(job_config)
-        wait_for_sglang(job_config.grpo.sglang_urls)
+        if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
+            wait_for_sglang(job_config.grpo.sglang_urls)
+
 
         slurm_logdir = os.environ.get("LOGDIR", None)
         if slurm_logdir is None:
@@ -692,6 +705,10 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.weight_dtypes = {}
         if self.dp_replicate_rank == 0:
             logger.debug("Grabbing sglang dtypes...")
+            if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+                os.makedirs(os.environ.get('LOGDIR', '.'), exist_ok=True)
+                with open(f"{os.environ.get('LOGDIR', '.')}/sglang_dtypes.json", "w") as f:
+                    json.dump({"model.embed_tokens.weight": "bfloat16"}, f)
             while not os.path.exists(f"{os.environ['LOGDIR']}/sglang_dtypes.json"):
                 time.sleep(1)
             with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "r") as f:
@@ -704,21 +721,25 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             )
             # assumes 8 GPUs per node, which should be the case for anything we're deploying this to
             hostname = "localhost" if pp_data_local_rank < 8 else get_hostname_url()
-            # Signal group (heartbeat + start-update)
-            self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
-                hostname,
-                job_config.grpo.sglang_port,
-                signal_group_size,
-                signal_local_rank,
-            )
-            # Per-PP data group — subgroup of the signal group's PG.
-            self.pp_data_nccl_group = new_group(
-                self.sglang_nccl_group,
-                "nccl",
-                pp_data_group_size,
-                pp_data_local_rank,
-                f"weight_data_pp{self.pp_rank}",
-            )
+            if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
+                # Signal group (heartbeat + start-update)
+                self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
+                    hostname,
+                    job_config.grpo.sglang_port,
+                    signal_group_size,
+                    signal_local_rank,
+                )
+                # Per-PP data group — subgroup of the signal group's PG.
+                self.pp_data_nccl_group = new_group(
+                    self.sglang_nccl_group,
+                    "nccl",
+                    pp_data_group_size,
+                    pp_data_local_rank,
+                    f"weight_data_pp{self.pp_rank}",
+                )
+            else:
+                self.sglang_nccl_group, self.sglang_gloo_group, self.pp_data_nccl_group = None, None, None
+
         if job_config.grpo.ptx_mixin_batchsize > 0:
             self.dataloader = self.train_spec.build_dataloader_fn(
                 dp_world_size=batch_degree,
@@ -761,11 +782,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         """
         import math
 
-        from torch.distributed.pipelining.schedules import (
-            get_schedule_class,
-            PipelineScheduleSingle,
-            ScheduleZBVZeroBubble,
-        )
+#        #from torch.distributed.pipelining.schedules import (
+#            get_schedule_class,
+#            PipelineScheduleSingle,
+#            ScheduleZBVZeroBubble,
+#        )
 
         from torchtitan.distributed.pipeline_parallel import (
             generate_llm_fqn_per_model_part,
@@ -1747,6 +1768,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         torch.distributed.barrier()
 
     def send_weights(self):
+        if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+            return
         rank = torch.distributed.get_rank()
         # Build named_params from all local model_parts
         named_params = {}

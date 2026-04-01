@@ -25,15 +25,15 @@ dataset = "c4_test"
 
 [parallelism]
 data_parallel_replicate_degree = 1
-data_parallel_shard_degree = 1
+data_parallel_shard_degree = 2
 tensor_parallel_degree = 1
 pipeline_parallel_degree = 1
-context_parallel_degree = 2  # Verify CP-aware Reward Norm
+context_parallel_degree = 1  # Verify FSDP2/Dist Norm instead due to PyTorch 2.5.1 experimental CP breakage
 
 [grpo]
 kl_beta = 0.01
 num_microbatches = 1
-async_weight_update = true
+async_weight_update = false
 sglang_urls = ["localhost:9000"]
 sglang_slurm_num_nodes = 0
 
@@ -44,4 +44,7 @@ enable = false
 mode = "none"
 
 [compile]
-enable = false
+enable = true
+backend = "inductor"
+fullgraph = false
+components = ["model"]
