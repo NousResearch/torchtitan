@@ -1,0 +1,65 @@
+# FA4 + Context Parallel — striped distribution (100M model)
+
+[job]
+dump_folder = "/home/nous/torchtitan-dumps"
+description = "FA4 CP striped 100M"
+print_config = false
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+
+[metrics]
+log_freq = 1
+disable_color_printing = true
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = true
+
+[model]
+name = "llama3"
+flavor = "100m_fa4"
+hf_assets_path = "/home/nous/lighthouse-torchtitan/torchtitan-bytes/torchtitan/assets/hf/bytes-tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 3e-4
+eps = 1e-8
+beta1 = 0.9
+beta2 = 0.95
+weight_decay = 0.1
+
+[lr_scheduler]
+warmup_steps = 200
+decay_ratio = 0.2
+decay_type = "linear"
+min_lr_factor = 0.01
+
+[training]
+local_batch_size = 1
+seq_len = 32768
+max_norm = 1.0
+steps = 100
+dataset = "c4_local"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 2
+context_parallel_distribution = "striped"
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "none"
+
+[compile]
+enable = false
+components = ["model", "loss"]
+
+[debug]
+seed = 42

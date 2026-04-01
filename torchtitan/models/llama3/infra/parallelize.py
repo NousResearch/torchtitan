@@ -45,10 +45,20 @@ _op_sac_save_list = {
     # the result of max, since the absolute maximum is
     # used to compute the scaling factor for quantization.
     torch.ops.aten.max.default,
-    torch._higher_order_ops.flex_attention,
-    torch.ops.torch_attn._varlen_attn.default,
-    torch._higher_order_ops.inductor_compiled_code,
 }
+# These ops may not exist on older PyTorch versions
+try:
+    _op_sac_save_list.add(torch._higher_order_ops.flex_attention)
+except AttributeError:
+    pass
+try:
+    _op_sac_save_list.add(torch.ops.torch_attn._varlen_attn.default)
+except AttributeError:
+    pass
+try:
+    _op_sac_save_list.add(torch._higher_order_ops.inductor_compiled_code)
+except AttributeError:
+    pass
 
 
 def parallelize_llama(
@@ -97,12 +107,30 @@ def parallelize_llama(
 
     attn_type = getattr(model.model_args, "attn_type", "sdpa")
     if parallel_dims.cp_enabled:
-        apply_cp_to_attention_module(
-            # pyrefly: ignore [missing-attribute, not-callable]
-            [block.attention.inner_attention for block in model.layers.values()],
-            parallel_dims.get_mesh("cp"),
-            attn_type,
+        cp_distribution = getattr(
+            job_config.parallelism, "context_parallel_distribution", "round_robin"
         )
+        if attn_type == "fa4":
+            # FA4 uses ring attention — replace inner_attention on each block
+            from torchtitan.distributed.fa4_context_parallel import (
+                FA4ContextParallelWrapper,
+            )
+
+            cp_mesh = parallel_dims.get_mesh("cp")
+            wrapper = FA4ContextParallelWrapper(cp_mesh, cp_distribution)
+            for block in model.layers.values():
+                block.attention.inner_attention = wrapper
+            logger.info(
+                f"Applied FA4 Context Parallel ({cp_distribution}) to the model"
+            )
+        else:
+            apply_cp_to_attention_module(
+                # pyrefly: ignore [missing-attribute, not-callable]
+                [block.attention.inner_attention for block in model.layers.values()],
+                parallel_dims.get_mesh("cp"),
+                attn_type,
+                cp_distribution,
+            )
 
     model_compile_enabled = (
         job_config.compile.enable and "model" in job_config.compile.components

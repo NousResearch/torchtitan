@@ -566,14 +566,27 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         extra_inputs.pop("sequence_lengths", None)
 
         if self.parallel_dims.cp_enabled:
-            inputs, labels, extra_kwargs = prepare_context_parallel_input(
-                inputs,
-                labels,
-                extra_kwargs,
-                self.parallel_dims.get_mesh("cp"),
-                self.device,
-                self.job_config.parallelism.context_parallel_load_balancer,
-            )
+            if attn_type == "fa4":
+                from torchtitan.distributed.fa4_context_parallel import (
+                    prepare_fa4_cp_input,
+                )
+                inputs, labels, extra_kwargs = prepare_fa4_cp_input(
+                    inputs,
+                    labels,
+                    extra_kwargs,
+                    self.parallel_dims.get_mesh("cp"),
+                    self.device,
+                    self.job_config.parallelism.context_parallel_distribution,
+                )
+            else:
+                inputs, labels, extra_kwargs = prepare_context_parallel_input(
+                    inputs,
+                    labels,
+                    extra_kwargs,
+                    self.parallel_dims.get_mesh("cp"),
+                    self.device,
+                    self.job_config.parallelism.context_parallel_load_balancer,
+                )
 
         return inputs, labels, extra_inputs, extra_kwargs
 

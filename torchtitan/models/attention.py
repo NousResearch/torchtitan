@@ -20,7 +20,10 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 
-from torch.nn.attention.varlen import varlen_attn
+try:
+    from torch.nn.attention.varlen import varlen_attn
+except ModuleNotFoundError:
+    varlen_attn = None  # type: ignore[assignment]
 from torch.types import Number
 
 
@@ -53,14 +56,6 @@ class VarlenMetadata(NamedTuple):
 
 
 class FlashAttention4Wrapper(torch.nn.Module):
-    """Wrapper around FlashAttention-4 (fa4) to make it compatible with torchtitan.
-
-    FA4 expects tensors in (batch, seqlen, nheads, headdim) layout, while
-    torchtitan models produce (batch, nheads, seqlen, headdim) after the
-    standard transpose. This wrapper handles the layout conversion.
-
-    Install FA4 with: pip install fa4
-    """
 
     def forward(
         self,
@@ -75,7 +70,6 @@ class FlashAttention4Wrapper(torch.nn.Module):
     ) -> torch.Tensor:
         from flash_attn.cute import flash_attn_func
 
-        # Convert from (bs, n_heads, seqlen, head_dim) to (bs, seqlen, n_heads, head_dim)
         q = q.transpose(1, 2)
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
@@ -91,7 +85,6 @@ class FlashAttention4Wrapper(torch.nn.Module):
         if isinstance(out, tuple):
             out = out[0]
 
-        # Convert back to (bs, n_heads, seqlen, head_dim)
         return out.transpose(1, 2)
 
 
@@ -159,16 +152,20 @@ class FlexAttentionWrapper(torch.nn.Module):
         either positionally or as keywords to be compatible with _ContextParallel.
     """
 
-    _compiled_flex_attn: ClassVar[Callable] = torch.compile(
-        flex_attention,
-        # This options also encapsulate max-autotune-no-cudagraphs.
-        options={
-            "wrap_inductor_compiled_regions": True,
-            "max_autotune": True,
-            "coordinate_descent_tuning": True,
-            "triton.cudagraphs": False,
-        },
-    )
+    try:
+        _compiled_flex_attn: ClassVar[Callable] = torch.compile(
+            flex_attention,
+            options={
+                "wrap_inductor_compiled_regions": True,
+                "max_autotune": True,
+                "coordinate_descent_tuning": True,
+                "triton.cudagraphs": False,
+            },
+        )
+    except RuntimeError:
+        _compiled_flex_attn: ClassVar[Callable] = torch.compile(  # type: ignore[no-redef]
+            flex_attention, mode="max-autotune-no-cudagraphs"
+        )
 
     def forward(
         self,
