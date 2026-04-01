@@ -53,7 +53,6 @@ from torchtitan.grpo.grpo_step import (
     scale_rewards,
 )
 from torchtitan.grpo.sglang_handling import (
-    AsyncWeightUpdater,
     get_hostname_url,
     get_sglang_urls,
     new_group,
@@ -247,10 +246,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
         self.metrics_rank = _get_metrics_rank(parallel_dims, job_config)
         self.data_handler = OnlineDataHandler(metrics_rank=self.metrics_rank)
-        if self.job_config.grpo.async_weight_update:
-            self.async_weight_updater = AsyncWeightUpdater(self)
-        else:
-            self.async_weight_updater = None
 
         # build model (using meta init)
         model_args = self.train_spec.model_args[job_config.model.flavor]
@@ -1151,13 +1146,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
 
     def train_step(self, data_iterator):
         """Perform a single GRPO training step."""
-        # Wait for any previous background weight sync to complete 
-        # before we start new logic that might depend on it.
-        if self.dp_replicate_rank == 0:
-            logger.debug("Waiting for previous background weight sync...")
-            self.async_weight_updater.sync_queue.join()
-            logger.debug("Previous background weight sync done.")
-            
         train_step_start = time.perf_counter()
         (
             batches,
@@ -1495,13 +1483,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
         ] = None,
     ):
-        # Wait for any previous background weight sync to complete 
-        # before we start new logic that might depend on it.
-        if self.dp_replicate_rank == 0:
-            logger.debug("Waiting for previous background weight sync...")
-            self.async_weight_updater.sync_queue.join()
-            logger.debug("Previous background weight sync done.")
-
         logger.debug("prepping training step...")
         # Save the current step learning rate for logging
         lr = self.lr_schedulers.schedulers[0].get_last_lr()[0]
@@ -1771,23 +1752,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
             return
         rank = torch.distributed.get_rank()
-        # Build named_params from all local model_parts
-        named_params = {}
-        for model_part in self.model_parts:
-            named_params.update({k: v for (k, v) in model_part.named_parameters()})
-
-        """Trigger an asynchronous weight sync."""
-        if self.dp_replicate_rank == 0:
-            self.async_weight_updater.trigger_sync(self.step)
-        else:
-            # Ranks that don't participate in the sync still need to synchronize
-            # with the group at appropriate points if barriers are used.
-            # However, with AsyncWeightUpdater, only rank 0 of DP group acts.
-            pass
-
-    def _send_weights_internal(self):
-        """Internal weight sync logic executed by the background thread."""
-        rank = torch.distributed.get_rank()
         named_params = {
             n: p for m in self.model_parts for n, p in m.named_parameters()
         }
@@ -1926,10 +1890,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 self.ema_ref_weights()
                 ema_weight_end = time.perf_counter()
                 send_weight_start = time.perf_counter()
-                if self.async_weight_updater:
-                    self.async_weight_updater.trigger_sync(self.step)
-                else:
-                    self.send_weights()
+                self.send_weights()
                 send_weight_end = time.perf_counter()
                 if self.use_ref_model and (
                     0.0 < self.job_config.grpo.ref_model_ema < 1.0

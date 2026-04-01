@@ -33,7 +33,6 @@ context_parallel_degree = 1  # Verify FSDP2/Dist Norm instead due to PyTorch 2.5
 [grpo]
 kl_beta = 0.01
 num_microbatches = 1
-async_weight_update = false
 sglang_urls = ["localhost:9000"]
 sglang_slurm_num_nodes = 0
 
