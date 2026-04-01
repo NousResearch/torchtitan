@@ -1772,7 +1772,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             param = named_params[local_name]
             sent_count += 1
             
-            local_param = param.to_local()
+            # Broadcast parameter across the Devicemesh to construct the unsharded local tensor
+            local_param = param.full_tensor().detach() if hasattr(param, "full_tensor") else param.detach()
+            if hasattr(local_param, "to_local"):
+                local_param = local_param.to_local()
+                
             send_param(
                 local_param,
                 name,
