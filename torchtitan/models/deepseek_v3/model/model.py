@@ -378,6 +378,65 @@ class Attention(nn.Module):
         output = output.view(bsz, seqlen, -1)  # (bsz, seqlen, n_heads * v_head_dim)
         return self.wo(output)  # (bsz, seqlen, dim)
 
+    # --- Split attention for ScMoE SBO (LongCat-style) ---
+
+    def attn0_qkv(
+        self,
+        x: torch.Tensor,
+        freqs_cis: torch.Tensor,
+        positions: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Attn0: QKV projections + RoPE (linear ops, no core attention)."""
+        bsz, seqlen, _ = x.size()
+
+        if self.q_lora_rank == 0:
+            q = self.wq(x)
+        else:
+            q = self.wq_a(x)
+            q = self.wq_b(self.q_norm(q))
+        q = q.view(bsz, seqlen, -1, self.qk_head_dim)
+        q_nope, q_pe = torch.split(
+            q, [self.qk_nope_head_dim, self.qk_rope_head_dim], dim=-1
+        )
+        q_pe = apply_rotary_emb(q_pe, freqs_cis, positions)
+        q = torch.cat([q_nope, q_pe], dim=-1)
+
+        kv = self.wkv_a(x)
+        kv, k_pe = torch.split(kv, [self.kv_lora_rank, self.qk_rope_head_dim], dim=-1)
+        k_pe = apply_rotary_emb(k_pe.unsqueeze(2), freqs_cis, positions)
+        kv = self.wkv_b(self.kv_norm(kv))
+        kv = kv.view(bsz, seqlen, -1, self.qk_nope_head_dim + self.v_head_dim)
+        k_nope, v = torch.split(kv, [self.qk_nope_head_dim, self.v_head_dim], dim=-1)
+        k = torch.cat([k_nope, k_pe.expand(-1, -1, self.n_heads, -1)], dim=-1)
+
+        q = q.transpose(1, 2)
+        k = k.transpose(1, 2)
+        v = v.transpose(1, 2)
+        return q, k, v
+
+    def attn1_core(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attention_masks: AttentionMasksType | None,
+    ) -> torch.Tensor:
+        """Attn1: Core attention + output projection."""
+        match self.attn_type:
+            case "flex":
+                assert isinstance(attention_masks, BlockMask)
+                output = self.inner_attention(
+                    q, k, v, block_mask=attention_masks, scale=self.softmax_scale
+                )
+            case _:
+                assert attention_masks is None
+                output = self.inner_attention(q, k, v, scale=self.softmax_scale)
+
+        bsz, _, seqlen, _ = q.shape
+        output = output.transpose(1, 2).contiguous()
+        output = output.view(bsz, seqlen, -1)
+        return self.wo(output)
+
     def init_weights(self, init_std: float):
         linear_list = [
             self.wkv_a,
@@ -419,7 +478,15 @@ class TransformerBlock(nn.Module):
             self.attention_norm.weight.requires_grad = False
             self.ffn_norm.weight.requires_grad = False
 
-        self.moe_enabled = layer_id >= model_args.n_dense_layers
+        interval = getattr(model_args, "moe_layer_interval", 1)
+        if interval <= 1:
+            self.moe_enabled = layer_id >= model_args.n_dense_layers
+        else:
+            # Alternating: MoE every N-th layer after dense layers
+            self.moe_enabled = (
+                layer_id >= model_args.n_dense_layers
+                and (layer_id - model_args.n_dense_layers) % interval == (interval - 1)
+            )
 
         # Check if ScMoE is enabled
         self.scmoe_enabled = self.moe_enabled and model_args.moe_args.use_scmoe
@@ -484,23 +551,29 @@ class TransformerBlock(nn.Module):
             If ScMoE is enabled: tuple of (output, next_shortcut)
             Otherwise: output tensor with the same shape as the input.
         """
-        # Attention sublayer
+        # Paper-exact overlap (dispatch || attention)
+        # Set SCMOE_NO_OVERLAP=1 to disable for A/B testing
+        if (
+            self.scmoe_enabled
+            and shortcut_input is not None
+            and hasattr(self.moe, "start_dispatch")
+            and not os.environ.get("SCMOE_NO_OVERLAP", "0") == "1"
+        ):
+            return self._scmoe_overlap_forward(
+                x, shortcut_input, freqs_cis, attention_masks, positions
+            )
+
+        # Standard path: attention first
         x_attn = x + self.attention(
             self.attention_norm(x), freqs_cis, attention_masks, positions
         )
 
         if self.moe_enabled:
             if self.scmoe_enabled:
-                # ScMoE: routed experts process shortcut, shared experts process current
-                # If no shortcut provided (first ScMoE layer), use attention output
-                if shortcut_input is None:
-                    shortcut_input = x_attn
-
-                # ScMoE takes both current and shortcut inputs
+                # First ScMoE layer (no shortcut) — sequential fallback
+                shortcut_input = x_attn
                 moe_output = self.moe(x_current=x_attn, x_shortcut=shortcut_input)
                 output = x_attn + moe_output
-
-                # Return output and next shortcut (post-attention for pos1)
                 return output, x_attn
             else:
                 # Standard MoE (with optional simulated comm delay)
@@ -515,7 +588,58 @@ class TransformerBlock(nn.Module):
         else:
             # Dense FFN layer
             output = x_attn + self.feed_forward(self.ffn_norm(x_attn))
+            # If ScMoE is used in the model, return x_attn as Pos-2 shortcut
+            # (intermediate between Attention and MLP in this dense layer)
+            if shortcut_input is not None or (
+                hasattr(self, "_return_shortcut") and self._return_shortcut
+            ):
+                return output, x_attn
             return output
+
+    # Lazy-initialized comm stream for ScMoE overlap
+    _comm_stream: torch.cuda.Stream | None = None
+
+    def _get_comm_stream(self, device: torch.device) -> torch.cuda.Stream:
+        if TransformerBlock._comm_stream is None:
+            TransformerBlock._comm_stream = torch.cuda.Stream(device=device)
+        return TransformerBlock._comm_stream
+
+    def _scmoe_overlap_forward(
+        self,
+        x: torch.Tensor,
+        shortcut_input: torch.Tensor,
+        freqs_cis: torch.Tensor,
+        attention_masks: AttentionMasksType | None,
+        positions: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """ScMoE overlap: dispatch on comm_stream || attention on default stream.
+
+        Timeline:
+            Default: [Router] [Attention.................] → wait → [GEMM] → [SE] → wait
+            Comm:    [layout+dispatch+permute.............]         [combine......]
+        """
+        scmoe = self.moe  # ScMoEDeepEP
+        comm_stream = self._get_comm_stream(x.device)
+
+        # Step 1: Route + dispatch on comm_stream (GPU queues on comm_stream)
+        scmoe.start_dispatch(shortcut_input, comm_stream)
+
+        # Step 2: Attention on default stream (runs in parallel with dispatch on GPU)
+        x_attn = x + self.attention(
+            self.attention_norm(x), freqs_cis, attention_masks, positions
+        )
+
+        # Step 3: Wait for dispatch, Expert GEMM on default stream
+        routed_output = scmoe.wait_dispatch_and_gemm()
+
+        # Step 4: Combine a2a (async) || SharedExperts
+        scmoe.combine_async(routed_output)
+        shared_output = scmoe.shared_forward(x_attn)
+
+        # Merge
+        output = x_attn + scmoe.sync_and_merge(shared_output, x_attn.shape)
+
+        return output, x_attn
 
     def init_weights(self, buffer_device: torch.device):
         for norm in (self.attention_norm, self.ffn_norm):
@@ -666,6 +790,7 @@ class DeepSeekV3Model(ModelProtocol):
         if use_scmoe:
             # Track shortcut buffer for ScMoE layers
             shortcut_buffer: torch.Tensor | None = None
+            interval = getattr(self.model_args, "moe_layer_interval", 1)
 
             for layer in self.layers.values():
                 layer_block = cast(TransformerBlock, layer)
@@ -676,10 +801,20 @@ class DeepSeekV3Model(ModelProtocol):
                         h, self.freqs_cis, attention_masks, positions, shortcut_buffer
                     )
                     h, shortcut_buffer = result
+                elif interval >= 2:
+                    # Dense layer in alternating mode: return intermediate for Pos-2
+                    layer_block._return_shortcut = True
+                    result = layer_block(
+                        h, self.freqs_cis, attention_masks, positions
+                    )
+                    if isinstance(result, tuple):
+                        h, shortcut_buffer = result
+                    else:
+                        h = result
+                        shortcut_buffer = h
                 else:
                     # Dense or standard MoE layer
                     h = layer_block(h, self.freqs_cis, attention_masks, positions)
-                    # Store output as shortcut for next ScMoE layer
                     shortcut_buffer = h
         else:
             # Standard forward pass (no ScMoE)

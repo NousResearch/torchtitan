@@ -1,0 +1,67 @@
+# ScMoE with profiling — for comparison with baseline
+[job]
+dump_folder = "./outputs/profile_scmoe"
+description = "ScMoE profiling (paper-exact overlap)"
+print_config = false
+
+[profiling]
+enable_profiling = true
+save_traces_folder = "./outputs/profile_scmoe/traces"
+profile_freq = 5
+
+[metrics]
+log_freq = 1
+disable_color_printing = true
+enable_wandb = false
+
+[model]
+name = "deepseek_v3"
+flavor = "kimi_k2_scmoe"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 2.2e-4
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 2
+decay_ratio = 0.8
+
+[training]
+local_batch_size = 1
+seq_len = 8192
+steps = 5
+dataset = "c4_test"
+enable_cpu_offload = false
+dtype = "bfloat16"
+max_norm = 10.0
+
+[parallelism]
+data_parallel_shard_degree = -1
+data_parallel_replicate_degree = 1
+expert_parallel_degree = 64
+context_parallel_degree = 1
+expert_parallel_comm_backend = "deepep"
+
+[activation_checkpoint]
+mode = "full"
+
+[compile]
+enable = true
+components = ["loss"]
+
+[deepep]
+sync_comm_stream = false
+fused_weighted_scatter_add = false
+fused_silu_gate_prob = false
+
+[debug]
+moe_force_load_balance = true
+
+[comm]
+init_timeout_seconds = 1800
+train_timeout_seconds = 1800
+
+[checkpoint]
+enable = false

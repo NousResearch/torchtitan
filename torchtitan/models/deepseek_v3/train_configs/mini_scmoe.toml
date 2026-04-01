@@ -1,0 +1,95 @@
+# Mini DeepSeek V3 model with ScMoE (Shortcut Connected MoE) enabled
+# Designed for 8 GPU single-node testing of communication hiding
+#
+# Model specs:
+# - 8 layers (2 dense + 6 MoE with ScMoE)
+# - 64 experts, top-6 routing
+# - dim=1024, moe_inter_dim=2048
+# - ~1.5B parameters total
+#
+# ScMoE configuration:
+# - Uses shortcut connection from layer L-1 for MoE input
+# - Dense FFN processes current layer input in parallel
+# - Separate CUDA streams for communication hiding
+
+[job]
+dump_folder = "./outputs/mini_scmoe"
+description = "Mini DeepSeek V3 with ScMoE for communication hiding testing"
+print_config = false
+
+[profiling]
+enable_profiling = false
+save_traces_folder = "profile_trace"
+profile_freq = 10
+enable_memory_snapshot = false
+save_memory_snapshot_folder = "memory_snapshot"
+
+[metrics]
+log_freq = 10
+disable_color_printing = false
+enable_tensorboard = false
+save_tb_folder = "tb"
+enable_wandb = false
+
+[model]
+name = "deepseek_v3"
+flavor = "mini_scmoe"
+
+[optimizer]
+name = "AdamW"
+lr = 3e-4
+eps = 1e-8
+
+[lr_scheduler]
+warmup_steps = 100
+decay_ratio = 0.8
+decay_type = "cosine"
+min_lr_factor = 0.1
+
+[training]
+local_batch_size = 4
+seq_len = 2048
+max_norm = 1.0
+steps = 500
+dataset = "c4"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = -1
+fsdp_reshard_after_forward = "default"
+tensor_parallel_degree = 1
+enable_async_tensor_parallel = false
+pipeline_parallel_degree = 1
+pipeline_parallel_schedule = "Interleaved1F1B"
+expert_parallel_degree = 8  # Full EP across 8 GPUs
+expert_tensor_parallel_degree = 1
+expert_parallel_comm_backend = "deepep"  # Use DeepEP for optimized comm
+
+[checkpoint]
+enable = false
+folder = "checkpoint"
+interval = 100
+last_save_model_only = true
+export_dtype = "float32"
+async_mode = "disabled"
+
+[activation_checkpoint]
+mode = "selective"
+selective_ac_option = "op"
+
+[compile]
+enable = true
+components = ["loss"]
+
+# DeepEP configuration for optimized all-to-all
+[deepep]
+sync_comm_stream = false
+
+# Float8 quantization (optional, for memory efficiency)
+[quantize.linear.float8]
+enable_fsdp_float8_all_gather = false
+precompute_float8_dynamic_scale_for_fsdp = false
+filter_fqns = ["output", "router.gate"]
+
+[quantize.grouped_mm.float8]
+fqns = ["experts"]

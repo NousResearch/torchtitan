@@ -58,6 +58,7 @@ class DeepSeekV3ModelArgs(BaseModelArgs):
     moe_inter_dim: int = 1408
     n_layers: int = 27
     n_dense_layers: int = 1
+    moe_layer_interval: int = 1  # MoE every N layers (1=every, 2=every other)
     n_heads: int = 16
     norm_eps: float = 1e-5  # eps used for RMSNorm
 

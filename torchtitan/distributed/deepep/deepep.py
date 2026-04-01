@@ -338,15 +338,27 @@ def _permute_tokens(
         permuted_scores: Routing scores in same order [num_all_tokens]
         permuted_indices: Original token indices for unpermutation [num_all_tokens]
     """
-    mask = dispatched_indices != -1
-    valid_expert_ids = dispatched_indices[mask]  # 1d tensor
-    valid_scores = dispatched_scores[mask]
+    # Fused path: avoid nonzero by using where + reshape instead of boolean indexing
+    num_recv, topk = dispatched_indices.shape
+    valid_mask = dispatched_indices != -1  # [num_recv, topk]
 
-    # Repeat each token by its valid count and select tokens in expert order
+    # Flatten and filter using where (avoids nonzero)
+    flat_indices = dispatched_indices.view(-1)  # [num_recv * topk]
+    flat_scores = dispatched_scores.view(-1)
+    flat_mask = valid_mask.view(-1)
+
+    # Use where to get valid entries without nonzero
+    # Create token indices for each (token, expert) pair
+    token_ids = torch.arange(num_recv, device=hidden_states.device).unsqueeze(1).expand(-1, topk).reshape(-1)
+
+    # Filter to valid entries
+    valid_expert_ids = flat_indices[flat_mask]
+    valid_scores = flat_scores[flat_mask]
+    valid_token_ids = token_ids[flat_mask]
+
+    # Sort by expert ID for grouped GEMM
     sort_order = torch.argsort(valid_expert_ids, stable=True)
-    permuted_indices = torch.arange(
-        len(hidden_states), device=hidden_states.device
-    ).repeat_interleave(mask.sum(dim=1))[sort_order]
+    permuted_indices = valid_token_ids[sort_order]
     permuted_hidden_states = hidden_states.index_select(0, permuted_indices)
     permuted_scores = valid_scores[sort_order]
 
