@@ -644,6 +644,20 @@ class Parallelism:
                 "Use None to disable load balancing."
             )
 
+    context_parallel_distribution: Literal["round_robin", "striped"] = "round_robin"
+    """
+    Sequence distribution strategy for FA4 context parallelism. Options:
+    - "round_robin": Head-tail balanced distribution. Rank r owns a contiguous
+      head chunk [r*half:(r+1)*half] and tail chunk [S-(r+1)*half:S-r*half],
+      where half = seq_len // (2*W). Tokens within each shard are in globally
+      ascending order, enabling load-balanced causal attention across all ranks.
+      Requires seq_len % (2 * context_parallel_degree) == 0.
+    - "striped": Interleaved distribution. Rank r owns tokens r, r+W, r+2W, ...
+      where W is the CP world size. Near load-balanced for causal attention.
+      Requires seq_len % context_parallel_degree == 0.
+    Only affects FA4 attention type. SDPA and FlexAttention ignore this setting.
+    """
+
     context_parallel_rotate_method: Literal["allgather", "alltoall"] = "allgather"
     """
     The collective to use in context parallel SDPA for kv shards exchange.

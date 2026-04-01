@@ -10,13 +10,22 @@ from typing import Any, cast
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor.experimental._attention import (
-    _context_parallel_shard,
-    _ContextParallel,
-    _enable_context_parallel_dispatcher,
-    _HeadTailLoadBalancer,
-    _PTRRLoadBalancer,
-)
+
+try:
+    from torch.distributed.tensor.experimental._attention import (
+        _context_parallel_shard,
+        _ContextParallel,
+        _enable_context_parallel_dispatcher,
+        _HeadTailLoadBalancer,
+        _PTRRLoadBalancer,
+    )
+except ImportError:
+    _context_parallel_shard = None  # type: ignore[assignment]
+    _ContextParallel = None  # type: ignore[assignment, misc]
+    _enable_context_parallel_dispatcher = None  # type: ignore[assignment]
+    _HeadTailLoadBalancer = None  # type: ignore[assignment]
+    _PTRRLoadBalancer = None  # type: ignore[assignment]
+
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention.flex_attention import BlockMask
 
@@ -28,6 +37,7 @@ def apply_cp_to_attention_module(
     attention_modules: Sequence[nn.Module],
     cp_mesh: DeviceMesh,
     attention_type: str,
+    cp_distribution: str = "round_robin",
 ) -> None:
     """
     Apply context parallelism to attention modules.
@@ -42,7 +52,12 @@ def apply_cp_to_attention_module(
         attention_type: Type of attention mechanism. Must be one of:
             - "sdpa": scaled_dot_product_attention()
             - "flex": flex_attention()
+            - "fa4": Flash Attention 4 (ring attention)
             - "varlen": varlen_attn() (not yet implemented)
+        cp_distribution: Sequence distribution strategy for FA4.
+            - "round_robin": contiguous chunks per rank
+            - "striped": interleaved tokens across ranks
+            Only used when attention_type is "fa4".
 
     Raises:
         NotImplementedError: If attention_type is "varlen"
@@ -66,6 +81,15 @@ def apply_cp_to_attention_module(
             cp_plan = _ContextParallel(
                 seq_dim=2, attention_type=_ContextParallel.AttentionType.SDPA
             )
+        case "fa4":
+            # FA4 uses its own ring attention — handled separately
+            from torchtitan.distributed.fa4_context_parallel import (
+                apply_fa4_cp_to_attention_module,
+            )
+            apply_fa4_cp_to_attention_module(
+                list(attention_modules), cp_mesh, cp_distribution,
+            )
+            return
         case "varlen":
             raise NotImplementedError(
                 "Variable-length attention CP is not yet supported"
@@ -73,7 +97,7 @@ def apply_cp_to_attention_module(
         case _:
             raise ValueError(
                 f"Invalid attention_type '{attention_type}'. "
-                f"Must be one of: 'sdpa', 'flex', 'varlen'"
+                f"Must be one of: 'sdpa', 'flex', 'fa4', 'varlen'"
             )
 
     for attention_module in attention_modules:
