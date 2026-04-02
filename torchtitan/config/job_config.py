@@ -1359,6 +1359,11 @@ class GRPO:
     Whether to scale by total tokens.
     """
 
+    async_weight_update: bool = False
+    """
+    Whether to enable asynchronous weight updates to the inference server.
+    """
+
 
 @dataclass
 class Debug:
