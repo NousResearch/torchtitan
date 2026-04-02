@@ -159,6 +159,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.batch_degree, self.batch_rank = self.ft_manager.get_dp_info(
             batch_degree, batch_rank
         )
+        from torchtitan.grpo.health import NumericalHealthMonitor
+        self.health_monitor = NumericalHealthMonitor()
 
         if parallel_dims.cp_enabled:
             self.cp_degree = parallel_dims.get_mesh("cp").size()
@@ -1576,8 +1578,23 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 pp_mesh=parallel_dims.get_optional_mesh("pp"),
                 ep_enabled=parallel_dims.ep_enabled,
             )
+            # Numerical Health Monitoring - check gradients
+            if getattr(self, "health_monitor", None) is not None:
+                self.health_monitor.check(self.step, model_parts=self.model_parts)
+                
             grad_norms.append(grad_norm.mean().item())
             self.optimizers.step()
+            
+            # Numerical Health Monitoring - check rewards
+            if getattr(self, "health_monitor", None) is not None and len(microbatch) > 0:
+                all_rewards = []
+                for nanobatch in microbatch:
+                    if "batch" in nanobatch and len(nanobatch["batch"]) > 4:
+                        all_rewards.append(torch.from_numpy(nanobatch["batch"][4]).to(self.device).float().flatten())
+                if len(all_rewards) > 0:
+                    health_status = self.health_monitor.check(self.step, rewards=torch.cat(all_rewards))
+                    all_metrics.append({"health/healthy": float(health_status["healthy"])})
+                    
         self.checkpointer.maybe_wait_for_staging()
         self.lr_schedulers.step()
 
