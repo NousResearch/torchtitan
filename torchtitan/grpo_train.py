@@ -382,6 +382,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 device=self.device,
                 use_ref_model=False,  # deferred to Phase 2
                 grpo_by_token=job_config.grpo.grpo_by_token,
+                parallel_dims=self.parallel_dims,
             )
             grpo_pp_loss_fn = create_grpo_pp_loss_fn(self.grpo_pp_context)
 
