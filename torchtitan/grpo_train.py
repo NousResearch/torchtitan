@@ -562,8 +562,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
         # Wait for SGlang servers to be ready
         job_config.grpo.sglang_urls = get_sglang_urls(job_config)
-        if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
-            wait_for_sglang(job_config.grpo.sglang_urls)
+        wait_for_sglang(job_config.grpo.sglang_urls)
 
 
         slurm_logdir = os.environ.get("LOGDIR", None)
@@ -701,10 +700,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.weight_dtypes = {}
         if self.dp_replicate_rank == 0:
             logger.debug("Grabbing sglang dtypes...")
-            if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
-                os.makedirs(os.environ.get('LOGDIR', '.'), exist_ok=True)
-                with open(f"{os.environ.get('LOGDIR', '.')}/sglang_dtypes.json", "w") as f:
-                    json.dump({"model.embed_tokens.weight": "bfloat16"}, f)
             while not os.path.exists(f"{os.environ['LOGDIR']}/sglang_dtypes.json"):
                 time.sleep(1)
             with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "r") as f:
@@ -715,26 +710,22 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"PP data group (size={pp_data_group_size}, "
                 f"rank={pp_data_local_rank})"
             )
-            # assumes 8 GPUs per node, which should be the case for anything we're deploying this to
-            hostname = "localhost" if pp_data_local_rank < 8 else get_hostname_url()
-            if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
-                # Signal group (heartbeat + start-update)
-                self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
-                    hostname,
-                    job_config.grpo.sglang_port,
-                    signal_group_size,
-                    signal_local_rank,
-                )
-                # Per-PP data group — subgroup of the signal group's PG.
-                self.pp_data_nccl_group = new_group(
-                    self.sglang_nccl_group,
-                    "nccl",
-                    pp_data_group_size,
-                    pp_data_local_rank,
-                    f"weight_data_pp{self.pp_rank}",
-                )
-            else:
-                self.sglang_nccl_group, self.sglang_gloo_group, self.pp_data_nccl_group = None, None, None
+            hostname = get_hostname_url()
+            # Signal group (heartbeat + start-update)
+            self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
+                hostname,
+                job_config.grpo.sglang_port,
+                signal_group_size,
+                signal_local_rank,
+            )
+            # Per-PP data group — subgroup of the signal group's PG.
+            self.pp_data_nccl_group = new_group(
+                self.sglang_nccl_group,
+                "nccl",
+                pp_data_group_size,
+                pp_data_local_rank,
+                f"weight_data_pp{self.pp_rank}",
+            )
 
         if job_config.grpo.ptx_mixin_batchsize > 0:
             self.dataloader = self.train_spec.build_dataloader_fn(
@@ -1750,8 +1741,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         torch.distributed.barrier()
 
     def send_weights(self):
-        if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
-            return
         rank = torch.distributed.get_rank()
         named_params = {
             n: p for m in self.model_parts for n, p in m.named_parameters()
