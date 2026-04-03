@@ -13,6 +13,13 @@ from torchtitan.config.job_config import JobConfig
 from torchtitan.grpo.sglang_handling import send_wait
 from torchtitan.tools.logging import logger
 
+try:
+    from atroposlib.api.shm_buffer import ZeroCopySHMBuffer
+    HAS_SHM = True
+except ImportError:
+    logger.warning("atroposlib.api.shm_buffer not found. Zero-Copy SHM transport disabled.")
+    HAS_SHM = False
+
 
 def get_dynamic_batch_gas(
     batch_size, gradient_accumulation_steps, seq_len, max_token_len, num_microbatches
@@ -309,8 +316,10 @@ class OnlineDataHandler:
             self.server_url = f'http://{os.environ["head_node_ip"]}:8000'
         if torch.distributed.get_rank() == self.metrics_rank:
             self.queue = Queue()
+            self.shm_buffer = None
         else:
             self.queue = None
+            self.shm_buffer = None
 
     def register_atropos(
         self,
@@ -331,7 +340,7 @@ class OnlineDataHandler:
         """
         if torch.distributed.get_rank() != self.metrics_rank:
             return
-        requests.post(
+        response = requests.post(
             f"{self.server_url}/register",
             json={
                 "wandb_group": wandb.run.group,
@@ -343,7 +352,18 @@ class OnlineDataHandler:
                 "save_checkpoint_interval": job_config.checkpoint.interval,
                 "num_steps": job_config.training.steps,
             },
-        )
+        ).json()
+
+        # Initialize Zero-Copy SHM Pinhole if supported
+        if HAS_SHM and torch.distributed.get_rank() == self.metrics_rank:
+            shm_handle = response.get("shm_handle")
+            if shm_handle:
+                try:
+                    self.shm_buffer = ZeroCopySHMBuffer(name=shm_handle, create=False)
+                    logger.info(f"Attached to Zero-Copy SHM Pinhole: {shm_handle}")
+                except Exception as e:
+                    logger.error(f"Failed to attach to SHM: {e}")
+                    self.shm_buffer = None
 
     def data_handling(
         self,
@@ -391,14 +411,37 @@ class OnlineDataHandler:
                 #         data_lens,
                 #     ) = self.queue.get()
                 start_data_get_time = time.perf_counter()
-                data = requests.get(f"{self.server_url}/batch").json()
+                
+                # High-Resolution Zero-Copy Fetch (SHM Pinhole)
+                data = None
+                if self.shm_buffer:
+                    shm_data = self.shm_buffer.read_next()
+                    if shm_data is not None:
+                        # Construct a shim dict for prep_data compatibility
+                        # Each entry in SHM is a full group or a single trajectory
+                        # For Phase 2, we assume the SHM contains formatted batches
+                        data = {
+                            "batch": [{
+                                "tokens": [shm_data.tolist()], # SHM view
+                                "scores": [0.0], # Placeholder for Phase 2
+                                "overrides": None,
+                                "masks": [None]
+                            }]
+                        }
+                        logger.debug("Fetched trajectory via SHM Pinhole (Zero-Copy)")
+
+                # Fallback to legacy HTTP/JSON polling
+                if data is None:
+                    data = requests.get(f"{self.server_url}/batch").json()
+                    
                 data_get_time = time.perf_counter() - start_data_get_time
-                if data["batch"] is not None:
-                    logger.debug("Rx'd batch from server...")
-                    # Save the batch
+                if data.get("batch") is not None:
+                    logger.debug("Data bundle ready for prep...")
                     start_data_dump_time = time.perf_counter()
-                    with open("temp.json", "w") as f:
-                        json.dump(data, f)
+                    # Only dump to disk if we are not using SHM (performance optimization)
+                    if not self.shm_buffer:
+                        with open("temp.json", "w") as f:
+                            json.dump(data, f)
                     data_dump_time = time.perf_counter() - start_data_dump_time
                     start_data_prep_time = time.perf_counter()
                     (
