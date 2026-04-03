@@ -415,20 +415,20 @@ class OnlineDataHandler:
                 # High-Resolution Zero-Copy Fetch (SHM Pinhole)
                 data = None
                 if self.shm_buffer:
-                    shm_data = self.shm_buffer.read_next()
-                    if shm_data is not None:
+                    shm_payload = self.shm_buffer.read_next()
+                    if shm_payload is not None:
                         # Construct a shim dict for prep_data compatibility
                         # Each entry in SHM is a full group or a single trajectory
-                        # For Phase 2, we assume the SHM contains formatted batches
+                        # Unpack tokens and real environment score
                         data = {
                             "batch": [{
-                                "tokens": [shm_data.tolist()], # SHM view
-                                "scores": [0.0], # Placeholder for Phase 2
+                                "tokens": [shm_payload["tokens"]],
+                                "scores": [shm_payload["score"]],
                                 "overrides": None,
                                 "masks": [None]
                             }]
                         }
-                        logger.debug("Fetched trajectory via SHM Pinhole (Zero-Copy)")
+                        logger.debug("Fetched trajectory via SHM Pinhole (Zero-Copy with Real Score)")
 
                 # Fallback to legacy HTTP/JSON polling
                 if data is None:
