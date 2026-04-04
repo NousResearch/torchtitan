@@ -23,7 +23,6 @@ from torch.nn.attention.flex_attention import (
 try:
     from torch.nn.attention.varlen import varlen_attn
 except ImportError:
-    # Fallback for environments where varlen_attn is missing
     varlen_attn = None
 
 from torch.types import Number

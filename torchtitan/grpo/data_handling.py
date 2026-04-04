@@ -412,14 +412,12 @@ class OnlineDataHandler:
                 #     ) = self.queue.get()
                 start_data_get_time = time.perf_counter()
                 
-                # High-Resolution Zero-Copy Fetch (SHM Pinhole)
+                # Fetch from SHM Pinhole
                 data = None
                 if self.shm_buffer:
                     shm_payload = self.shm_buffer.read_next()
                     if shm_payload is not None:
-                        # Construct a shim dict for prep_data compatibility
-                        # Each entry in SHM is a full group or a single trajectory
-                        # Unpack tokens and real environment score
+                        # Construct data group from SHM payload
                         data = {
                             "batch": [{
                                 "tokens": [shm_payload["tokens"]],
