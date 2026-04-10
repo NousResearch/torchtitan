@@ -13,3 +13,24 @@ try:
     __version__ = version("torchtitan")
 except Exception as e:
     __version__ = "0.0.0+unknown"
+
+# Version Shim: Mock missing nightly checkpointing features for PyTorch 2.6.0 Stable
+import torch
+import sys
+import types
+
+try:
+    from torch.distributed.checkpoint.format_utils import HuggingFaceStorageReader
+except ImportError:
+    # Inject a dummy module and class to prevent boot-time crashes on stable builds
+    dist_checkpoint = types.ModuleType("torch.distributed.checkpoint")
+    format_utils = types.ModuleType("torch.distributed.checkpoint.format_utils")
+    
+    class FakeReader:
+        def __init__(self, *args, **kwargs): pass
+    
+    format_utils.HuggingFaceStorageReader = FakeReader
+    dist_checkpoint.format_utils = format_utils
+    sys.modules["torch.distributed.checkpoint.format_utils"] = format_utils
+    if "torch.distributed.checkpoint" not in sys.modules:
+        sys.modules["torch.distributed.checkpoint"] = dist_checkpoint

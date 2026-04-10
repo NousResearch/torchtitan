@@ -308,18 +308,35 @@ def data_worker(
 
 
 class OnlineDataHandler:
-    def __init__(self, metrics_rank: int = 0):
+    def __init__(
+        self,
+        transport=None,
+        shm_name=None,
+        group_size=None,
+        batch_size=None,
+        metrics_rank: int = 0,
+    ):
         self.metrics_rank = metrics_rank
+        # Use environment variables as default overrides
+        self.transport = transport or os.environ.get("TRANSPORT", "REST")
+        self.shm_name = shm_name or os.environ.get("SHM_NAME", "atropos_shm")
+        self.group_size = int(group_size or os.environ.get("GROUP_SIZE", "8"))
+        self.batch_size = int(batch_size or os.environ.get("BATCH_SIZE", "1024"))
         if int(os.environ.get("SLURM_NODEID", "0")) == 0:
             self.server_url = "http://localhost:8000"
         else:
             self.server_url = f'http://{os.environ["head_node_ip"]}:8000'
+        
         if torch.distributed.get_rank() == self.metrics_rank:
             self.queue = Queue()
             self.shm_buffer = None
+            self.stash = {}  # Buffer for out-of-order trajectories: {instance_id: {rep_id: data}}
+            self.group_size = 8  # Fallback group size
         else:
             self.queue = None
             self.shm_buffer = None
+            self.stash = {}
+            self.group_size = 8
 
     def register_atropos(
         self,
@@ -357,10 +374,13 @@ class OnlineDataHandler:
         # Initialize Zero-Copy SHM Pinhole if supported
         if HAS_SHM and torch.distributed.get_rank() == self.metrics_rank:
             shm_handle = response.get("shm_handle")
+            self.group_size = response.get("group_size", 8)
             if shm_handle:
                 try:
                     self.shm_buffer = ZeroCopySHMBuffer(name=shm_handle, create=False)
-                    logger.info(f"Attached to Zero-Copy SHM Pinhole: {shm_handle}")
+                    logger.info(
+                        f"Attached to Zero-Copy SHM Pinhole: {shm_handle} (Group Size: {self.group_size})"
+                    )
                 except Exception as e:
                     logger.error(f"Failed to attach to SHM: {e}")
                     self.shm_buffer = None
@@ -412,21 +432,43 @@ class OnlineDataHandler:
                 #     ) = self.queue.get()
                 start_data_get_time = time.perf_counter()
                 
-                # Fetch from SHM Pinhole
+                # Fetch from SHM Pinhole with Grouped Stashing
                 data = None
                 if self.shm_buffer:
-                    shm_payload = self.shm_buffer.read_next()
-                    if shm_payload is not None:
-                        # Construct data group from SHM payload
-                        data = {
-                            "batch": [{
-                                "tokens": [shm_payload["tokens"]],
-                                "scores": [shm_payload["score"]],
-                                "overrides": None,
-                                "masks": [None]
-                            }]
-                        }
-                        logger.debug("Fetched trajectory via SHM Pinhole (Zero-Copy with Real Score)")
+                    start_shm_poll = time.perf_counter()
+                    while True:
+                        shm_payload = self.shm_buffer.read_next()
+                        if shm_payload is not None:
+                            inst_id = shm_payload["instance_id"]
+                            rep_id = shm_payload["repetition_id"]
+                            
+                            if inst_id not in self.stash:
+                                self.stash[inst_id] = {}
+                            
+                            self.stash[inst_id][rep_id] = shm_payload
+                            
+                            # Check if we have a complete group
+                            if len(self.stash[inst_id]) >= self.group_size:
+                                group_data = self.stash.pop(inst_id)
+                                # Construct data group in Atropos format
+                                data = {
+                                    "batch": [{
+                                        "tokens": [group_data[i]["tokens"] for i in range(self.group_size)],
+                                        "scores": [group_data[i]["score"] for i in range(self.group_size)],
+                                        "overrides": [group_data[i]["metadata"].get("overrides") for i in range(self.group_size)],
+                                        "masks": [[1] * len(group_data[i]["tokens"]) for i in range(self.group_size)],
+                                        "inference_logprobs": [group_data[i]["metadata"].get("logprobs") for i in range(self.group_size)]
+                                    }]
+                                }
+                                logger.debug(f"Assembled complete Group via SHM Stash (ID: {inst_id})")
+                                break
+                        
+                        # Timeout to avoid busy-waiting forever if buffer is dry
+                        if time.perf_counter() - start_shm_poll > 1.0:
+                            break
+                        time.sleep(0.001)
+
+                # Fallback to legacy HTTP/JSON polling if no complete group in SHM
 
                 # Fallback to legacy HTTP/JSON polling
                 if data is None:
