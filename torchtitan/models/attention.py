@@ -72,7 +72,6 @@ class VarlenAttentionWrapper(torch.nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
         if VarlenAttentionWrapper._compiled_varlen_attn is None:
-            # Fallback to standard SDPA if varlen_attn is missing
             return F.scaled_dot_product_attention(xq, xk, xv, scale=scale, is_causal=True)
 
         cu_seq_q = attention_masks.cu_seq_q
@@ -80,13 +79,9 @@ class VarlenAttentionWrapper(torch.nn.Module):
         max_q = attention_masks.max_q
         max_k = attention_masks.max_k
 
-        xq_packed = xq.transpose(1, 2).flatten(0, 1)  # (bs * seqlen, n_heads, head_dim)
-        xk_packed = xk.transpose(1, 2).flatten(
-            0, 1
-        )  # (bs * seqlen, n_kv_heads, head_dim)
-        xv_packed = xv.transpose(1, 2).flatten(
-            0, 1
-        )  # (bs * seqlen, n_kv_heads, head_dim)
+        xq_packed = xq.transpose(1, 2).flatten(0, 1)
+        xk_packed = xk.transpose(1, 2).flatten(0, 1)
+        xv_packed = xv.transpose(1, 2).flatten(0, 1)
 
         return VarlenAttentionWrapper._compiled_varlen_attn(
             xq_packed,
@@ -97,16 +92,7 @@ class VarlenAttentionWrapper(torch.nn.Module):
             max_q,
             max_k,
             scale=scale,
-            # window_size=(left, right) controls the attention window relative to each
-            # query position. 'left' is how many tokens before the query to attend to,
-            # and 'right' is how many tokens after. A value of -1 means unlimited.
-            #
-            # This replaces the is_causal flag:
-            #   - (-1, 0): Causal attention - each token attends to all previous tokens
-            #              and itself, but no future tokens. Equivalent to is_causal=True.
-            #   - (-1, -1): Full bidirectional attention (no masking). Equivalent to
-            #               is_causal=False.
-            #   - (W, 0): Sliding window causal - attend to at most W previous tokens.
+            # (left, right) window size. (-1, 0) is standard causal.
             window_size=(-1, 0),
         )
 

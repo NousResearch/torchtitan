@@ -317,7 +317,6 @@ class OnlineDataHandler:
         metrics_rank: int = 0,
     ):
         self.metrics_rank = metrics_rank
-        # Use environment variables as default overrides
         self.transport = transport or os.environ.get("TRANSPORT", "REST")
         self.shm_name = shm_name or os.environ.get("SHM_NAME", "atropos_shm")
         self.group_size = int(group_size or os.environ.get("GROUP_SIZE", "8"))
@@ -371,16 +370,13 @@ class OnlineDataHandler:
             },
         ).json()
 
-        # Initialize Zero-Copy SHM Pinhole if supported
         if HAS_SHM and torch.distributed.get_rank() == self.metrics_rank:
             shm_handle = response.get("shm_handle")
             self.group_size = response.get("group_size", 8)
             if shm_handle:
                 try:
                     self.shm_buffer = ZeroCopySHMBuffer(name=shm_handle, create=False)
-                    logger.info(
-                        f"Attached to Zero-Copy SHM Pinhole: {shm_handle} (Group Size: {self.group_size})"
-                    )
+                    logger.info(f"Attached to SHM segment: {shm_handle}")
                 except Exception as e:
                     logger.error(f"Failed to attach to SHM: {e}")
                     self.shm_buffer = None
@@ -422,20 +418,7 @@ class OnlineDataHandler:
         grad_accum_size = max(1, grad_accum_size)
         while True:
             if torch.distributed.get_rank() == self.metrics_rank:
-                # if not self.queue.empty():
-                #     (
-                #         batches,
-                #         max_token_len,
-                #         dynamic_batch_size,
-                #         dynamic_grad_accum_size,
-                #         data_lens,
-                #     ) = self.queue.get()
-                start_data_get_time = time.perf_counter()
-                
-                # Fetch from SHM Pinhole with Grouped Stashing
-                data = None
                 if self.shm_buffer:
-                    start_shm_poll = time.perf_counter()
                     while True:
                         shm_payload = self.shm_buffer.read_next()
                         if shm_payload is not None:

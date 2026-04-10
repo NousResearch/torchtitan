@@ -14,7 +14,7 @@ try:
 except Exception as e:
     __version__ = "0.0.0+unknown"
 
-# Version Shim: Mock missing nightly checkpointing features for PyTorch 2.6.0 Stable
+# Distributed checkpoint shims for PyTorch 2.6.0 stability
 import torch
 import sys
 import types
@@ -22,7 +22,6 @@ import types
 try:
     from torch.distributed.checkpoint.format_utils import HuggingFaceStorageReader
 except ImportError:
-    # Inject a dummy module and class to prevent boot-time crashes on stable builds
     dist_checkpoint = types.ModuleType("torch.distributed.checkpoint")
     format_utils = types.ModuleType("torch.distributed.checkpoint.format_utils")
     
