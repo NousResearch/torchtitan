@@ -418,7 +418,10 @@ class OnlineDataHandler:
         grad_accum_size = max(1, grad_accum_size)
         while True:
             if torch.distributed.get_rank() == self.metrics_rank:
+                t_data_start = time.perf_counter()
+                data = None
                 if self.shm_buffer:
+                    t_shm_start = time.perf_counter()
                     while True:
                         shm_payload = self.shm_buffer.read_next()
                         if shm_payload is not None:
@@ -430,10 +433,8 @@ class OnlineDataHandler:
                             
                             self.stash[inst_id][rep_id] = shm_payload
                             
-                            # Check if we have a complete group
                             if len(self.stash[inst_id]) >= self.group_size:
                                 group_data = self.stash.pop(inst_id)
-                                # Construct data group in Atropos format
                                 data = {
                                     "batch": [{
                                         "tokens": [group_data[i]["tokens"] for i in range(self.group_size)],
@@ -443,21 +444,17 @@ class OnlineDataHandler:
                                         "inference_logprobs": [group_data[i]["metadata"].get("logprobs") for i in range(self.group_size)]
                                     }]
                                 }
-                                logger.debug(f"Assembled complete Group via SHM Stash (ID: {inst_id})")
+                                logger.debug(f"Assembled SHM group: {inst_id}")
                                 break
                         
-                        # Timeout to avoid busy-waiting forever if buffer is dry
-                        if time.perf_counter() - start_shm_poll > 1.0:
+                        if time.perf_counter() - t_shm_start > 1.0:
                             break
                         time.sleep(0.001)
 
-                # Fallback to legacy HTTP/JSON polling if no complete group in SHM
-
-                # Fallback to legacy HTTP/JSON polling
                 if data is None:
                     data = requests.get(f"{self.server_url}/batch").json()
                     
-                data_get_time = time.perf_counter() - start_data_get_time
+                data_get_time = time.perf_counter() - t_data_start
                 if data.get("batch") is not None:
                     logger.debug("Data bundle ready for prep...")
                     start_data_dump_time = time.perf_counter()
