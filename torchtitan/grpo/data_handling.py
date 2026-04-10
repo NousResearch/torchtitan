@@ -13,6 +13,13 @@ from torchtitan.config.job_config import JobConfig
 from torchtitan.grpo.sglang_handling import send_wait
 from torchtitan.tools.logging import logger
 
+try:
+    from atroposlib.api.shm_buffer import ZeroCopySHMBuffer
+    HAS_SHM = True
+except ImportError:
+    logger.warning("atroposlib.api.shm_buffer not found. Zero-Copy SHM transport disabled.")
+    HAS_SHM = False
+
 
 def get_dynamic_batch_gas(
     batch_size, gradient_accumulation_steps, seq_len, max_token_len, num_microbatches
@@ -301,16 +308,34 @@ def data_worker(
 
 
 class OnlineDataHandler:
-    def __init__(self, metrics_rank: int = 0):
+    def __init__(
+        self,
+        transport=None,
+        shm_name=None,
+        group_size=None,
+        batch_size=None,
+        metrics_rank: int = 0,
+    ):
         self.metrics_rank = metrics_rank
+        self.transport = transport or os.environ.get("TRANSPORT", "REST")
+        self.shm_name = shm_name or os.environ.get("SHM_NAME", "atropos_shm")
+        self.group_size = int(group_size or os.environ.get("GROUP_SIZE", "8"))
+        self.batch_size = int(batch_size or os.environ.get("BATCH_SIZE", "1024"))
         if int(os.environ.get("SLURM_NODEID", "0")) == 0:
             self.server_url = "http://localhost:8000"
         else:
             self.server_url = f'http://{os.environ["head_node_ip"]}:8000'
+        
         if torch.distributed.get_rank() == self.metrics_rank:
             self.queue = Queue()
+            self.shm_buffer = None
+            self.stash = {}  # Buffer for out-of-order trajectories: {instance_id: {rep_id: data}}
+            self.group_size = 8  # Fallback group size
         else:
             self.queue = None
+            self.shm_buffer = None
+            self.stash = {}
+            self.group_size = 8
 
     def register_atropos(
         self,
@@ -331,7 +356,7 @@ class OnlineDataHandler:
         """
         if torch.distributed.get_rank() != self.metrics_rank:
             return
-        requests.post(
+        response = requests.post(
             f"{self.server_url}/register",
             json={
                 "wandb_group": wandb.run.group,
@@ -343,7 +368,18 @@ class OnlineDataHandler:
                 "save_checkpoint_interval": job_config.checkpoint.interval,
                 "num_steps": job_config.training.steps,
             },
-        )
+        ).json()
+
+        if HAS_SHM and torch.distributed.get_rank() == self.metrics_rank:
+            shm_handle = response.get("shm_handle")
+            self.group_size = response.get("group_size", 8)
+            if shm_handle:
+                try:
+                    self.shm_buffer = ZeroCopySHMBuffer(name=shm_handle, create=False)
+                    logger.info(f"Attached to SHM segment: {shm_handle}")
+                except Exception as e:
+                    logger.error(f"Failed to attach to SHM: {e}")
+                    self.shm_buffer = None
 
     def data_handling(
         self,
@@ -382,23 +418,50 @@ class OnlineDataHandler:
         grad_accum_size = max(1, grad_accum_size)
         while True:
             if torch.distributed.get_rank() == self.metrics_rank:
-                # if not self.queue.empty():
-                #     (
-                #         batches,
-                #         max_token_len,
-                #         dynamic_batch_size,
-                #         dynamic_grad_accum_size,
-                #         data_lens,
-                #     ) = self.queue.get()
-                start_data_get_time = time.perf_counter()
-                data = requests.get(f"{self.server_url}/batch").json()
-                data_get_time = time.perf_counter() - start_data_get_time
-                if data["batch"] is not None:
-                    logger.debug("Rx'd batch from server...")
-                    # Save the batch
+                t_data_start = time.perf_counter()
+                data = None
+                if self.shm_buffer:
+                    t_shm_start = time.perf_counter()
+                    while True:
+                        shm_payload = self.shm_buffer.read_next()
+                        if shm_payload is not None:
+                            inst_id = shm_payload["instance_id"]
+                            rep_id = shm_payload["repetition_id"]
+                            
+                            if inst_id not in self.stash:
+                                self.stash[inst_id] = {}
+                            
+                            self.stash[inst_id][rep_id] = shm_payload
+                            
+                            if len(self.stash[inst_id]) >= self.group_size:
+                                group_data = self.stash.pop(inst_id)
+                                data = {
+                                    "batch": [{
+                                        "tokens": [group_data[i]["tokens"] for i in range(self.group_size)],
+                                        "scores": [group_data[i]["score"] for i in range(self.group_size)],
+                                        "overrides": [group_data[i]["metadata"].get("overrides") for i in range(self.group_size)],
+                                        "masks": [[1] * len(group_data[i]["tokens"]) for i in range(self.group_size)],
+                                        "inference_logprobs": [group_data[i]["metadata"].get("logprobs") for i in range(self.group_size)]
+                                    }]
+                                }
+                                logger.debug(f"Assembled SHM group: {inst_id}")
+                                break
+                        
+                        if time.perf_counter() - t_shm_start > 1.0:
+                            break
+                        time.sleep(0.001)
+
+                if data is None:
+                    data = requests.get(f"{self.server_url}/batch").json()
+                    
+                data_get_time = time.perf_counter() - t_data_start
+                if data.get("batch") is not None:
+                    logger.debug("Data bundle ready for prep...")
                     start_data_dump_time = time.perf_counter()
-                    with open("temp.json", "w") as f:
-                        json.dump(data, f)
+                    # Only dump to disk if we are not using SHM (performance optimization)
+                    if not self.shm_buffer:
+                        with open("temp.json", "w") as f:
+                            json.dump(data, f)
                     data_dump_time = time.perf_counter() - start_data_dump_time
                     start_data_prep_time = time.perf_counter()
                     (

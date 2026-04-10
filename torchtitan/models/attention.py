@@ -20,7 +20,11 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 
-from torch.nn.attention.varlen import varlen_attn
+try:
+    from torch.nn.attention.varlen import varlen_attn
+except ImportError:
+    varlen_attn = None
+
 from torch.types import Number
 
 
@@ -52,8 +56,10 @@ class VarlenMetadata(NamedTuple):
 
 
 class VarlenAttentionWrapper(torch.nn.Module):
-    _compiled_varlen_attn: ClassVar[Callable] = torch.compile(
-        varlen_attn, mode="max-autotune-no-cudagraphs"
+    _compiled_varlen_attn: ClassVar[Callable | None] = (
+        torch.compile(varlen_attn, mode="max-autotune-no-cudagraphs")
+        if varlen_attn is not None
+        else None
     )
 
     def forward(
@@ -65,18 +71,17 @@ class VarlenAttentionWrapper(torch.nn.Module):
         scale: float | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
 
+        if VarlenAttentionWrapper._compiled_varlen_attn is None:
+            return F.scaled_dot_product_attention(xq, xk, xv, scale=scale, is_causal=True)
+
         cu_seq_q = attention_masks.cu_seq_q
         cu_seq_k = attention_masks.cu_seq_k
         max_q = attention_masks.max_q
         max_k = attention_masks.max_k
 
-        xq_packed = xq.transpose(1, 2).flatten(0, 1)  # (bs * seqlen, n_heads, head_dim)
-        xk_packed = xk.transpose(1, 2).flatten(
-            0, 1
-        )  # (bs * seqlen, n_kv_heads, head_dim)
-        xv_packed = xv.transpose(1, 2).flatten(
-            0, 1
-        )  # (bs * seqlen, n_kv_heads, head_dim)
+        xq_packed = xq.transpose(1, 2).flatten(0, 1)
+        xk_packed = xk.transpose(1, 2).flatten(0, 1)
+        xv_packed = xv.transpose(1, 2).flatten(0, 1)
 
         return VarlenAttentionWrapper._compiled_varlen_attn(
             xq_packed,
@@ -87,16 +92,7 @@ class VarlenAttentionWrapper(torch.nn.Module):
             max_q,
             max_k,
             scale=scale,
-            # window_size=(left, right) controls the attention window relative to each
-            # query position. 'left' is how many tokens before the query to attend to,
-            # and 'right' is how many tokens after. A value of -1 means unlimited.
-            #
-            # This replaces the is_causal flag:
-            #   - (-1, 0): Causal attention - each token attends to all previous tokens
-            #              and itself, but no future tokens. Equivalent to is_causal=True.
-            #   - (-1, -1): Full bidirectional attention (no masking). Equivalent to
-            #               is_causal=False.
-            #   - (W, 0): Sliding window causal - attend to at most W previous tokens.
+            # (left, right) window size. (-1, 0) is standard causal.
             window_size=(-1, 0),
         )
 
@@ -119,7 +115,6 @@ class FlexAttentionWrapper(torch.nn.Module):
         flex_attention,
         # This options also encapsulate max-autotune-no-cudagraphs.
         options={
-            "wrap_inductor_compiled_regions": True,
             "max_autotune": True,
             "coordinate_descent_tuning": True,
             "triton.cudagraphs": False,
