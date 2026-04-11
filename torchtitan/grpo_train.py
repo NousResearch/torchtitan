@@ -941,6 +941,13 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         mask = torch.from_numpy(masks).to(device_type)
         reward = torch.from_numpy(rewards).to(device_type).reshape(-1, 1)
         inf_logps = torch.from_numpy(inf_logps).to(device_type)
+
+        # Normalize reward across the data/context parallel mesh
+        from torchtitan.grpo.utils import normalize_rewards_distributed
+
+        loss_mesh = parallel_dims.get_optional_mesh("loss")
+        reward = normalize_rewards_distributed(reward, mask, loss_mesh)
+
         # Multiply by scaling coefs
         reward = scale_rewards(
             reward, job_config.grpo.pos_scaler, job_config.grpo.neg_scaler
