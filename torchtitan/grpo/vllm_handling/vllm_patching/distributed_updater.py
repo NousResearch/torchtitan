@@ -139,11 +139,10 @@ def broadcast_object_list(
     group_src: Optional[int] = None,
 ):
     """
-    Basically torch.distributed.broadcast_object_list, but forced to grab from rank 0.
-    This is required because the original implementation assumes that rank 0 comes from the
-    default process group, even when provided with a different process group for some unholy reason.
-
-    So we just prevent our rank 0 from broadcasting by removing the conditionals that would cause it.
+    Override of torch.distributed.broadcast_object_list to ensure source rank selection.
+    This is necessary because the default implementation may assume rank 0 is relative to
+    the default process group, which can lead to incorrect behavior when using custom 
+    process groups in specific configurations.
     """
     global_src = group_src
 
@@ -388,7 +387,7 @@ def weight_updater_process(
     )
     vllm_global_rank = rank  # vLLM rank before any offset
 
-    # ── Signal group ──────────────────────────────────────────────
+    # Signal group
     # All training dp_replicate_rank==0 ranks (across PP stages) +
     # all vLLM ranks.  Used for heartbeat/start-update signals only.
     signal_training_size = train_pp_size * num_training_gpus_per_pp
@@ -426,7 +425,7 @@ def weight_updater_process(
     )
     print("Created signal NCCL group", flush=True)
 
-    # ── Per-PP data groups ────────────────────────────────────────
+    # Per-PP data groups
     # One per training PP stage that maps to this vLLM PP stage.
     # Subgroups of the signal NCCL group - share its store via
     # PrefixStore namespacing, no extra TCP ports needed.
@@ -460,7 +459,7 @@ def weight_updater_process(
             flush=True,
         )
 
-    # ── Build per-PP param lists + interleaved iteration order ────
+    # Build per-PP param lists and interleaved iteration order
     per_pp_params = defaultdict(list)
     for tt_name in param_name_list:
         pp_stage = json_data["param_mappings"][tt_name].get("train_pp_stage", 0)
