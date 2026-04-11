@@ -10,9 +10,13 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from torch.distributed.tensor import DeviceMesh, distribute_module, DTensor, Replicate
+try:
+    from torch.distributed.tensor import DeviceMesh, distribute_module, DTensor, Replicate
+    from torch.distributed.tensor.placement_types import Placement
+except (ImportError, AttributeError):
+    from torch.distributed._tensor import DeviceMesh, distribute_module, DTensor, Replicate
+    from torch.distributed._tensor.placement_types import Placement
 from torch.distributed.tensor.parallel import ParallelStyle
-from torch.distributed.tensor.placement_types import Placement
 
 from torchtitan.distributed.parallel_dims import ParallelDims
 

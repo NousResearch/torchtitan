@@ -1,0 +1,50 @@
+[job]
+dump_folder = "./outputs/verify_grpo_2gpu"
+description = "GRPO 2-GPU Verification (CP + Dist Norm + Async Weight)"
+print_config = true
+
+[metrics]
+log_freq = 1
+enable_tensorboard = false
+enable_wandb = false
+
+[model]
+name = "llama3"
+flavor = "debugmodel"
+hf_assets_path = "./tests/assets/tokenizer"
+
+[optimizer]
+name = "AdamW"
+lr = 1e-4
+
+[training]
+local_batch_size = 2
+seq_len = 512
+steps = 5
+dataset = "c4_test"
+
+[parallelism]
+data_parallel_replicate_degree = 1
+data_parallel_shard_degree = 2
+tensor_parallel_degree = 1
+pipeline_parallel_degree = 1
+context_parallel_degree = 1  # Verify FSDP2/Dist Norm instead due to PyTorch 2.5.1 experimental CP breakage
+
+[grpo]
+kl_beta = 0.01
+num_microbatches = 1
+async_weight_update = false
+sglang_urls = ["localhost:9000"]
+sglang_slurm_num_nodes = 0
+
+[checkpoint]
+enable = false
+
+[activation_checkpoint]
+mode = "none"
+
+[compile]
+enable = true
+backend = "inductor"
+fullgraph = false
+components = ["model"]

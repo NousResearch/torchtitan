@@ -1247,6 +1247,9 @@ class Validation:
 
 @dataclass
 class GRPO:
+    async_weight_update: bool = False
+    """Whether to update sglang weights asynchronously"""
+
     kl_beta: float = 0.0
     """KL beta for GRPO"""
 
@@ -1354,6 +1357,11 @@ class GRPO:
     ptx_scale_by_tokens: bool = False
     """
     Whether to scale by total tokens.
+    """
+
+    async_weight_update: bool = False
+    """
+    Whether to enable asynchronous weight updates to the inference server.
     """
 
 

@@ -13,7 +13,14 @@ from torch.distributed._composable.fsdp import FSDPModule
 from torch.distributed._composable.replicate import replicate
 
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+try:
+    from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+except ImportError:
+    from torch.distributed._composable.fsdp import (
+        CPUOffloadPolicy,
+        fully_shard,
+        MixedPrecisionPolicy,
+    )
 from torch.distributed.tensor import Replicate, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -45,10 +52,17 @@ _op_sac_save_list = {
     # the result of max, since the absolute maximum is
     # used to compute the scaling factor for quantization.
     torch.ops.aten.max.default,
-    torch._higher_order_ops.flex_attention,
-    torch.ops.torch_attn._varlen_attn.default,
-    torch._higher_order_ops.inductor_compiled_code,
 }
+# Optional ops for PyTorch compatibility
+for _op_parent, _op_name in [
+    (getattr(torch, "_higher_order_ops", None), "flex_attention"),
+    (getattr(torch.ops, "torch_attn", None), "_varlen_attn"),
+    (getattr(torch, "_higher_order_ops", None), "inductor_compiled_code"),
+]:
+    if _op_parent and hasattr(_op_parent, _op_name):
+        _op = getattr(_op_parent, _op_name)
+        _op_sac_save_list.add(getattr(_op, "default", _op))
+
 
 
 def parallelize_llama(
@@ -283,7 +297,8 @@ def disable_fsdp_gradient_division(model: nn.Module) -> None:
     """
     for module in model.modules():
         if isinstance(module, FSDPModule):
-            module.set_gradient_divide_factor(1.0)
+            if hasattr(module, "set_gradient_divide_factor"):
+                module.set_gradient_divide_factor(1.0)
 
 
 def apply_fsdp(

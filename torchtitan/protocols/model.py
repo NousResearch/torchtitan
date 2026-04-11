@@ -10,7 +10,10 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 
-from torch.nn.attention.flex_attention import BlockMask
+try:
+    from torch.nn.attention.flex_attention import BlockMask
+except ImportError:
+    BlockMask = None
 
 from torchtitan.components.tokenizer import BaseTokenizer
 

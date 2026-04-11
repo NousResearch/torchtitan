@@ -81,18 +81,25 @@ def log_tensor_stats(tensor: torch.Tensor, name: str, num_bins: int = 64):  # no
     )
 
 
-def masked_mean(tensor, mask, per_seq=False):
+def masked_mean(tensor: torch.Tensor, mask: torch.Tensor, dim: int = None, keepdim: bool = False, per_seq: bool = False) -> torch.Tensor:
+    """Compute the mean of a tensor, with a mask applied."""
     if per_seq:
-        return ((tensor * mask).sum(dim=-1) / mask.sum(dim=-1)).mean()
-    else:
-        return (tensor * mask).sum() / mask.sum()
+        # Special case: mean per sequence then average across sequences
+        # tensor/mask assumed to be [B, S, ...]
+        seq_sum = (tensor * mask).sum(dim=1)
+        seq_count = mask.sum(dim=1).clamp(min=1.0)
+        seq_mean = seq_sum / seq_count
+        return seq_mean.mean()
+    
+    masked_tensor = tensor * mask
+    total_sum = masked_tensor.sum(dim=dim, keepdim=keepdim)
+    total_count = mask.sum(dim=dim, keepdim=keepdim).clamp(min=1.0)
+    return total_sum / total_count
 
 
-def masked_sum(tensor, mask, per_seq=False):
-    if per_seq:
-        return (tensor * mask).sum(dim=-1)
-    else:
-        return (tensor * mask).sum()
+def masked_sum(tensor: torch.Tensor, mask: torch.Tensor, dim: int = None, keepdim: bool = False) -> torch.Tensor:
+    """Compute the sum of a tensor, with a mask applied."""
+    return (tensor * mask).sum(dim=dim, keepdim=keepdim)
 
 
 @register_sharding(torch.ops.aten.amax.default)

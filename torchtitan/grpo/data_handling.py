@@ -58,6 +58,7 @@ def pad_data_to_good_offset(
     masks = list()
     lengths = list()
     inf_logps = list()
+    prompt_ids = list()
     for item in data["batch"]:
         scores = item["scores"]
         scores = np.array(scores)
@@ -140,9 +141,10 @@ def pad_data_to_good_offset(
             "reward": reward,
             "length": length,
             "inf_logp": inf_logp,
+            "prompt_ids": prompt_id,
         }
-        for (input_id, label, mask, reward, length, inf_logp) in zip(
-            input_ids, labels, masks, rewards, lengths, inf_logps
+        for (input_id, label, mask, reward, length, inf_logp, prompt_id) in zip(
+            input_ids, labels, masks, rewards, lengths, inf_logps, prompt_ids
         )
     ]
     sorted_items = sorted(raw_items, key=lambda x: x["length"], reverse=True)
@@ -166,6 +168,7 @@ def pad_data_to_good_offset(
         [x["mask"] for x in items],
         [x["length"] for x in items],
         [x["inf_logp"] for x in items],
+        [x["prompt_ids"] for x in items],
     )
 
 
@@ -191,6 +194,7 @@ def prep_data(
         masks,
         lengths,
         inf_logps,
+        prompt_ids,
     ) = pad_data_to_good_offset(
         data,
         cp_degree,
@@ -331,11 +335,13 @@ class OnlineDataHandler:
         """
         if torch.distributed.get_rank() != self.metrics_rank:
             return
+        if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+            return
         requests.post(
             f"{self.server_url}/register",
             json={
-                "wandb_group": wandb.run.group,
-                "wandb_project": wandb.run.project,
+                "wandb_group": wandb.run.group if wandb.run else "none",
+                "wandb_project": wandb.run.project if wandb.run else "none",
                 "batch_size": global_batch_size,
                 "max_token_len": job_config.training.seq_len,
                 "starting_step": step,
@@ -391,7 +397,22 @@ class OnlineDataHandler:
                 #         data_lens,
                 #     ) = self.queue.get()
                 start_data_get_time = time.perf_counter()
-                data = requests.get(f"{self.server_url}/batch").json()
+                if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+                    import numpy as np
+                    data = {
+                        "batch": [
+                            {
+                                "tokens": [[1, 2, 3, 4, 5, 6, 7, 8, 9, 10] * 6],
+                                "scores": [0.5],
+                                "masks": [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1] * 6],
+                                "overrides": [{"set_advantage_to_zero": False}],
+                                "prompt_ids": [1],
+                                "inference_logprobs": [[-0.1] * 60]
+                            }
+                        ] * 16 # Provide enough batches to fill the train process
+                    }
+                else:
+                    data = requests.get(f"{self.server_url}/batch").json()
                 data_get_time = time.perf_counter() - start_data_get_time
                 if data["batch"] is not None:
                     logger.debug("Rx'd batch from server...")
