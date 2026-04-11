@@ -55,19 +55,7 @@ class MoEStateDictAdapter(StateDictAdapter):
         GPU Layout (strided_shard_rank, shard_rank):
 
         StridedShard Rank                  Shard rank
-                        ┌─────────────────┐
-                    0   │    GPU(0, 0)    │  0
-                    ────┼─────────────────┤
-                    1   │    GPU(1, 0)    │
-                    ────┼─────────────────┤
-                    2   │    GPU(2, 0)    │
-                  ──────┼─────────────────┼────
-                    0   │    GPU(0, 1)    │  1
-                    ────┼─────────────────┤
-                    1   │    GPU(1, 1)    │
-                    ────┼─────────────────┤
-                    2   │    GPU(2, 1)    │
-                        └─────────────────┘
+        (Rank-0, Rank-1) indices calculated from inner to outer.
 
         Calculate the start_index from inner dimension (Shard(dim=i)) to outer dimension (StridedShard(dim=i)).
         """

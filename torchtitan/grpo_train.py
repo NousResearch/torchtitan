@@ -353,7 +353,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"does not support pipelining"
                 )
 
-            # ── Validate PP constraints (Phase 1) ─────────────────
+            # Validate PP constraints (Phase 1) 
             assert (
                 job_config.grpo.kl_beta == 0
             ), "Reference model (kl_beta > 0) not yet supported with PP"
@@ -374,7 +374,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"or decrease pipeline_parallel_microbatch_size."
             )
 
-            # ── Create GRPO PP loss context and closure ────────────
+            # Create GRPO PP loss context and closure
             self.grpo_pp_context = GRPOPPLossContext(
                 loss_fn=self.loss_fn,
                 entropy_loss_fn=self.entropy_loss_fn,
@@ -584,7 +584,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self._pp_local_to_original = {}
             self._pp_original_to_local = {}
 
-        # ── Build global param list across all PP stages ──────────────
+        # Build global param list across all PP stages
         # Each PP stage has different params (different layers). We need the
         # GLOBAL sorted param list so both training and vLLM iterate in the
         # same deterministic order.
@@ -662,7 +662,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 json.dump(train_send_order, f, indent=2)
         self.data_handler.register_atropos(job_config, self.step, global_batch_size)
 
-        # ── Setup weight-sync process groups ──────────────────────────
+        # Setup weight-sync process groups
         vllm_total_ranks = (
             len(job_config.grpo.sglang_urls)
             * job_config.grpo.sglang_tp
