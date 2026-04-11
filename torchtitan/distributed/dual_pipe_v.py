@@ -10,12 +10,25 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from torch.distributed.pipelining.schedules import (
-    _Action,
-    _PipelineContext,
-    _PipelineScheduleRuntime,
-    _wait_batch_p2p,
-)
+try:
+    from torch.distributed.pipelining.schedules import (
+        _Action,
+        _PipelineContext,
+        _PipelineScheduleRuntime,
+        _wait_batch_p2p,
+    )
+except ImportError:
+    from torch.distributed.pipelining.schedules import (
+        _Action,
+    )
+    try:
+        from torch.distributed.pipelining.schedules import _wait_batch_p2p
+    except ImportError:
+        def _wait_batch_p2p(op):
+            if op is not None:
+                op.wait()
+    _PipelineContext = object
+    _PipelineScheduleRuntime = object
 from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.distributed.tensor import DeviceMesh, distribute_module
 from torch.profiler import record_function

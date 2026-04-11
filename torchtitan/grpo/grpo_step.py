@@ -538,26 +538,27 @@ class GRPOPPLossContext:
       - Internal chunk tracking
     """
 
-    # ── Config & utilities (set once at init) ──────────────────────
+    # Config & utilities (set once at init)
     loss_fn: Callable = None
     entropy_loss_fn: Callable = None
     job_config: JobConfig = None
     device: torch.device = None
     use_ref_model: bool = False
     grpo_by_token: bool = False
+    parallel_dims = None
 
-    # ── Per-nanobatch scalars ──────────────────────────────────────
+    # Per-nanobatch scalars
     dynamic_scale: float = 1.0
     dynamic_grad_accum_size: float = 1.0
     total_masked_tokens: int = 1
 
-    # ── Chunk tracking (internal) ──────────────────────────────────
+    # Chunk tracking (internal)
     _tensor_chunks: dict = field(default_factory=dict)
     _n_microbatches: int = 1
     _mb_idx: int = 0
     _chunk_metrics: list = field(default_factory=list)
 
-    # ── Output (merged after pp_schedule.step) ─────────────────────
+    # Output (merged after pp_schedule.step)
     metrics: dict = field(default_factory=dict)
 
     # Tensor field names that get chunked along the batch dimension
@@ -665,7 +666,32 @@ def create_grpo_pp_loss_fn(ctx: GRPOPPLossContext) -> Callable:
             # Per-sequence: mean across sequences in this chunk.
             # rescale_accumulated_loss divides by n_microbatches, and
             # sum_chunks(mean_chunk) / n_microbatches = global_mean. ✓
-            scalar_loss = (mb_loss * chunk_mask).sum(-1) / chunk_mask.sum(-1)
+            seq_loss_sum = (mb_loss * chunk_mask).sum(-1)
+            seq_mask_sum = chunk_mask.sum(-1)
+            
+            # Align Compute-Parallel loss scaling by syncing the sequence-level sums across the CP mesh
+            if ctx.parallel_dims is not None and ctx.parallel_dims.cp_enabled:
+                import torch.distributed as dist
+                cp_group = ctx.parallel_dims.cp_mesh.get_group()
+                
+                # Extract local tensor if wrapped in DTensor
+                local_seq_loss_sum = seq_loss_sum.to_local() if hasattr(seq_loss_sum, "to_local") else seq_loss_sum
+                local_seq_mask_sum = seq_mask_sum.to_local() if hasattr(seq_mask_sum, "to_local") else seq_mask_sum
+                
+                # Reduce across CP mesh
+                dist.all_reduce(local_seq_loss_sum, op=dist.ReduceOp.SUM, group=cp_group)
+                dist.all_reduce(local_seq_mask_sum, op=dist.ReduceOp.SUM, group=cp_group)
+                
+                # Re-wrap if necessary
+                if hasattr(seq_loss_sum, "to_local"):
+                    from torch.distributed.tensor import DTensor
+                    seq_loss_sum = DTensor.from_local(local_seq_loss_sum, seq_loss_sum.device_mesh, seq_loss_sum.placements)
+                    seq_mask_sum = DTensor.from_local(local_seq_mask_sum, seq_mask_sum.device_mesh, seq_mask_sum.placements)
+                else:
+                    seq_loss_sum = local_seq_loss_sum
+                    seq_mask_sum = local_seq_mask_sum
+
+            scalar_loss = seq_loss_sum / seq_mask_sum.clamp(min=1.0)
             scalar_loss = scalar_loss.mean()
             scalar_loss = ctx.dynamic_scale * scalar_loss / ctx.dynamic_grad_accum_size
         else:

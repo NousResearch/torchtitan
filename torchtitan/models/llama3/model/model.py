@@ -12,7 +12,11 @@ from typing import cast
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.nn.attention.flex_attention import and_masks, BlockMask
+try:
+    from torch.nn.attention.flex_attention import and_masks, BlockMask
+except ImportError:
+    and_masks = None
+    BlockMask = None
 
 from torchtitan.components.peft.lora import lora_or_linear, per_layer_config
 from torchtitan.components.tokenizer import BaseTokenizer

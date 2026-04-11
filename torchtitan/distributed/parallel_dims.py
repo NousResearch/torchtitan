@@ -120,8 +120,10 @@ class ParallelDims:
                 if not self._mesh_exist(name, degree):
                     backend_override[name] = "fake"
 
-            return world_mesh._unflatten(
-                0, dim_degrees, dim_names, backend_override=backend_override
+            return init_device_mesh(
+                world_mesh.device_type,
+                dim_degrees,
+                mesh_dim_names=dim_names,
             )
 
         logger.info(

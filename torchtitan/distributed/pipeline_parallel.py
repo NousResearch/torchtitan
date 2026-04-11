@@ -12,23 +12,40 @@ from typing import Callable
 import torch
 import torch.nn as nn
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.pipelining import PipelineStage
 
-from torch.distributed.pipelining.schedules import (
-    _PipelineSchedule,
-    _PipelineScheduleRuntime,
-    get_schedule_class,
-    OVERLAP_F_B,
-    PipelineScheduleMulti,
-    PipelineScheduleSingle,
-    ScheduleDualPipeV,
-    ScheduleZBVZeroBubble,
-)
+try:
+    from torch.distributed.pipelining import PipelineStage
+    from torch.distributed.pipelining.schedules import (
+        _PipelineSchedule,
+        _PipelineScheduleRuntime,
+        get_schedule_class,
+        OVERLAP_F_B,
+        PipelineScheduleMulti,
+        PipelineScheduleSingle,
+        ScheduleDualPipeV,
+        ScheduleZBVZeroBubble,
+    )
+    _HAS_PIPELINING = True
+except ImportError:
+    _HAS_PIPELINING = False
+    # Minimal stubs so the module can be imported when PP is disabled
+    class _PipelineSchedule: pass
+    class _PipelineScheduleRuntime: pass
+    class PipelineScheduleMulti: pass
+    class PipelineScheduleSingle: pass
+    class PipelineStage: pass
+    class ScheduleDualPipeV: pass
+    class ScheduleZBVZeroBubble: pass
+    OVERLAP_F_B = False
+    def get_schedule_class(name): raise RuntimeError(f"Pipelining not available in PyTorch {torch.__version__}")
 
 from torchtitan.components.loss import LossFunction
 from torchtitan.config import JobConfig
 from torchtitan.distributed import ParallelDims
-from torchtitan.distributed.dual_pipe_v import overlap_callback
+try:
+    from torchtitan.distributed.dual_pipe_v import overlap_callback
+except ImportError:
+    overlap_callback = None
 from torchtitan.protocols.train_spec import BaseModelArgs, ParallelizeFunction
 from torchtitan.tools.logging import logger
 
