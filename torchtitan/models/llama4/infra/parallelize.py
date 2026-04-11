@@ -12,7 +12,10 @@ from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     CheckpointWrapper,
 )
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+try:
+    from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+except ImportError:
+    from torch.distributed._composable.fsdp import (CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy)
 from torch.distributed.tensor import Partial, Replicate, Shard
 
 try:

@@ -388,7 +388,7 @@ def weight_updater_process(
     )
     vllm_global_rank = rank  # vLLM rank before any offset
 
-    # ── Signal group ──────────────────────────────────────────────
+    # Signal group (Heartbeat + Start-Update)
     # All training dp_replicate_rank==0 ranks (across PP stages) +
     # all vLLM ranks.  Used for heartbeat/start-update signals only.
     signal_training_size = train_pp_size * num_training_gpus_per_pp
@@ -426,7 +426,7 @@ def weight_updater_process(
     )
     print("Created signal NCCL group", flush=True)
 
-    # ── Per-PP data groups ────────────────────────────────────────
+    # Per-PP data groups
     # One per training PP stage that maps to this vLLM PP stage.
     # Subgroups of the signal NCCL group - share its store via
     # PrefixStore namespacing, no extra TCP ports needed.
@@ -460,7 +460,7 @@ def weight_updater_process(
             flush=True,
         )
 
-    # ── Build per-PP param lists + interleaved iteration order ────
+    # Build per-PP param lists + interleaved iteration order
     per_pp_params = defaultdict(list)
     for tt_name in param_name_list:
         pp_stage = json_data["param_mappings"][tt_name].get("train_pp_stage", 0)

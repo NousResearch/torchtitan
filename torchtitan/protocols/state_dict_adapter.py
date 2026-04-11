@@ -4,13 +4,18 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 import json
 import os
 import re
 from abc import ABC, abstractmethod
 from typing import Any, Dict
 
-from torch.distributed.checkpoint import HuggingFaceStorageReader
+try:
+    from torch.distributed.checkpoint import HuggingFaceStorageReader
+except ImportError:
+    HuggingFaceStorageReader = None
 
 from torchtitan.tools.logging import logger
 
