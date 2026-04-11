@@ -556,3 +556,40 @@ class OnlineDataHandler:
         )
 
 
+if __name__ == "__main__":
+    with open("/home/dakota/github/torchtitan/temp.json") as f:
+        test_data = json.load(f)
+    (
+        batches,
+        max_token_len,
+        dynamic_batch_size,
+        dynamic_grad_accum_size,
+        data_lens,
+    ) = prep_data(
+        test_data,
+        cp_degree=1,
+        dp_degree=16,
+        batch_size=1,
+        gradient_accumulation_steps=256 // 16,
+        seq_len=32768,
+        scale_adv_by_len=True,
+        num_microbatches=2,
+    )
+    print(
+        max_token_len,
+        dynamic_batch_size,
+        dynamic_grad_accum_size,
+        max(*[x[0].shape[1] for x in batches]),
+    )
+    for microbatch_idx in range(2):
+        microbatch = []
+        mb_start = microbatch_idx * dynamic_grad_accum_size // 2
+        print(microbatch_idx * dynamic_grad_accum_size / 2.0)
+        mb_end = (microbatch_idx + 1) * dynamic_grad_accum_size // 2
+        print((microbatch_idx + 1) * dynamic_grad_accum_size / 2.0)
+        mb_batches = batches[mb_start:mb_end]
+        dynamic_batch = list()
+        print(mb_start, mb_end)
+        start_len = mb_batches[0][0].shape[1]
+
+
