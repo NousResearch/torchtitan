@@ -35,7 +35,11 @@ def pad_data_to_good_offset(
     data, cp_degree, dp_degree, scale_adv_by_len=True, num_microbatches=1
 ):
     max_token_len = max(
-    # Align to multiples of 64 * cp_degree to optimize context-parallel memory access
+        [max([len(x) for x in item["tokens"]]) for item in data["batch"]]
+    )
+    # usually 64 is a good choice to ensure nonweird scaling behavior on GPUS
+    # so we pad to the nearest multiple of 64 * cp_degree, since it's split along context parallel dimensions
+    # TODO: see if FSDP affects this as well
     good_multiple = 64 * cp_degree
     if (max_token_len - 1) % (good_multiple) != 0:
         max_token_len = math.ceil((max_token_len - 1) / (good_multiple)) * good_multiple
@@ -46,7 +50,7 @@ def pad_data_to_good_offset(
         token_setup_len = max_token_len
         max_token_len = (
             max_token_len - 1
-        )  # adjust for causal sequence termination
+        )  # since it's causal we need to remove the last bit...
     # pad all tokens to max_token_len and add to lists
     input_ids = list()
     labels = list()
@@ -128,7 +132,7 @@ def pad_data_to_good_offset(
                     ]
                 )
                 inf_logps.append(item["inference_logprobs"][i][:-1])
-    # Prepare items for balanced distribution
+    # sort into 4 buckets...
     raw_items = [
         {
             "input_id": input_id,
@@ -200,8 +204,13 @@ def prep_data(
     )
 
     dynamic_batch_size, dynamic_grad_accum_size = get_dynamic_batch_gas(
+        batch_size,
+        gradient_accumulation_steps,
+        seq_len,
+        max_token_len,
         num_microbatches,
     )
+    # now allocate to new batch/grad sizes
     for i in range(dynamic_grad_accum_size * dp_degree):
         start = i * dynamic_batch_size
         end = (i + 1) * dynamic_batch_size
@@ -266,6 +275,9 @@ def data_worker(
             continue
         data = requests.get(f"{server_url}/batch").json()
         if data["batch"] is not None:
+            # Save the batch
+            with open("temp.json", "w") as f:
+                json.dump(data, f)
             (
                 batches,
                 max_token_len,
@@ -376,6 +388,14 @@ class OnlineDataHandler:
         grad_accum_size = max(1, grad_accum_size)
         while True:
             if torch.distributed.get_rank() == self.metrics_rank:
+                # if not self.queue.empty():
+                #     (
+                #         batches,
+                #         max_token_len,
+                #         dynamic_batch_size,
+                #         dynamic_grad_accum_size,
+                #         data_lens,
+                #     ) = self.queue.get()
                 start_data_get_time = time.perf_counter()
                 if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
                     import numpy as np
@@ -396,6 +416,7 @@ class OnlineDataHandler:
                 data_get_time = time.perf_counter() - start_data_get_time
                 if data["batch"] is not None:
                     logger.debug("Rx'd batch from server...")
+                    # Save the batch
                     start_data_dump_time = time.perf_counter()
                     with open("temp.json", "w") as f:
                         json.dump(data, f)
@@ -425,6 +446,18 @@ class OnlineDataHandler:
                         send_wait(sglang_nccl_group, device)
                     max_token_len = torch.tensor(max_token_len).to(device)
                     torch.distributed.all_reduce(max_token_len)
+                    # back to int
+                    max_token_len = max_token_len.item()
+                    # distribute the lengths
+                    torch.distributed.broadcast_object_list(
+                        data_lens, self.metrics_rank
+                    )
+                    # now broadcast the batch
+                    torch.distributed.broadcast_object_list(batches, self.metrics_rank)
+                    # Finally, the timing info
+                    prep_time = torch.tensor(prep_time).to(device)
+                    data_dump_time = torch.tensor(data_dump_time).to(device)
+                    data_get_time = torch.tensor(data_get_time).to(device)
                     torch.distributed.broadcast(prep_time, self.metrics_rank)
                     torch.distributed.broadcast(data_dump_time, self.metrics_rank)
                     torch.distributed.broadcast(data_get_time, self.metrics_rank)
@@ -440,8 +473,10 @@ class OnlineDataHandler:
                 if dp_replicate_rank == 0:
                     send_wait(sglang_nccl_group, device)
                 if flag.item() > 0:
+                    # Got the batch
                     max_token_len = torch.tensor(0).to(device)
                     torch.distributed.all_reduce(max_token_len)
+                    # back to int
                     max_token_len = max_token_len.item()
                     data_lens = [
                         0
@@ -467,6 +502,7 @@ class OnlineDataHandler:
                         dp_degree,
                         num_microbatches=job_config.grpo.num_microbatches,
                     )
+                    # now get the batch
                     torch.distributed.broadcast_object_list(batches, self.metrics_rank)
                     prep_time = torch.tensor(0.0).to(device)
                     data_dump_time = torch.tensor(0.0).to(device)
@@ -476,7 +512,7 @@ class OnlineDataHandler:
                     torch.distributed.broadcast(data_get_time, self.metrics_rank)
                     break
             time.sleep(1)
-        # Validate data integrity across distributed workers
+        # Now to check data...
         all_good = 0
         comp_bs = len(batches[0][0])
         try:
@@ -500,6 +536,7 @@ class OnlineDataHandler:
             with open(filename, "w") as f:
                 json.dump(data, f)
             all_good += 1
+        # check to see if every all_good is 0...
         all_good = torch.tensor(all_good).to(device)
         torch.distributed.all_reduce(all_good)
         if all_good.item() > 0:
@@ -519,3 +556,38 @@ class OnlineDataHandler:
         )
 
 
+if __name__ == "__main__":
+    with open("/home/dakota/github/torchtitan/temp.json") as f:
+        test_data = json.load(f)
+    (
+        batches,
+        max_token_len,
+        dynamic_batch_size,
+        dynamic_grad_accum_size,
+        data_lens,
+    ) = prep_data(
+        test_data,
+        cp_degree=1,
+        dp_degree=16,
+        batch_size=1,
+        gradient_accumulation_steps=256 // 16,
+        seq_len=32768,
+        scale_adv_by_len=True,
+        num_microbatches=2,
+    )
+    print(
+        max_token_len,
+        dynamic_batch_size,
+        dynamic_grad_accum_size,
+        max(*[x[0].shape[1] for x in batches]),
+    )
+    for microbatch_idx in range(2):
+        microbatch = []
+        mb_start = microbatch_idx * dynamic_grad_accum_size // 2
+        print(microbatch_idx * dynamic_grad_accum_size / 2.0)
+        mb_end = (microbatch_idx + 1) * dynamic_grad_accum_size // 2
+        print((microbatch_idx + 1) * dynamic_grad_accum_size / 2.0)
+        mb_batches = batches[mb_start:mb_end]
+        dynamic_batch = list()
+        print(mb_start, mb_end)
+        start_len = mb_batches[0][0].shape[1]
