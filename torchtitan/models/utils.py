@@ -52,24 +52,8 @@ class MoEStateDictAdapter(StateDictAdapter):
         Given a [StridedShard(dim=i), Shard(dim=i)] placement, calculate the start index
         and end index on dim-i for GPU rank (strided_shard_dim_degree, shard_dim_rank)
 
-        GPU Layout (strided_shard_rank, shard_rank):
-
-        StridedShard Rank                  Shard rank
-                        ┌─────────────────┐
-                    0   │    GPU(0, 0)    │  0
-                    ────┼─────────────────┤
-                    1   │    GPU(1, 0)    │
-                    ────┼─────────────────┤
-                    2   │    GPU(2, 0)    │
-                  ──────┼─────────────────┼────
-                    0   │    GPU(0, 1)    │  1
-                    ────┼─────────────────┤
-                    1   │    GPU(1, 1)    │
-                    ────┼─────────────────┤
-                    2   │    GPU(2, 1)    │
-                        └─────────────────┘
-
-        Calculate the start_index from inner dimension (Shard(dim=i)) to outer dimension (StridedShard(dim=i)).
+        Calculate the start_index for a given [StridedShard(dim=i), Shard(dim=i)] placement
+        by mapping the inner dimension (Shard) to the outer dimension (StridedShard).
         """
 
         block_size = dim_size_to_split // (strided_shard_dim_degree * shard_dim_degree)
