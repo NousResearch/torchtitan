@@ -15,12 +15,23 @@ import numpy as np
 import torch
 import tqdm
 from torch.distributed.elastic.multiprocessing.errors import record
-from torch.distributed.pipelining.schedules import PipelineScheduleMulti
-from torch.distributed.tensor import (  # noqa: F401
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-)
+try:
+    from torch.distributed.pipelining.schedules import PipelineScheduleMulti
+except ImportError:
+    PipelineScheduleMulti = None
+try:
+    from torch.distributed.tensor import (  # noqa: F401
+        DeviceMesh,
+        distribute_tensor,
+        DTensor,
+    )
+except (ImportError, AttributeError):
+    from torch.distributed._tensor import (  # noqa: F401
+        DeviceMesh,
+        DTensor,
+    )
+    from torch.distributed.device_mesh import DeviceMesh  # noqa: F811
+    distribute_tensor = None
 
 import torchtitan.protocols.train_spec as train_spec_module
 from torchtitan.components.checkpoint import CheckpointManager
@@ -320,7 +331,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             job_config.training.local_batch_size * batch_degree
         )
         assert self.gradient_accumulation_steps > 0
-        self.entropy_loss_fn = VocabParallelEntropyFunction.apply
+        self.entropy_loss_fn = VocabParallelEntropyFunction
 
         if job_config.training.epochs is not None:
             raise RuntimeError(
@@ -342,7 +353,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"does not support pipelining"
                 )
 
-            # ── Validate PP constraints (Phase 1) ─────────────────
+            # Validate PP constraints (Phase 1) 
             assert (
                 job_config.grpo.kl_beta == 0
             ), "Reference model (kl_beta > 0) not yet supported with PP"
@@ -363,7 +374,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"or decrease pipeline_parallel_microbatch_size."
             )
 
-            # ── Create GRPO PP loss context and closure ────────────
+            # Create GRPO PP loss context and closure
             self.grpo_pp_context = GRPOPPLossContext(
                 loss_fn=self.loss_fn,
                 entropy_loss_fn=self.entropy_loss_fn,
@@ -550,7 +561,9 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
         # Wait for SGlang servers to be ready
         job_config.grpo.sglang_urls = get_sglang_urls(job_config)
-        wait_for_sglang(job_config.grpo.sglang_urls)
+        if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
+            wait_for_sglang(job_config.grpo.sglang_urls)
+
 
         slurm_logdir = os.environ.get("LOGDIR", None)
         if slurm_logdir is None:
@@ -572,7 +585,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self._pp_local_to_original = {}
             self._pp_original_to_local = {}
 
-        # ── Build global param list across all PP stages ──────────────
+        # Build global param list across all PP stages
         # Each PP stage has different params (different layers). We need the
         # GLOBAL sorted param list so both training and vLLM iterate in the
         # same deterministic order.
@@ -650,7 +663,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 json.dump(train_send_order, f, indent=2)
         self.data_handler.register_atropos(job_config, self.step, global_batch_size)
 
-        # ── Setup weight-sync process groups ──────────────────────────
+        # Setup weight-sync process groups
         vllm_total_ranks = (
             len(job_config.grpo.sglang_urls)
             * job_config.grpo.sglang_tp
@@ -687,6 +700,12 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         self.weight_dtypes = {}
         if self.dp_replicate_rank == 0:
             logger.debug("Grabbing sglang dtypes...")
+            if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+                os.makedirs(os.environ.get("LOGDIR", "."), exist_ok=True)
+                with open(
+                    f"{os.environ.get('LOGDIR', '.')}/sglang_dtypes.json", "w"
+                ) as f:
+                    json.dump({"model.embed_tokens.weight": "bfloat16"}, f)
             while not os.path.exists(f"{os.environ['LOGDIR']}/sglang_dtypes.json"):
                 time.sleep(1)
             with open(f"{os.environ['LOGDIR']}/sglang_dtypes.json", "r") as f:
@@ -699,21 +718,29 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             )
             # assumes 8 GPUs per node, which should be the case for anything we're deploying this to
             hostname = "localhost" if pp_data_local_rank < 8 else get_hostname_url()
-            # Signal group (heartbeat + start-update)
-            self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
-                hostname,
-                job_config.grpo.sglang_port,
-                signal_group_size,
-                signal_local_rank,
-            )
-            # Per-PP data group — subgroup of the signal group's PG.
-            self.pp_data_nccl_group = new_group(
-                self.sglang_nccl_group,
-                "nccl",
-                pp_data_group_size,
-                pp_data_local_rank,
-                f"weight_data_pp{self.pp_rank}",
-            )
+            if os.environ.get("GRPO_MOCK_ENV", "0") != "1":
+                # Signal group (heartbeat + start-update)
+                self.sglang_nccl_group, self.sglang_gloo_group = setup_group(
+                    hostname,
+                    job_config.grpo.sglang_port,
+                    signal_group_size,
+                    signal_local_rank,
+                )
+                # Per-PP data group — subgroup of the signal group's PG.
+                self.pp_data_nccl_group = new_group(
+                    self.sglang_nccl_group,
+                    "nccl",
+                    pp_data_group_size,
+                    pp_data_local_rank,
+                    f"weight_data_pp{self.pp_rank}",
+                )
+            else:
+                self.sglang_nccl_group, self.sglang_gloo_group, self.pp_data_nccl_group = (
+                    None,
+                    None,
+                    None,
+                )
+
         if job_config.grpo.ptx_mixin_batchsize > 0:
             self.dataloader = self.train_spec.build_dataloader_fn(
                 dp_world_size=batch_degree,
@@ -756,11 +783,11 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         """
         import math
 
-        from torch.distributed.pipelining.schedules import (
-            get_schedule_class,
-            PipelineScheduleSingle,
-            ScheduleZBVZeroBubble,
-        )
+#        #from torch.distributed.pipelining.schedules import (
+#            get_schedule_class,
+#            PipelineScheduleSingle,
+#            ScheduleZBVZeroBubble,
+#        )
 
         from torchtitan.distributed.pipeline_parallel import (
             generate_llm_fqn_per_model_part,
@@ -1111,6 +1138,32 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self.step,
         )
         data_loading_time = time.perf_counter() - data_load_start
+        return (
+            batches,
+            max_token_len,
+            dynamic_batch_size,
+            dynamic_grad_acc_size,
+            data_lens,
+            prep_time,
+            get_time,
+            dump_time,
+            data_loading_time,
+        )
+
+    def train_step(self, data_iterator):
+        """Perform a single GRPO training step."""
+        train_step_start = time.perf_counter()
+        (
+            batches,
+            max_token_len,
+            dynamic_batch_size,
+            dynamic_grad_acc_size,
+            data_lens,
+            prep_time,
+            get_time,
+            dump_time,
+            data_loading_time,
+        ) = self.grab_batch()
         # Slice to just this dp index
         start = self.batch_rank * dynamic_grad_acc_size
         end = (self.batch_rank + 1) * dynamic_grad_acc_size
@@ -1702,65 +1755,48 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         torch.distributed.barrier()
 
     def send_weights(self):
+        if os.environ.get("GRPO_MOCK_ENV", "0") == "1":
+            return
         rank = torch.distributed.get_rank()
-        # Build named_params from all local model_parts
-        named_params = {}
-        for model_part in self.model_parts:
-            named_params.update({k: v for (k, v) in model_part.named_parameters()})
-
-        if self.dp_replicate_rank == 0:
-            # Signal on the signal group -- all vLLM ranks receive this.
-            logger.info(
-                f"[rank {rank}] send_weights: broadcasting start signal "
-                f"(PP stage {self.pp_rank})"
+        named_params = {
+            n: p for m in self.model_parts for n, p in m.named_parameters()
+        }
+        
+        # Signal the vLLM/SGLang weight updater to start receiving
+        send_start_update(self.sglang_nccl_group, self.device)
+        
+        sent_count = 0
+        my_total = sum(
+            1 for name in self.param_name_to_send_list 
+            if self.param_pp_stages[name] == self.pp_rank
+        )
+        for name in self.param_name_to_send_list:
+            if self.param_pp_stages[name] != self.pp_rank:
+                continue
+            
+            local_name = self._pp_original_to_local.get(name, name)
+            param = named_params[local_name]
+            sent_count += 1
+            
+            # Broadcast parameter across the Devicemesh to construct the unsharded local tensor
+            local_param = param.full_tensor().detach() if hasattr(param, "full_tensor") else param.detach()
+            if hasattr(local_param, "to_local"):
+                local_param = local_param.to_local()
+                
+            send_param(
+                local_param,
+                name,
+                param.shape,
+                self.weight_dtypes,
+                max(self.tp_degree, self.ep_degree),
+                self.dp_shard_degree,
+                self.pp_data_nccl_group,
+                self.pp_data_group_size,
             )
-            send_start_update(self.sglang_nccl_group, self.device)
-
-            # Iterate global sorted param list.  Only send params that belong
-            # to this PP stage (other stages send theirs on their own groups).
-            sent_count = 0
-            my_total = sum(
-                1
-                for n in self.param_name_to_send_list
-                if self.param_pp_stages[n] == self.pp_rank
-            )
-            for name in self.param_name_to_send_list:
-                if self.param_pp_stages[name] != self.pp_rank:
-                    continue  # belongs to another PP stage's group
-                # Look up by local name (PP re-indexes layers from 0)
-                local_name = self._pp_original_to_local.get(name, name)
-                param = named_params[local_name]
-                sent_count += 1
-                logger.info(
-                    f"[rank {rank}] send_weights: [{sent_count}/{my_total}] "
-                    f"sending {name} (PP stage {self.pp_rank}, "
-                    f"shape={param.shape})"
-                )
-                local_param = param.to_local()
-                send_param(
-                    local_param,
-                    name,
-                    param.shape,
-                    self.weight_dtypes,
-                    max(self.tp_degree, self.ep_degree),
-                    self.dp_shard_degree,
-                    self.pp_data_nccl_group,
-                    self.pp_data_group_size,
-                )
-            logger.info(
-                f"[rank {rank}] send_weights: done sending {sent_count} "
-                f"params, entering barrier"
-            )
-        else:
-            logger.info(
-                f"[rank {rank}] send_weights: dp_replicate_rank="
-                f"{self.dp_replicate_rank}, skipping send, entering barrier"
-            )
-        # Sync across all ranks (including dp_replicate > 0)
+        
+        # Final sync for this update batch
         torch.cuda.synchronize()
-        logger.info(f"[rank {rank}] send_weights: cuda synced, calling barrier")
-        torch.distributed.barrier()
-        logger.info(f"[rank {rank}] send_weights: barrier passed")
+        torch.distributed.barrier(group=self.sglang_nccl_group)
 
     def batch_generator(
         self, data_iterable: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]

@@ -4,13 +4,18 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import import_module
 from typing import Mapping, TypeAlias
 
 import torch.nn as nn
-from torch.distributed.pipelining.schedules import _PipelineSchedule
+try:
+    from torch.distributed.pipelining.schedules import _PipelineSchedule
+except ImportError:
+    _PipelineSchedule = None
 
 from torchtitan.components.dataloader import BaseDataLoader
 from torchtitan.components.loss import LossFunction

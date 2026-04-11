@@ -1247,6 +1247,9 @@ class Validation:
 
 @dataclass
 class GRPO:
+    async_weight_update: bool = False
+    """Whether to update sglang weights asynchronously"""
+
     kl_beta: float = 0.0
     """KL beta for GRPO"""
 

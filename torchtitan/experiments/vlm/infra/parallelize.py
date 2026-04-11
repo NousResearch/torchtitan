@@ -11,7 +11,10 @@ import torch
 import torch.nn as nn
 
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+try:
+    from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy
+except ImportError:
+    from torch.distributed._composable.fsdp import (CPUOffloadPolicy, fully_shard, MixedPrecisionPolicy)
 
 from torchtitan.config import JobConfig, TORCH_DTYPE_MAP
 from torchtitan.distributed import ParallelDims
