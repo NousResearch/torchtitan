@@ -63,9 +63,7 @@ def log_tensor_stats(tensor: torch.Tensor, name: str, num_bins: int = 64):  # no
 
     tmin = flat.min().item()
     tmax = flat.max().item()
-    # Anecdotally, this can somehow happen sometimes. Maybe a precision error
-    # in min()/max() above. Swap here to prevent a runtime error.
-    # If all values are equal, just return a single bin.
+    # Handle precision errors where min/max might be inverted or equal
     if tmin > tmax:
         tmin, tmax = tmax, tmin
     if tmin == tmax:
@@ -210,11 +208,6 @@ class VocabParallelEntropyFunction(Function):
         # Probabilities in original dtype
         probs = exp_logits / global_sum_exp
 
-        # Cast to fp32 for log operations (more stable)
-        # global_sum_exp_fp32 = global_sum_exp.float()
-        # shifted_logits_fp32 = shifted_logits.float()
-        # probs_fp32 = probs.float()
-
         # Compute log_probs in fp32
         log_probs = shifted_logits - global_sum_exp.log()
 
@@ -233,22 +226,6 @@ class VocabParallelEntropyFunction(Function):
         """
         probs, log_probs = ctx.saved_tensors
 
-        # # Cast to fp32 for stability if needed
-        # if probs.dtype != torch.float32:
-        #     probs_fp32 = probs.float()
-        #     log_probs_fp32 = log_probs.float()
-
-        #     # Compute entropy for each sample in fp32
-        #     entropy_per_sample = torch.sum(probs_fp32 * log_probs_fp32, dim=-1, keepdim=True)
-
-        #     # Gradient in fp32
-        #     grad_logits = probs_fp32 * (log_probs_fp32 - entropy_per_sample)
-
-        #     # Scale by incoming gradient and cast back
-        #     grad_logits = grad_logits * grad_output.unsqueeze(-1).float()
-        #     grad_logits = grad_logits.to(probs.dtype)
-        # else:
-        #     # Already fp32
         entropy_per_sample = torch.sum(probs * log_probs, dim=-1, keepdim=True)
         grad_logits = probs * (log_probs - entropy_per_sample)
         grad_logits = grad_logits * grad_output.unsqueeze(-1)
@@ -270,41 +247,29 @@ class VocabParallelEntropyLoss(nn.Module):
         """
         Compute entropy loss for vocabulary parallel logits.
 
-        Uses https://arxiv.org/abs/1805.02867 method to calculate softmax locally
-
         Args:
             logits: Local logits tensor [batch_size, seq_len, local_vocab_size]
-            target: Optional targets for masking (not used in pure entropy, but useful for masked LM)
 
         Returns:
             entropy_loss: Scalar entropy loss
         """
-        # Get dimensions
         batch_size, seq_len, local_vocab_size = logits.shape
 
-        # Step 1: Find max for numerical stability
-        # gets local max, then all_reduces to get global max
+        # Step 1: Find global max for numerical stability
         logit_max = torch.amax(logits, dim=-1, keepdim=True).redistribute(
             device_mesh=logits.device_mesh,
             placements=[torch.distributed.tensor.Replicate()],
-        )  # [B, S, 1]
+        )
 
-        # Step 3: Subtract global max from local logits
+        # Step 2: Compute shifted logits and global sum of exponentials
         shifted_logits = logits - logit_max
-
-        # Step 4: Compute exp of shifted logits
         exp_logits = shifted_logits.exp()
+        global_sum_exp = exp_logits.sum(dim=-1, keepdim=True)
 
-        # Step 5: Sum exp to get global sum through DTensor mapping
-        global_sum_exp = exp_logits.sum(dim=-1, keepdim=True)  # [B, S, 1]
-
-        # Step 6: Compute local probabilities using global denominator
-        probs = exp_logits / global_sum_exp  # [B, S, local_vocab]
-        # log(p) = log(exp(shifted_logits) / sum(exp(shifted_logits)))
-        #        = log(exp(shifted_logits)) - log(sum(exp(shifted_logits)))
-        #        = shifted_logits - log(global_sum_exp)
+        # Step 3: Compute probabilities and log-probabilities
+        probs = exp_logits / global_sum_exp
         logp = shifted_logits - global_sum_exp.log()
-        # Step 7: Compute entropy contribution: p * log(p)
-        # Add small epsilon to avoid log(0)
-        entropy = torch.sum(probs * logp, dim=-1)  # [B, S]
+
+        # Step 4: Compute entropy contribution: p * log(p)
+        entropy = torch.sum(probs * logp, dim=-1)
         return entropy

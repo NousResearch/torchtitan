@@ -353,7 +353,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"does not support pipelining"
                 )
 
-            # ── Validate PP constraints (Phase 1) ─────────────────
+            # Validate PP constraints (Phase 1)
             assert (
                 job_config.grpo.kl_beta == 0
             ), "Reference model (kl_beta > 0) not yet supported with PP"
@@ -374,7 +374,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 f"or decrease pipeline_parallel_microbatch_size."
             )
 
-            # ── Create GRPO PP loss context and closure ────────────
+            # Create GRPO PP loss context and closure
             self.grpo_pp_context = GRPOPPLossContext(
                 loss_fn=self.loss_fn,
                 entropy_loss_fn=self.entropy_loss_fn,
@@ -584,7 +584,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self._pp_local_to_original = {}
             self._pp_original_to_local = {}
 
-        # ── Build global param list across all PP stages ──────────────
+        # Build global param list across all PP stages
         # Each PP stage has different params (different layers). We need the
         # GLOBAL sorted param list so both training and vLLM iterate in the
         # same deterministic order.
@@ -662,7 +662,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 json.dump(train_send_order, f, indent=2)
         self.data_handler.register_atropos(job_config, self.step, global_batch_size)
 
-        # ── Setup weight-sync process groups ──────────────────────────
+        # Setup weight-sync process groups
         vllm_total_ranks = (
             len(job_config.grpo.sglang_urls)
             * job_config.grpo.sglang_tp
@@ -767,12 +767,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             original_to_local: dict mapping original name -> local param name
         """
         import math
-
-#        #from torch.distributed.pipelining.schedules import (
-#            get_schedule_class,
-#            PipelineScheduleSingle,
-#            ScheduleZBVZeroBubble,
-#        )
 
         from torchtitan.distributed.pipeline_parallel import (
             generate_llm_fqn_per_model_part,
@@ -931,7 +925,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         total_masked_tokens = batch_dict["total_masked_tokens"]
         curr_len = -1
         input_ids, labels, masks, inf_logps, rewards = batch
-        # if tp_rank == 0:
         device_type = utils.device_type
         input_ids = torch.from_numpy(input_ids).to(device_type)
         extra_inputs = {}
@@ -977,7 +970,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
 
         if parallel_dims.pp_enabled:
-            # ── PP forward / backward ─────────────────────────────
+            # PP forward / backward
             # Update the closure's mutable context with this nanobatch's data.
             # Tensors are pre-chunked into n_microbatches pieces to match
             # the PP schedule's internal batch splitting.
@@ -1085,26 +1078,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 del pred
                 mb_loss.backward()
                 loss = mb_loss.detach()
-                # Save batch for off-policy if needed
-                # TODO: Reintroduce off-policy
-                # if job_config.training.grpo_num_epochs > 1:
-                #     with torch.no_grad():
-                #         new_batch.append(
-                #             (
-                #                 input_ids.detach(),
-                #                 labels.detach(),
-                #                 logp.detach(),
-                #                 ref_logp.detach()
-                #                 if use_ref_model
-                #                 else None,
-                #                 mask.detach(),
-                #                 reward.detach(),
-                #                 dynamic_scale,
-                #                 dynamic_grad_accum_size,
-                #                 total_masked_tokens,
-                #             )
-                #         )
-
         return loss, metrics, ntokens_since_last_log
 
     def grab_batch(self):
@@ -1201,25 +1174,15 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             dynamic_batch = list()
             try:
                 start_len = mb_batches[0][0].shape[1]
-            except IndexError as e:
-                print(
-                    "failed to create this microbatch,"
+            except IndexError:
+                logger.error(
+                    "Failed to create microbatch: "
                     f"mb_start: {mb_start}, mb_end: {mb_end}, num in mb: {len(mb_batches)}"
                 )
-                raise e
+                raise
             len_step = dynamic_batch_size
             curr_len = -1
 
-            # TODO: Add back in reuse of old batches
-            # if len(old_batch) > 0:
-            #     if job_config.training.grpo_by_token:
-            #         total_offp_accum = sum([old[0][-1] for old in old_batch])
-            #     else:
-            #         total_offp_accum = sum([old[0][-2] for old in old_batch])
-            # else:
-            #     total_offp_accum = 0
-
-            # preprocess actual grad accum
             logger.debug(
                 f"Beginning microbatch {microbatch_idx + 1}/{job_config.grpo.num_microbatches} setup..."
             )
@@ -1297,8 +1260,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     f"total_parsed_batches: {total_bs}, "
                     f"total_gas: {dynamic_grad_accum_size}"
                 )
+                # Concatenate components for vectorization
                 if len(dynamic_batch) > 1:
-                    # cat all the stuff
                     batch = [
                         np.concatenate([item[p] for item in dynamic_batch], axis=0)[
                             :, :curr_len
@@ -1315,13 +1278,8 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                 curr_len = -1
                 dynamic_batch = list()
 
-                # Convert to tensors for pre-computation
-                input_ids = torch.from_numpy(batch[0]).to(self.device)
-                labels = torch.from_numpy(batch[1]).to(self.device)
-
-                # do logp and ref_logp
-                with torch.no_grad():
-                    extra_inputs = {}
+                # Compute log-probabilities for the nanobatch
+                input_ids = torch.from_numpy(batch[0]).to(self.device)                    extra_inputs = {}
                     extra_kwargs = {}
                     attn_type = getattr(self.model_args, "attn_type", "sdpa")
                     if attn_type in ["flex", "varlen"]:
@@ -1512,9 +1470,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         except AssertionError:
             logger.error("Skipping batch due to data handling error")
             return
-        logger.debug("performing training step...")
-        # Keep these variables local to shorten the code as these are
-        # the major variables that are used in the training loop.
+        # Use local variables for hot-loop performance
         parallel_dims = self.parallel_dims
         loss = 0.0
         all_metrics = list()
@@ -1528,7 +1484,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             self.optimizers.zero_grad()
             logger.debug(f"Nanobatches in this step: {len(microbatch)}")
             for nanobatch in microbatch:
-                # What a "microbatch" is usually called in a pretraining context
                 nb_loss, nb_metrics, n_tokens_seen = self.forward_backward_step(
                     batch_dict=nanobatch,
                     job_config=self.job_config,
@@ -1618,8 +1573,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
             global_ptx_loss = total_ptx_loss
             global_dynamic_scale = total_dynamic_scale
             global_ntokens_seen = self.ntokens_seen
-        # Yeah, maybe we should include a max here, but spikes will still be seen in the graph, it's hard to
-        # not show a 1000 spike when it's usually below 1.0 after all.
         grad_norm = np.mean(grad_norms)
         extra_metrics = self.collate_metrics(all_metrics, all_weights)
         extra_metrics.update(
@@ -1648,7 +1601,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         return self.step, global_avg_loss, global_max_loss, grad_norm, extra_metrics
 
     def collate_metrics(self, metrics_per_nb, weights_per_nb):
-        # For now we'll just assume we'll average them all together
         out_metrics = {}
         keys = list()
         for metrics_dict in metrics_per_nb:
@@ -1702,12 +1654,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     ft_pg,
                 )
         return out_metrics
-        for key in list(metrics_per_nb[-1].keys()):
-            # check to see which indexes the key is in
-            out_metrics[key] = sum(
-                [m[key] * w for m, w in zip(metrics_per_nb, weights_per_nb)]
-            )
-        return out_metrics
 
     def ema_ref_weights(self):
         if self.use_ref_model and (0.0 < self.job_config.grpo.ref_model_ema < 1.0):
@@ -1716,9 +1662,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     self.model_parts[0].parameters(),
                     self.ref_model_parts[0].parameters(),
                 ):  # type: DTensor, (DTensor || Tensor)
-                    # Due to weirdness, we need to get the full tensor, then place it back into whatever the ref
-                    # model decides to be. Since the mdl param is dp_sharded, we need to do this operation on the
-                    # full_tensor as ref_param will not be sharded in the FSDP context.
                     if isinstance(ref_param, DTensor):
                         full_ref = (
                             ref_param.full_tensor().detach()
@@ -1872,8 +1815,6 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
                     logger.warning("Ran out of data; last step was canceled.")
                     break
 
-                # Change timeouts here since we're going away from this comfy highly connected world, potentially, with the
-                # sglang updates...
                 dist_utils.set_pg_timeouts(
                     timeout=timedelta(minutes=10),
                     parallel_dims=self.parallel_dims,
