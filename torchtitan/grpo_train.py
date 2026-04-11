@@ -974,7 +974,7 @@ class Trainer(torch.distributed.checkpoint.stateful.Stateful):
         )
 
         if parallel_dims.pp_enabled:
-            # ── PP forward / backward ─────────────────────────────
+            # PP forward / backward
             # Update the closure's mutable context with this nanobatch's data.
             # Tensors are pre-chunked into n_microbatches pieces to match
             # the PP schedule's internal batch splitting.
