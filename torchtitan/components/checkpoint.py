@@ -42,10 +42,16 @@ from torch.distributed.checkpoint.state_dict import (
     set_model_state_dict,
     StateDictOptions,
 )
-from torch.distributed.checkpoint.state_dict_saver import (
-    AsyncCheckpointerType,
-    AsyncSaveResponse,
-)
+try:
+    from torch.distributed.checkpoint.state_dict_saver import (
+        AsyncCheckpointerType,
+        AsyncSaveResponse,
+    )
+except ImportError:
+    class AsyncCheckpointerType:
+        PROCESS = "process"
+        THREAD = "thread"
+    AsyncSaveResponse = object
 from torch.distributed.checkpoint.stateful import Stateful
 
 from torchtitan.components.dataloader import BaseDataLoader

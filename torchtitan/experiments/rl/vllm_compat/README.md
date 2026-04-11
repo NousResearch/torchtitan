@@ -222,28 +222,26 @@ This implementation uses the same kernels for both rollouts (vLLM) and training 
 
 ## Project Structure
 
-```
-rl/vllm_compat/
-├── README.md                          # Documentation
-├── __init__.py                        # Package initialization
-├── batch_invariant_backward.py        # Backward passes for vLLM ops
-├── weights_vllm_compat.py             # Weight conversion utilities
-├── simple_rl.py                       # RL training loop
-├── models/
-│   ├── __init__.py
-│   ├── attention.py                   # VLLMCompatibleFlashAttention
-│   └── qwen3/
-│       ├── __init__.py
-│       └── model_vllm_compat.py       # vLLM-compatible Qwen3 model
-├── weights/
-│   ├── __init__.py
-│   ├── converter.py                   # Weight conversion script
-│   └── README.md                      # Weight conversion documentation
-└── tests/
-    ├── __init__.py
-    ├── test_batch_invariant_backward.py  # Test backward passes
-    └── test_exact_determinism.py         # Test determinism
-```
+- `rl/vllm_compat/`
+  - `README.md`: Documentation
+  - `__init__.py`: Package initialization
+  - `batch_invariant_backward.py`: Backward passes for vLLM ops
+  - `weights_vllm_compat.py`: Weight conversion utilities
+  - `simple_rl.py`: RL training loop
+  - `models/`
+    - `__init__.py`
+    - `attention.py`: VLLMCompatibleFlashAttention
+    - `qwen3/`
+      - `__init__.py`
+      - `model_vllm_compat.py`: vLLM-compatible Qwen3 model
+  - `weights/`
+    - `__init__.py`
+    - `converter.py`: Weight conversion script
+    - `README.md`: Weight conversion documentation
+  - `tests/`
+    - `__init__.py`
+    - `test_batch_invariant_backward.py`: Test backward passes
+    - `test_exact_determinism.py`: Test determinism
 
 ## TODO
 

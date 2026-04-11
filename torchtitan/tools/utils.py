@@ -146,6 +146,14 @@ def get_peak_flops(device_name: str) -> float:
     elif "l40s" in device_name:
         # data from: "https://resources.nvidia.com/en-us-l40s/l40s-datasheet-28413"
         return 362e12
+    elif "RTX 3090" in device_name:
+        # data from: https://www.nvidia.com/en-us/geforce/graphics-cards/30-series/rtx-3090-3090ti/
+        # Peak BF16/FP16 Tensor performance: 142.3 TFLOPS
+        return 142.3e12
+    elif "RTX 4090" in device_name:
+        # data from: https://www.nvidia.com/en-us/geforce/graphics-cards/40-series/rtx-4090/
+        # Peak BF16/FP16 Tensor performance: 330 TFLOPS
+        return 330e12
 
     else:  # for other GPU types, assume A100
         logger.warning(f"Peak flops undefined for: {device_name}, fallback to A100")
