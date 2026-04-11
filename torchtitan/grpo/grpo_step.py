@@ -538,7 +538,7 @@ class GRPOPPLossContext:
       - Internal chunk tracking
     """
 
-    # Config & utilities (set once at init)
+    # ── Config & utilities (set once at init) ──────────────────────
     loss_fn: Callable = None
     entropy_loss_fn: Callable = None
     job_config: JobConfig = None
@@ -546,18 +546,18 @@ class GRPOPPLossContext:
     use_ref_model: bool = False
     grpo_by_token: bool = False
 
-    # Per-nanobatch scalars
+    # ── Per-nanobatch scalars ──────────────────────────────────────
     dynamic_scale: float = 1.0
     dynamic_grad_accum_size: float = 1.0
     total_masked_tokens: int = 1
 
-    # Chunk tracking (internal)
+    # ── Chunk tracking (internal) ──────────────────────────────────
     _tensor_chunks: dict = field(default_factory=dict)
     _n_microbatches: int = 1
     _mb_idx: int = 0
     _chunk_metrics: list = field(default_factory=list)
 
-    # Output (merged after pp_schedule.step)
+    # ── Output (merged after pp_schedule.step) ─────────────────────
     metrics: dict = field(default_factory=dict)
 
     # Tensor field names that get chunked along the batch dimension
